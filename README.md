@@ -6,7 +6,7 @@ LingEdge（凌界云）是一套从零开发的商业级 CDN 平台：官方网�
 
 ## 当前状态
 
-仓库处于 Epic 1 起步阶段：已交付的只有工程骨架（Story 1.1）、静态质量门禁（Story 1.2）与契约工具链及冻结点 CF-1（Story 1.3），均不含业务功能。下列二进制目前**仅支持 `--version`**，不含任何业务逻辑；表中「骨架」表示目录已建立、功能**未交付**。
+仓库处于 Epic 1 起步阶段：已交付的只有工程骨架（Story 1.1）、静态质量门禁（Story 1.2）、契约工具链及冻结点 CF-1（Story 1.3）与 platform 基础库（Story 1.4：配置、日志脱敏、统一错误、Request ID、时钟与 ULID），均不含业务功能。下列二进制目前**仅支持 `--version`**，不含任何业务逻辑；表中「骨架」表示目录已建立、功能**未交付**。
 
 | 组件 | 入口 / 目录 | 状态 |
 |---|---|---|
@@ -17,7 +17,8 @@ LingEdge（凌界云）是一套从零开发的商业级 CDN 平台：官方网�
 | Scheduler | `cmd/lingedge-scheduler` | 骨架（未交付） |
 | Reporter | `cmd/lingedge-reporter`（含 windows/amd64 构建） | 骨架（未交付） |
 | Worker | `cmd/lingedge-worker` | 骨架（未交付） |
-| 业务模块 | `internal/{platform,auth,tenant,website,…}` | 骨架（未交付） |
+| 业务模块 | `internal/{auth,tenant,website,…}` | 骨架（未交付） |
+| 平台基础库 | `internal/platform/{config,logx,apierr,requestid,clock,uid}`、`pkg/redact`（脱敏引擎，Server/Tools/Node 共用） | 已交付（Story 1.4；无业务功能，尚未被任何二进制装配） |
 | 前端 / 官网 / 文档站 / 状态页 | `frontend/*`、`docs-site`、`status-site` | 骨架（未交付） |
 
 ## 开发

@@ -1,0 +1,470 @@
+{
+ "_comment": "仅测试：脱敏回归语料（Story 1.4 AC2 / G-5）。所有口令、令牌、私钥均为虚构的、不可用的占位串；本文件是 G-6 固定口令扫描的唯一豁免位置（tests/fixtures/ 且标注『仅测试』）。leak_cases 的 secrets 在任何输出中出现即测试失败；benign_cases 必须逐字不变。",
+ "leak_cases": [
+  {
+   "name": "API Token 出现在句中",
+   "input": "upstream call failed, token le_ab12cd34_Zx9Yw8Vv7Uu6Tt5Ss4Rr3Qq2Pp1Oo0Nn was rejected",
+   "secrets": [
+    "Zx9Yw8Vv7Uu6Tt5Ss4Rr3Qq2Pp1Oo0Nn"
+   ]
+  },
+  {
+   "name": "API Token 位于括号与引号内",
+   "input": "revoked (le_Q1w2E3r4_aaaaBBBBccccDDDDeeeeFFFFgggg) and \"le_Q1w2E3r4_aaaaBBBBccccDDDDeeeeFFFFgggg\"",
+   "secrets": [
+    "aaaaBBBBccccDDDDeeeeFFFFgggg"
+   ]
+  },
+  {
+   "name": "API Token 含连字符与下划线的随机段",
+   "input": "token=le_zZ9yY8xX_ab-cd_ef-gh_ij-kl_mn-op",
+   "secrets": [
+    "ab-cd_ef-gh_ij-kl_mn-op"
+   ]
+  },
+  {
+   "name": "enroll Token",
+   "input": "enroll with lenr1.eyJzZXJ2ZXIiOiJodHRwczovL2V4YW1wbGUub3JnIiwiY2EiOiJhYmMxMjMiLCJzZWNyZXQiOiJ4eHh4eHh4eHh4In0 failed",
+   "secrets": [
+    "eyJzZXJ2ZXIiOiJodHRwczovL2V4YW1wbGUub3JnIiwiY2EiOiJhYmMxMjMiLCJzZWNyZXQiOiJ4eHh4eHh4eHh4In0"
+   ]
+  },
+  {
+   "name": "enroll Token 作为单独值",
+   "input": "lenr1.AAAA-bbbb_CCCC.dddd=",
+   "secrets": [
+    "AAAA-bbbb_CCCC.dddd"
+   ]
+  },
+  {
+   "name": "PEM 块 PRIVATE KEY",
+   "input": "load failed:\n-----BEGIN PRIVATE KEY-----\nMIIFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE\nZm9vYmFyYmF6cXV4ZmFrZWtleW1hdGVyaWFsZm9yY29ycHVzb25seQ==\n-----END PRIVATE KEY-----\nretry later",
+   "secrets": [
+    "Zm9vYmFyYmF6cXV4ZmFrZWtleW1hdGVyaWFsZm9yY29ycHVzb25seQ==",
+    "MIIFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE"
+   ]
+  },
+  {
+   "name": "PEM 块 RSA PRIVATE KEY",
+   "input": "load failed:\n-----BEGIN RSA PRIVATE KEY-----\nMIIFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE\nZm9vYmFyYmF6cXV4ZmFrZWtleW1hdGVyaWFsZm9yY29ycHVzb25seQ==\n-----END RSA PRIVATE KEY-----\nretry later",
+   "secrets": [
+    "Zm9vYmFyYmF6cXV4ZmFrZWtleW1hdGVyaWFsZm9yY29ycHVzb25seQ==",
+    "MIIFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE"
+   ]
+  },
+  {
+   "name": "PEM 块 EC PRIVATE KEY",
+   "input": "load failed:\n-----BEGIN EC PRIVATE KEY-----\nMIIFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE\nZm9vYmFyYmF6cXV4ZmFrZWtleW1hdGVyaWFsZm9yY29ycHVzb25seQ==\n-----END EC PRIVATE KEY-----\nretry later",
+   "secrets": [
+    "Zm9vYmFyYmF6cXV4ZmFrZWtleW1hdGVyaWFsZm9yY29ycHVzb25seQ==",
+    "MIIFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE"
+   ]
+  },
+  {
+   "name": "PEM 块 OPENSSH PRIVATE KEY",
+   "input": "load failed:\n-----BEGIN OPENSSH PRIVATE KEY-----\nMIIFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE\nZm9vYmFyYmF6cXV4ZmFrZWtleW1hdGVyaWFsZm9yY29ycHVzb25seQ==\n-----END OPENSSH PRIVATE KEY-----\nretry later",
+   "secrets": [
+    "Zm9vYmFyYmF6cXV4ZmFrZWtleW1hdGVyaWFsZm9yY29ycHVzb25seQ==",
+    "MIIFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE"
+   ]
+  },
+  {
+   "name": "PEM 块 ENCRYPTED PRIVATE KEY",
+   "input": "load failed:\n-----BEGIN ENCRYPTED PRIVATE KEY-----\nMIIFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE\nZm9vYmFyYmF6cXV4ZmFrZWtleW1hdGVyaWFsZm9yY29ycHVzb25seQ==\n-----END ENCRYPTED PRIVATE KEY-----\nretry later",
+   "secrets": [
+    "Zm9vYmFyYmF6cXV4ZmFrZWtleW1hdGVyaWFsZm9yY29ycHVzb25seQ==",
+    "MIIFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE"
+   ]
+  },
+  {
+   "name": "PEM 块（换行被转义为 \\n 的 JSON 字符串）",
+   "input": "{\"msg\":\"bad cert\",\"blob\":\"-----BEGIN PRIVATE KEY-----\\nMIIFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE\\nZm9vYmFyYmF6cXV4ZmFrZWtleW1hdGVyaWFsZm9yY29ycHVzb25seQ==\\n-----END PRIVATE KEY-----\"}",
+   "secrets": [
+    "Zm9vYmFyYmF6cXV4ZmFrZWtleW1hdGVyaWFsZm9yY29ycHVzb25seQ=="
+   ]
+  },
+  {
+   "name": "PEM 块被截断（只有头）",
+   "input": "partial: -----BEGIN PRIVATE KEY-----\nMIIFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE\nZm9vYmFy",
+   "secrets": [
+    "MIIFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE",
+    "Zm9vYmFy"
+   ]
+  },
+  {
+   "name": "同一文本两个 PEM 块",
+   "input": "a -----BEGIN PRIVATE KEY-----\nMIIFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE\nZm9vYmFyYmF6cXV4ZmFrZWtleW1hdGVyaWFsZm9yY29ycHVzb25seQ==\n-----END PRIVATE KEY----- b -----BEGIN EC PRIVATE KEY-----\nMIIFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE\nZm9vYmFyYmF6cXV4ZmFrZWtleW1hdGVyaWFsZm9yY29ycHVzb25seQ==\n-----END EC PRIVATE KEY----- c",
+   "secrets": [
+    "Zm9vYmFyYmF6cXV4ZmFrZWtleW1hdGVyaWFsZm9yY29ycHVzb25seQ=="
+   ]
+  },
+  {
+   "name": "MySQL DSN",
+   "input": "open db: lingedge_app:S3cr3tDsnPassw0rd!x@tcp(127.0.0.1:3306)/lingedge?parseTime=true&loc=UTC",
+   "secrets": [
+    "S3cr3tDsnPassw0rd!x"
+   ]
+  },
+  {
+   "name": "MySQL DSN 口令含 @ 与 :",
+   "input": "dial lingedge_migrate:p@ss:w0rd-dsn@tcp(10.0.0.5:3306)/lingedge",
+   "secrets": [
+    "p@ss:w0rd-dsn"
+   ]
+  },
+  {
+   "name": "MySQL DSN unix socket",
+   "input": "lingedge_maint:UnixSockPass99@unix(/tmp/mysql.sock)/lingedge",
+   "secrets": [
+    "UnixSockPass99"
+   ]
+  },
+  {
+   "name": "URL 口令 mysql://",
+   "input": "connect mysql://app:UrlP4ssw0rdSecret@db.internal:3306/lingedge refused",
+   "secrets": [
+    "UrlP4ssw0rdSecret"
+   ]
+  },
+  {
+   "name": "URL 口令 redis:// 空用户名",
+   "input": "redis://:RedisUrlSecret7788@127.0.0.1:6379/0 unreachable",
+   "secrets": [
+    "RedisUrlSecret7788"
+   ]
+  },
+  {
+   "name": "URL 口令 https 且百分号编码",
+   "input": "GET https://svc:p%40ssPercentEnc@api.example.org/v1 -> 502",
+   "secrets": [
+    "p%40ssPercentEnc"
+   ]
+  },
+  {
+   "name": "Authorization: Bearer 头",
+   "input": "Authorization: Bearer abcdef0123456789ABCDEF.ghijk-lmnop",
+   "secrets": [
+    "abcdef0123456789ABCDEF.ghijk-lmnop"
+   ]
+  },
+  {
+   "name": "Authorization: Basic 头",
+   "input": "got header Authorization: Basic dXNlcjpCYXNpY1NlY3JldDEyMw==",
+   "secrets": [
+    "dXNlcjpCYXNpY1NlY3JldDEyMw=="
+   ]
+  },
+  {
+   "name": "JSON 形态的 Authorization（值为数组）",
+   "input": "{\"headers\":{\"Authorization\":[\"Bearer jsonBearerValue12345\"]}}",
+   "secrets": [
+    "jsonBearerValue12345"
+   ]
+  },
+  {
+   "name": "Bearer 单独出现",
+   "input": "retry with Bearer tokenvalue0123456789abc",
+   "secrets": [
+    "tokenvalue0123456789abc"
+   ]
+  },
+  {
+   "name": "password=",
+   "input": "bind failed password=hunter2-secret-xyz host=db1",
+   "secrets": [
+    "hunter2-secret-xyz"
+   ]
+  },
+  {
+   "name": "password: 带引号含空格",
+   "input": "config password: \"correct horse battery staple\" loaded",
+   "secrets": [
+    "correct horse battery staple"
+   ]
+  },
+  {
+   "name": "JSON password",
+   "input": "{\"user\":\"bob\",\"password\":\"p@ss \\\"quoted\\\" word\",\"age\":3}",
+   "secrets": [
+    "p@ss",
+    "quoted"
+   ]
+  },
+  {
+   "name": "单引号值",
+   "input": "DB_PASSWORD='sq-secret-value-1'",
+   "secrets": [
+    "sq-secret-value-1"
+   ]
+  },
+  {
+   "name": "client_secret 与 URL 查询串",
+   "input": "POST /oauth?client_secret=cs-abc-123456&grant_type=client_credentials",
+   "secrets": [
+    "cs-abc-123456"
+   ]
+  },
+  {
+   "name": "access_token 查询参数",
+   "input": "GET /api?access_token=at_0123456789abcdef&page=2",
+   "secrets": [
+    "at_0123456789abcdef"
+   ]
+  },
+  {
+   "name": "x-api-key 头",
+   "input": "x-api-key: k_live_0123456789abcdef",
+   "secrets": [
+    "k_live_0123456789abcdef"
+   ]
+  },
+  {
+   "name": "private_key 键",
+   "input": "private_key=MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC",
+   "secrets": [
+    "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC"
+   ]
+  },
+  {
+   "name": "dsn 键",
+   "input": "dsn=app:DsnKeySecretValue@tcp(db:3306)/x",
+   "secrets": [
+    "DsnKeySecretValue"
+   ]
+  },
+  {
+   "name": "Cookie 头（值含空格与分号）",
+   "input": "Cookie: le_admin_sid=Zm9vYmFyYmF6Cookie1; theme=dark; lang=zh",
+   "secrets": [
+    "Zm9vYmFyYmF6Cookie1"
+   ]
+  },
+  {
+   "name": "Set-Cookie 头",
+   "input": "Set-Cookie: le_console_sid=SetCookieSecret99; Path=/; HttpOnly; Secure",
+   "secrets": [
+    "SetCookieSecret99"
+   ]
+  },
+  {
+   "name": "JSON 形态的 Cookie",
+   "input": "{\"Cookie\":\"le_admin_sid=JsonCookieSecret77\"}",
+   "secrets": [
+    "JsonCookieSecret77"
+   ]
+  },
+  {
+   "name": "裸会话 cookie 名=值",
+   "input": "session le_admin_sid=BareSidSecret4455 expired",
+   "secrets": [
+    "BareSidSecret4455"
+   ]
+  },
+  {
+   "name": "多种凭据混在同一行",
+   "input": "dsn app:MixedDsnPass1@tcp(h:1)/d token le_mixed001_MixedTokenSecret1234 password=MixedPlain1 lenr1.MixedEnroll_9",
+   "secrets": [
+    "MixedDsnPass1",
+    "MixedTokenSecret1234",
+    "MixedPlain1",
+    "MixedEnroll_9"
+   ]
+  },
+  {
+   "name": "错误链文本（被多层包装）",
+   "input": "create tenant: insert: connect: dial tcp 10.0.0.5:3306: lingedge_app:ChainWrappedPass42@tcp(10.0.0.5:3306)/lingedge: i/o timeout",
+   "secrets": [
+    "ChainWrappedPass42"
+   ]
+  },
+  {
+   "name": "Windows 换行与制表符",
+   "input": "password:\thunter2tab\r\nnext line",
+   "secrets": [
+    "hunter2tab"
+   ]
+  },
+  {
+   "name": "嵌套对象位于敏感键下",
+   "input": "{\"credentials\":{\"user\":\"svc\",\"pass\":\"NestedObjLeak11\",\"extra\":[\"NestedObjLeak12\"]},\"ok\":1}",
+   "secrets": [
+    "NestedObjLeak11",
+    "NestedObjLeak12"
+   ]
+  },
+  {
+   "name": "敏感键下的数组",
+   "input": "tokens: [\"ArrLeakValueA1\", \"ArrLeakValueB2\"] done",
+   "secrets": [
+    "ArrLeakValueA1",
+    "ArrLeakValueB2"
+   ]
+  },
+  {
+   "name": "引号内含转义引号与括号",
+   "input": "{\"secret\":\"a\\\"}ESCLEAK33{\\\"b\",\"n\":2}",
+   "secrets": [
+    "ESCLEAK33"
+   ]
+  },
+  {
+   "name": "未闭合的引号",
+   "input": "connect failed: client_secret=\"UnclosedLeak44",
+   "secrets": [
+    "UnclosedLeak44"
+   ]
+  },
+  {
+   "name": "键在行尾、值在引号里多段",
+   "input": "set private_key = 'SingleQuoteKeyMaterial55' and continue",
+   "secrets": [
+    "SingleQuoteKeyMaterial55"
+   ]
+  },
+  {
+   "name": "MySQL DSN 省略协议括号",
+   "input": "open app:NoParenDsnPass66@/lingedge?parseTime=true",
+   "secrets": [
+    "NoParenDsnPass66"
+   ]
+  },
+  {
+   "name": "URL 用户信息里放令牌",
+   "input": "git clone https://ghp_TokenInUserinfo123456@git.example.org/repo.git",
+   "secrets": [
+    "ghp_TokenInUserinfo123456"
+   ]
+  },
+  {
+   "name": "命令行标志（空格分隔）",
+   "input": "exec: tool --password CliFlagSecret77 --verbose",
+   "secrets": [
+    "CliFlagSecret77"
+   ]
+  },
+  {
+   "name": "命令行标志 --token",
+   "input": "run --token=CliTokenEq88 --x",
+   "secrets": [
+    "CliTokenEq88"
+   ]
+  },
+  {
+   "name": "JSON 套 JSON（转义引号）",
+   "input": "{\"msg\":\"{\\\"password\\\":\\\"EscJsonLeak99\\\",\\\"u\\\":1}\"}",
+   "secrets": [
+    "EscJsonLeak99"
+   ]
+  }
+ ],
+ "benign_cases": [
+  "user 42 logged in from 10.0.0.1",
+  "request 01ARZ3NDEKTSV4RRFFQ69G5FAV completed in 12ms",
+  "resource.not_found site.domain_conflict errors.auth.forbidden",
+  "created api token for user bob",
+  "token count is 3 and the password policy requires 12 characters",
+  "bearer of bad news; basic configuration loaded",
+  "le_admin_sid is the cookie name used by the admin realm",
+  "https://example.com/path?page=2&sort=-created_at",
+  "mysql://db.internal:3306/lingedge",
+  "contact admin@example.com or ops@example.org",
+  "time=12:30:45 level=info",
+  "listening on 127.0.0.1:8080 and [::1]:9443",
+  "GET https://host.example.com:8080/a@b HTTP/1.1",
+  "把配置发布到集群：版本 7 → 8，影响 3 个站点",
+  "-----BEGIN CERTIFICATE----- is a public certificate header",
+  "key: value, retry: 3, uid: 01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  "le_ab12 short and le_ab12cd34_short are not tokens",
+  "lenr1 without a dot is not a token",
+  "",
+  " ",
+  "password:\nnext line stays",
+  "trailing key password=",
+  "{\"ok\":{\"nested\":[1,2,3]},\"count\":3}",
+  "inside the side panel, footprint grows",
+  "git clone ssh://git@github.com/org/repo.git",
+  "session count and csrf are mentioned only in prose"
+ ],
+ "keys": {
+  "sensitive": [
+   "password",
+   "Password",
+   "PASSWORD",
+   "user_password",
+   "db.password",
+   "passwd",
+   "passphrase",
+   "secret",
+   "client_secret",
+   "clientSecret",
+   "token",
+   "access_token",
+   "accessToken",
+   "refresh-token",
+   "X-CSRF-Token",
+   "x_csrf_token",
+   "private_key",
+   "privateKey",
+   "PrivateKey",
+   "private-key",
+   "authorization",
+   "Authorization",
+   "cookie",
+   "Cookie",
+   "Set-Cookie",
+   "api_key",
+   "apiKey",
+   "API_KEY",
+   "APIKey",
+   "X-Api-Key",
+   "credential",
+   "credential_enc",
+   "dsn",
+   "DSN",
+   "db_dsn",
+   "pwd",
+   "session_id",
+   "sessionId",
+   "sid",
+   "csrf",
+   "otp",
+   "totp",
+   "hmac",
+   "signature",
+   "master_key",
+   "masterKey",
+   "encryption_key",
+   "signing_key",
+   "access_key",
+   "recovery_code"
+  ],
+  "benign": [
+   "request_id",
+   "uid",
+   "status",
+   "method",
+   "path",
+   "latency_ms",
+   "duration",
+   "user_agent",
+   "remote_addr",
+   "message_key",
+   "site_uid",
+   "tenant_uid",
+   "level",
+   "msg",
+   "ts",
+   "caller",
+   "error",
+   "keyspace",
+   "cluster_region",
+   "",
+   "side",
+   "footprint",
+   "inside",
+   "sidebar",
+   "assignment",
+   "session_count_total_x"
+  ]
+ }
+}

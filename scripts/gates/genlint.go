@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -117,6 +118,19 @@ var forbidPatterns = []struct{ pattern, msg string }{
 	{`^(syscall|windows)\.CreateProcess[AW]?$`, "禁止直接创建进程（G-12/NFR-9）：只能经 internal/tools/security 白名单入口"},
 }
 
+// noDirectClockMarker 是 forbidigo 诊断里的固定标记，exclusions 据此把规则限定在 Server 业务代码（internal/<server 模块>/）内。
+const noDirectClockMarker = "[no-direct-clock]"
+
+// clockPackage 是唯一允许读取系统时钟的包（Story 1.4 AC5）。
+const clockPackage = "internal/platform/clock"
+
+// clockForbid：业务代码不得直接读系统时钟（含把 time.Now 当函数值别名），一律经注入的 platform/clock.Clock，使时间可被测试注入。
+// 适用范围见 renderLintConfig 的 exclusions：仅 internal/<Server 模块>/；Tools（internal/tools，不能依赖 platform）、cmd、pkg、scripts、tests 不受此条约束。
+var clockForbid = struct{ pattern, msg string }{
+	`^time\.(Now|Since|Until)$`,
+	noDirectClockMarker + " 禁止直接读取系统时钟（Story 1.4 AC5）：经注入的 internal/platform/clock.Clock 取时间（clock.Since/clock.Until 代替 time.Since/time.Until）；仅 " + clockPackage + " 可调用",
+}
+
 func renderLintConfig() string {
 	var b strings.Builder
 	w := func(format string, a ...any) { fmt.Fprintf(&b, format, a...) }
@@ -145,6 +159,7 @@ func renderLintConfig() string {
 	for _, p := range forbidPatterns {
 		w("        - pattern: %s\n          msg: %s\n", q(p.pattern), q(p.msg))
 	}
+	w("        - pattern: %s\n          msg: %s\n", q(clockForbid.pattern), q(clockForbid.msg))
 	w("  exclusions:\n    generated: lax\n    rules:\n")
 	w("      # 唯一白名单入口：internal/tools/security（其内部仍受 `gates shell` 的参数数组/无 shell 检查约束）。\n")
 	w("      - path: %s\n        linters:\n          - forbidigo\n", q(`^internal/tools/security/`))
@@ -152,8 +167,13 @@ func renderLintConfig() string {
 	w("      - path: %s\n        linters:\n          - forbidigo\n", q(`^scripts/`))
 	w("      - path: %s\n        linters:\n          - forbidigo\n", q(`_test\.go$`))
 	w("      - path: %s\n        linters:\n          - forbidigo\n", q(`^tests/`))
+	w("      # 直接读时钟的禁令（%s）只约束 Server 业务代码 internal/<Server 模块>/，其余路径整体豁免；时钟包自身是唯一出口。\n", noDirectClockMarker)
+	w("      - path-except: %s\n        linters:\n          - forbidigo\n        text: %s\n", q(`^internal/(`+strings.Join(serverModules, "|")+`)/`), q(regexpQuote(noDirectClockMarker)))
+	w("      - path: %s\n        linters:\n          - forbidigo\n        text: %s\n", q(`^`+clockPackage+`/`), q(regexpQuote(noDirectClockMarker)))
 	return b.String()
 }
+
+func regexpQuote(s string) string { return regexp.QuoteMeta(s) }
 
 func runGenLint(root string, opts options) ([]Finding, error) {
 	want := renderLintConfig()

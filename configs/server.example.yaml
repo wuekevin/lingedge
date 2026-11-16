@@ -1,0 +1,56 @@
+# lingedge-server 示例配置（Story 1.4）。复制为 /etc/lingedge/server/server.yaml（开发时可复制为 configs/server.local.yaml，
+# 该文件名已被 .gitignore 忽略）后按需修改。
+#
+# 本文件不含任何口令或密钥（NFR-6）：
+#   - 数据库/Redis 口令只能通过以下两种方式之一提供，二者不可同时设置：
+#       1) 环境变量  LINGEDGE_DATABASE__PASSWORD / LINGEDGE_REDIS__PASSWORD
+#       2) 配置键    database.password_file / redis.password_file，指向只含口令的文件
+#          （绝对路径；权限不得允许「其他用户」访问，例如 root:lingedge 0440；文件末尾换行会被忽略）
+#   - 主密钥 master.key 不在此文件中，由 Tools 安装步骤生成并经 systemd LoadCredential 提供（ADR-011）。
+# 任何键都可用环境变量覆盖：LINGEDGE_<节>__<键>（双下划线分隔层级，全大写），例如 LINGEDGE_HTTP__LISTEN。
+# 配置中出现未知键、重复键、类型不符会被拒绝，错误信息只含键路径、不回显取值。
+
+server:
+  # 环境名，进入 Redis 键空间 le:<env>:…，运行期必填（共用同一 Redis 的多套环境必须不同；
+  # 本地开发请改为 dev，避免与生产键空间 le:prod:… 混用）。
+  env: prod
+  # 数据目录。
+  data_dir: /var/lib/lingedge/server
+
+http:
+  # REST 监听；默认仅本机，由 Nginx 反代。
+  listen: 127.0.0.1:8080
+
+grpc:
+  # 节点 mTLS gRPC。
+  listen: 0.0.0.0:9443
+  # 节点注册端口（仅有未过期注册令牌时才会真正监听）。
+  enroll_listen: 0.0.0.0:9444
+
+metrics:
+  # Prometheus 指标，仅本机。
+  listen: 127.0.0.1:9180
+
+database:
+  host: 127.0.0.1
+  port: 3306
+  name: lingedge
+  user: lingedge_app
+  # 口令：见文件头说明（password_file 或 LINGEDGE_DATABASE__PASSWORD）。
+
+redis:
+  addr: 127.0.0.1:6379
+  db: 0
+  # 口令（如有）：见文件头说明（password_file 或 LINGEDGE_REDIS__PASSWORD）。
+
+log:
+  # debug | info | warn | error
+  level: info
+  # json | console（生产与日志采集使用 json）
+  format: json
+
+# release:
+#   # 官方发行源地址（未定，UD-3），必须是 https，不得内嵌凭据。
+#   base_url: https://releases.example.org/
+#   # 追加的根证书文件（绝对路径，可选）。
+#   ca_file: /etc/lingedge/release-ca.pem

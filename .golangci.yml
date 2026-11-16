@@ -1378,6 +1378,8 @@ linters:
           msg: "禁止 x/sys/unix 进程执行（G-12/NFR-9）：只能经 internal/tools/security 白名单入口"
         - pattern: "^(syscall|windows)\\.CreateProcess[AW]?$"
           msg: "禁止直接创建进程（G-12/NFR-9）：只能经 internal/tools/security 白名单入口"
+        - pattern: "^time\\.(Now|Since|Until)$"
+          msg: "[no-direct-clock] 禁止直接读取系统时钟（Story 1.4 AC5）：经注入的 internal/platform/clock.Clock 取时间（clock.Since/clock.Until 代替 time.Since/time.Until）；仅 internal/platform/clock 可调用"
   exclusions:
     generated: lax
     rules:
@@ -1395,3 +1397,12 @@ linters:
       - path: "^tests/"
         linters:
           - forbidigo
+      # 直接读时钟的禁令（[no-direct-clock]）只约束 Server 业务代码 internal/<Server 模块>/，其余路径整体豁免；时钟包自身是唯一出口。
+      - path-except: "^internal/(platform|auth|tenant|plugin|website|origin|cache|ruleengine|certificate|waf|security|l4proxy|dns|billing|cms|seo|media|monitoring|notification|node|cluster|scheduler|reporter)/"
+        linters:
+          - forbidigo
+        text: "\\[no-direct-clock\\]"
+      - path: "^internal/platform/clock/"
+        linters:
+          - forbidigo
+        text: "\\[no-direct-clock\\]"

@@ -203,6 +203,10 @@ func TestLintGatesBlockViolationsAndAllowLegitimate(t *testing.T) {
 		"internal/auth/internal/service/prod_exec.go":       {"package service\n\nimport \"os/exec\"\n\nvar Run = func(a string) error {\n\treturn exec.Command(\"ls\", a).Run()\n}\n", "forbidigo", "os/exec"},
 		"internal/auth/internal/service/prod_syscall.go":    {"package service\n\nimport \"syscall\"\n\nvar Replace = func(a string) error {\n\treturn syscall.Exec(a, nil, nil)\n}\n", "forbidigo", "syscall.Exec"},
 		"internal/auth/internal/service/prod_startproc.go":  {"package service\n\nimport \"os\"\n\nvar Spawn = func(a string) (*os.Process, error) {\n\treturn os.StartProcess(a, nil, nil)\n}\n", "forbidigo", "os.StartProcess"},
+		"internal/auth/internal/service/prod_time_now.go":   {"package service\n\nimport \"time\"\n\nvar Stamp = func() time.Time {\n\treturn time.Now()\n}\n", "forbidigo", "[no-direct-clock]"},
+		"internal/billing/internal/service/prod_since.go":   {"package service\n\nimport \"time\"\n\nvar Age = func(t time.Time) (time.Duration, time.Duration) {\n\treturn time.Since(t), time.Until(t)\n}\n", "forbidigo", "[no-direct-clock]"},
+		"internal/cache/internal/service/prod_now_alias.go": {"package service\n\nimport \"time\"\n\nvar Now = time.Now\n", "forbidigo", "[no-direct-clock]"},
+		"internal/platform/other/prod_now.go":               {"package other\n\nimport \"time\"\n\nvar Stamp = func() time.Time {\n\treturn time.Now()\n}\n", "forbidigo", "[no-direct-clock]"},
 		"internal/auth/internal/service/prod_exec_alias.go": {"package service\n\nimport (\n\t\"context\"\n\tx \"os/exec\"\n)\n\nvar Run2 = func(ctx context.Context, a string) error {\n\treturn x.CommandContext(ctx, \"ls\", a).Run()\n}\n", "forbidigo", "os/exec"},
 	}
 	// 必须通过（合法依赖与白名单用法）。
@@ -220,6 +224,13 @@ func TestLintGatesBlockViolationsAndAllowLegitimate(t *testing.T) {
 		"internal/tools/security/ok_syscall.go":             "package security\n\nimport \"syscall\"\n\nvar Replace = func(a string) error {\n\treturn syscall.Exec(a, nil, nil)\n}\n",
 		"internal/origin/internal/testdouble/ok_td.go":      "//go:build lingedge_testdouble\n\npackage testdouble\n\nimport \"testing\"\n\nvar _ = testing.Short\n",
 		"internal/origin/internal/service/ok_exec_test.go":  "package service\n\nimport \"os/exec\"\n\nvar _ = exec.Command\n",
+		// 时钟包是唯一出口；测试、Tools（不能依赖 platform）、cmd、pkg 不受「禁止直接读时钟」约束。
+		"internal/platform/clock/ok_now.go":             "package clock\n\nimport \"time\"\n\nvar Stamp = func() time.Time {\n\treturn time.Now()\n}\n",
+		"internal/auth/internal/service/ok_now_test.go": "package service\n\nimport \"time\"\n\nvar _ = time.Now\n",
+		"internal/tools/cli/ok_now.go":                  "package cli\n\nimport \"time\"\n\nvar Stamp = func() time.Time {\n\treturn time.Now()\n}\n",
+		"cmd/lingedge-node/ok_now.go":                   "package main\n\nimport \"time\"\n\nvar Stamp = func() time.Time {\n\treturn time.Now()\n}\n",
+		"pkg/version/ok_now.go":                         "package version\n\nimport \"time\"\n\nvar Stamp = func() time.Time {\n\treturn time.Now()\n}\n",
+		"internal/auth/internal/service/ok_injected.go": "package service\n\nimport (\n\t\"time\"\n\n\t\"github.com/wuekevin/lingedge/internal/platform/clock\"\n)\n\nvar StampInjected = func(c clock.Clock) time.Time {\n\treturn c.Now()\n}\n",
 	}
 	put(t, dst, "internal/cache/internal/domain/d.go", "package domain\n") // ok_own_impl.go 引用的自有实现包
 	for rel, v := range violations {

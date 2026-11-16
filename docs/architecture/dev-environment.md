@@ -39,8 +39,8 @@ inputs:
 | github.com/jmoiron/sqlx | SQL 访问（唯一 DB 访问层） | v1.4.0 | 基线固定；最近发布于 2024-04，维护活跃度实现时评估 |
 | github.com/go-sql-driver/mysql | MySQL 驱动 | v1.10.1 | |
 | github.com/redis/go-redis/v9 | Redis 客户端 | v9.23.0 | |
-| go.uber.org/zap | 日志 | v1.28.0 | 基线固定 |
-| google.golang.org/grpc | gRPC | v1.85.0 | 基线固定 |
+| go.uber.org/zap | 日志 | v1.28.0 | 基线固定；**已在 go.mod 固定**（Story 1.4，经 `internal/platform/logx` 统一脱敏） |
+| google.golang.org/grpc | gRPC | v1.85.0 | 基线固定；**已在 go.mod 固定**（Story 1.4 起仅 `grpc/metadata` 等用于 Request ID 元数据与测试；间接依赖 `golang.org/x/net` 升至 v0.62.0 以消除 GO-2026-6860/6866） |
 | google.golang.org/protobuf | Protobuf 运行时 | v1.36.12 | 与 `protoc-gen-go`/`protoc-gen-go-grpc` 版本需配套，实现时核对 |
 | github.com/miekg/dns | 权威 DNS（P3） | v1.1.73 | 基线固定 |
 | github.com/spf13/cobra | CLI | v1.10.2 | 基线固定 |
@@ -55,7 +55,8 @@ inputs:
 | github.com/stretchr/testify | 测试断言 | v1.12.1 | |
 | github.com/testcontainers/testcontainers-go | **不采用**（无 Docker，NFR-7） | v0.45.0 | 仅记录：集成测试依赖本机/验收机的真实 MySQL/Redis，不使用容器 |
 | github.com/oschwald/geoip2-golang | GeoIP（P3） | v1.13.0 | 数据源与授权待定（OQ-5） |
-| github.com/oklog/ulid/v2 | ULID（`uid`） | v2.1.2 | |
+| github.com/oklog/ulid/v2 | ULID（`uid`） | v2.1.2 | **已在 go.mod 固定**（Story 1.4，`internal/platform/uid`） |
+| go.yaml.in/yaml/v3 | 配置 YAML 解码（Story 1.4 新增） | v3.0.6（2026-11-17 `go list -m -versions`） | 已固定；YAML 官方组织维护的 yaml.v3 延续版（gopkg.in/yaml.v3 已停更）；`KnownFields(true)` 用于拒绝未知键 |
 | github.com/go-playground/validator/v10 | 参数校验 | v10.30.6 | |
 | github.com/klauspost/compress | zstd（日志/块压缩） | v1.20.4 | |
 | github.com/golang-jwt/jwt/v5 | — | v5.3.1 | **不采用**：会话为不透明令牌（ADR-018） |
@@ -216,7 +217,7 @@ flowchart LR
 
 1. 〔待实现〕准备数据库：用独立账号创建 `lingedge_dev` 库（本机 `mysql@8.0`；不使用 root 长期连接）。
 2. 〔待实现〕`make migrate`：执行 `lingedge-server migrate plan` 查看待执行迁移及其分类，再 `up`。
-3. 〔待实现〕`cp configs/server.example.yaml configs/server.local.yaml`，填入本地 MySQL/Redis 连接；主密钥通过开发用 `KeyProvider`（file，权限 0400，**仅开发用，勿入库**）。
+3. `cp configs/server.example.yaml configs/server.local.yaml`（示例与加载器已随 Story 1.4 交付并有测试；示例不含任何口令；本地请把 `server.env` 改为 `dev`，避免与生产 Redis 键空间混用）。数据库/Redis 口令只能经环境变量 `LINGEDGE_DATABASE__PASSWORD` / `LINGEDGE_REDIS__PASSWORD` 或 `password_file`（权限不得允许其他用户访问）提供；〔待实现〕主密钥通过开发用 `KeyProvider`（file，权限 0400，**仅开发用，勿入库**）。
 4. 〔待实现〕`go run ./cmd/lingedge-server --roles=api,grpc,scheduler,worker`；首次启动进入 setup mode，终端打印一次性 setup token（对应 F-8），经向导创建管理员（无默认密码）。
 5. 〔待实现〕`pnpm -C frontend dev`（admin / website）。
 6. 〔待实现〕在 Linux 验收机：`lingedge install node` → Admin 创建节点并生成注册 Token → `lingedge node enroll --token …` → Admin 看到节点在线。
