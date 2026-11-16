@@ -1,0 +1,89 @@
+// LingEdge Node 协议 · 公共类型
+// 阶段：M1（除非字段另行标注）
+//
+// 约定（与 docs/architecture/architecture.md §9、docs/api/node-protocol.md 一致）：
+//  - 所有资源引用一律使用 uid（CHAR(26) ULID 字符串），不使用内部 bigint id。
+//  - 时间一律 google.protobuf.Timestamp（UTC）；时长一律 google.protobuf.Duration。
+//  - 请求追踪：Request ID 走 gRPC metadata `x-request-id`（不放在消息体内）。
+//  - 认证主体：由 mTLS 客户端证书 SAN `URI:urn:lingedge:<role>:<uid>` 解析，
+//    消息体内出现的 node_uid 仅为冗余自检字段，服务端必须与证书主体比对，不一致即拒绝。
+//  - 本协议没有任何"执行命令/脚本/任意文件下发"的消息类型（NFR-14、FR-35）。
+syntax = "proto3";
+
+package lingedge.node.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// 实现时须与仓库 go.mod 的 module 路径对齐。[ASSUMPTION] 模块路径为 github.com/wuekevin/lingedge
+option go_package = "github.com/wuekevin/lingedge/proto/lingedge/node/v1;nodev1";
+
+// Role 证书主体角色，对应证书 SAN `urn:lingedge:<role>:<uid>`。
+enum Role {
+  ROLE_UNSPECIFIED = 0;
+  ROLE_NODE = 1;       // 边缘节点 Agent（M1）
+  ROLE_DNS = 2;        // 权威 DNS 服务（P3，见 node-protocol.md「预留」）
+  ROLE_REPORTER = 3;   // 区域探针（P3）
+  ROLE_SCHEDULER = 4;  // 独立 Scheduler（P3）
+  ROLE_WORKER = 5;     // 独立 Worker（P3）
+}
+
+// Digest 摘要。algorithm 当前仅允许 "sha256"，value 为原始 32 字节（非 hex）。
+message Digest {
+  string algorithm = 1;
+  bytes value = 2;
+}
+
+// ClientInfo Agent 自述信息（仅用于展示与兼容性判断，不作授权依据）。
+message ClientInfo {
+  string agent_version = 1;      // 如 "1.0.0"（语义化版本）
+  string build_commit = 2;       // 构建提交哈希（可空）
+  string os = 3;                 // 如 "linux"
+  string arch = 4;               // 如 "amd64" / "arm64"
+  string hostname = 5;           // 主机名（展示用）
+  string openresty_version = 6;  // 已安装的 OpenResty 版本（未装为空）
+  uint32 protocol_major = 7;     // 本 Agent 实现的协议主版本；当前为 1
+  repeated string capabilities = 8;  // 能力标签，如 "cache.purge_url"、"rev.block_dedup"；未知标签服务端忽略
+}
+
+// RevisionRef 指向某集群的某个配置修订。
+message RevisionRef {
+  string cluster_uid = 1;
+  uint64 seq = 2;             // 集群内单调递增序号（ADR-002）
+  string revision_uid = 3;    // config_revisions.uid
+  Digest manifest_digest = 4; // canonical manifest JSON 的 sha256
+  // 修订谱系（lineage，ADR-002 §12）。节点接受规则：(lineage, seq) 字典序**严格大于**本地 (lineage, applied_seq)。
+  // 数据库恢复后 Server 提升 lineage，使低 seq 的新修订仍可被节点接受。v1 新增字段（向后兼容）；0 视为 1。
+  uint64 lineage = 5;
+}
+
+// ErrorDetail 附加在 gRPC status details 或业务回执中的结构化错误。
+message ErrorDetail {
+  string code = 1;                    // 稳定点分小写字符串，如 "revision.signature_invalid"
+  string message = 2;                 // 面向运维的简短英文/中文描述（不含敏感信息）
+  map<string, string> metadata = 3;   // 附加键值（不得含密钥、Token、私钥）
+}
+
+// SigningKey 配置签名公钥（ADR-002/012；Ed25519）。
+message SigningKey {
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    STATUS_ACTIVE = 1;    // 用于签发与验证
+    STATUS_RETIRING = 2;  // 仅验证（轮换重叠期）
+    STATUS_REVOKED = 3;   // 禁止验证（泄露/吊销）；此类 key 签发的修订必须拒绝
+  }
+  string key_id = 1;
+  string algorithm = 2;      // 当前仅 "ed25519"
+  bytes public_key = 3;      // 32 字节原始公钥
+  Status status = 4;
+  google.protobuf.Timestamp not_before = 5;  // 签发起始；注意：配置签名本身无过期（R-4），此处仅限制 key 的启用时间
+}
+
+// SigningKeyset 签名公钥集（链式轮换：新 keyset 由旧版 keyset 中仍有效的 key 签名）。
+message SigningKeyset {
+  uint64 version = 1;                 // 单调递增
+  repeated SigningKey keys = 2;
+  google.protobuf.Timestamp issued_at = 3;
+  uint64 previous_version = 4;        // 上一版本号；首版为 0（由 enroll 时的 TLS+CA 钉扎信任，作为信任起点）
+  string signed_by_key_id = 5;        // 签署本 keyset 的、previous_version 中的 key；首版为空
+  bytes signature = 6;                // Ed25519(signed_by_key_id, "LINGEDGE-KEYSET-V1\n" + canonical_json(version,keys,issued_at,previous_version))
+}

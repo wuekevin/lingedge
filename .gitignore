@@ -1,0 +1,44 @@
+# 构建产物
+/bin/
+/dist/
+*.test
+*.out
+coverage.*
+
+# 前端
+node_modules/
+.pnpm-store/
+frontend/**/dist/
+frontend/**/.output/
+frontend/**/.nuxt/
+docs-site/dist/
+docs-site/.output/
+docs-site/.nuxt/
+status-site/dist/
+status-site/.output/
+status-site/.nuxt/
+go.work
+go.work.sum
+
+# 本地配置与凭据（NFR-6：仓库内不含任何口令）
+.env
+.env.*
+!.env.example
+*.local.yaml
+*.local.yml
+*.local.toml
+*.pem
+*.key
+
+# 工具与编辑器
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# BMad 渲染缓存与产出（可再生）
+/_bmad/render/
+/_bmad-output/
+
+# BMAD 本地配置与渲染产物
+/_bmad/

@@ -1,0 +1,62 @@
+// LingEdge Node 协议 · 注册
+// 监听：Server :9444（仅 TLS，不要求客户端证书；仅当存在未过期注册 Token 时才监听；限速）
+// 阶段：M1
+syntax = "proto3";
+
+package lingedge.node.v1;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "lingedge/node/v1/common.proto";
+
+option go_package = "github.com/wuekevin/lingedge/proto/lingedge/node/v1;nodev1";
+
+// EnrollService 节点首次注册。
+// 认证主体：无（客户端尚无证书）。身份由「一次性注册 Token + 服务端证书的 CA 指纹钉扎」建立。
+service EnrollService {
+  // Enroll 使用一次性 Token 换取由私有 CA 签发的节点证书。
+  // Token 格式 `lenr1.<base64url(server_url|ca_fingerprint|secret)>`（见 node-protocol.md）；
+  // ca_fingerprint = 私有 CA 根证书 DER 的 SHA-256；Server 在 :9444 出示由该 CA 签发的 Server 叶证书（serverAuth，
+  // SAN 含 server_url 主机），客户端按该指纹钉扎链（不信任系统根），只把 secret 部分放入请求。
+  // 失败一律统一错误 `enroll.token_invalid`（不区分不存在/已用/过期）。重新注册用 `lingedge node enroll --force-reenroll`。
+  // 服务端以原子 UPDATE（used_at IS NULL）消费 Token；重放一律拒绝（FR-52）。
+  // 阶段：M1。限速与失败节流由服务端实施。
+  rpc Enroll(EnrollRequest) returns (EnrollResponse);
+}
+
+message EnrollRequest {
+  // Token 中的 secret 部分（高熵随机串）。服务端仅存其哈希。日志中必须脱敏。
+  string token_secret = 1;
+  // PEM 编码的 PKCS#10 CSR。私钥在节点本地生成，永不上传。
+  // 服务端忽略 CSR 中的 Subject/SAN，只采用公钥；证书主体由服务端按 Token 绑定的节点 uid 重新生成。
+  bytes csr_pem = 2;
+  // 期望角色；M1 仅接受 ROLE_NODE，必须与 Token 绑定的角色一致。
+  Role role = 3;
+  ClientInfo client = 4;
+  // 节点自报出口/公网 IP（仅供展示与 IP 池建议，不作信任依据）。
+  repeated string reported_ips = 5;
+}
+
+message EnrollResponse {
+  string node_uid = 1;
+  // 节点证书链（PEM，叶证书在前）。SAN: URI:urn:lingedge:node:<node_uid>；有效期默认 90 天（ADR-003）。
+  bytes certificate_chain_pem = 2;
+  // 私有 CA 根证书（PEM，可含新旧两张以支持 CA 轮换重叠，见 ADR-003 CA 轮换分阶段流程）。
+  bytes ca_bundle_pem = 3;
+  google.protobuf.Timestamp certificate_not_after = 4;
+  // 初始配置签名公钥集（信任起点，ADR-002 链式轮换）。
+  SigningKeyset signing_keyset = 5;
+  // 节点运行参数。
+  EnrollParameters parameters = 6;
+  // v1 新增：本次下发的 CA bundle 版本（节点以此作为 Heartbeat.ca_bundle_version 的初值）。
+  uint64 ca_bundle_version = 7;
+}
+
+message EnrollParameters {
+  // mTLS 控制面地址（host:port），通常为 :9443。
+  string control_endpoint = 1;
+  // 建议心跳间隔；实际以每次 HeartbeatResponse.next_interval 为准。默认值待基线测试后确定（NFR-30）。
+  google.protobuf.Duration heartbeat_interval = 2;
+  // 服务端协议主版本。
+  uint32 protocol_major = 3;
+}

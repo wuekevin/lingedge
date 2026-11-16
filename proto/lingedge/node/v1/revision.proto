@@ -1,0 +1,150 @@
+// LingEdge Node 协议 · 配置修订分发
+// 监听：Server :9443（mTLS）
+// 阶段：M1
+syntax = "proto3";
+
+package lingedge.node.v1;
+
+import "google/protobuf/timestamp.proto";
+import "lingedge/node/v1/common.proto";
+import "lingedge/node/v1/control.proto";
+
+option go_package = "github.com/wuekevin/lingedge/proto/lingedge/node/v1;nodev1";
+
+// RevisionService 配置修订与证书分发。
+// 认证主体：ROLE_NODE。每个 RPC 由拦截器校验「请求的集群/证书属于该节点」，否则 NOT_FOUND（不泄漏存在性）。
+service RevisionService {
+  // FetchRevision 服务端流式下载某集群某 seq 的修订 bundle，支持按 offset 断点续传。
+  // 第一条消息必为 header（含 manifest 与签名，节点可先验签再继续接收数据）。
+  // 节点校验顺序见 node-protocol.md：sha256 → 签名 → seq 单调 → 解包 → 渲染 → nginx -t → 应用 → 健康检查 → ReportApply。
+  // 节点只能拉取 Server 在其 desired 中声明的 (cluster, seq)（防止越权/枚举），否则 PERMISSION_DENIED→映射为 NOT_FOUND。
+  rpc FetchRevision(FetchRevisionRequest) returns (stream FetchRevisionResponse);
+
+  // FetchCertificate 取得某站点证书的 fullchain 与私钥（私钥不入修订，ADR-002/011）。
+  // 修订只引用 certificate_uid（不含证书版本与指纹，IMP-06 选 (a)）：节点取**当前活动版本**；回滚修订不回退证书。
+  // Server 仅在「该证书被节点所属集群上的某站点引用」时授权。响应含私钥明文：
+  // 仅经 mTLS 传输；节点必须以 0600 写入、不得写日志；Server 审计每次取用。
+  rpc FetchCertificate(FetchCertificateRequest) returns (FetchCertificateResponse);
+
+  // ReportApply 上报应用进度与结果（幂等：同一 (deployment_target_uid, state, attempt) 重复上报视为同一事件；
+  // 数据库承载 = deployment_target_steps 的 UNIQUE(deployment_target_id, attempt, state)，deployment_target_uid = deployment_targets.uid）。
+  // 多集群时仍按集群逐个上报；回退以节点代为单位（ADR-020 §节点代）。
+  rpc ReportApply(ReportApplyRequest) returns (ReportApplyResponse);
+
+  // GetSigningKeyset 获取签名公钥集（收到 DIRECTIVE_REFETCH_KEYSET 或 latest_keyset_version 更大时调用）。
+  rpc GetSigningKeyset(GetSigningKeysetRequest) returns (GetSigningKeysetResponse);
+}
+
+message FetchRevisionRequest {
+  string cluster_uid = 1;
+  uint64 seq = 2;
+  // 断点续传：从 bundle 的该字节偏移开始发送 data；0=从头。header 总会被重发。
+  uint64 offset = 3;
+  // 期望的单块最大字节数；服务端取 min(该值, 服务端上限)。默认值待基线测试后确定。
+  uint32 max_chunk_bytes = 4;
+  // 节点本地已有的块摘要（内容寻址 config_blocks）。服务端可据此在 bundle 中省略这些块（M1 可忽略，保留字段）。
+  repeated Digest have_blocks = 5;
+}
+
+message FetchRevisionResponse {
+  oneof payload {
+    RevisionHeader header = 1;
+    RevisionData data = 2;
+  }
+}
+
+// RevisionHeader 修订元信息，含已签名 manifest。
+message RevisionHeader {
+  RevisionRef revision = 1;
+  // canonical JSON 形式的 manifest 原文（字节须与签名输入完全一致）。
+  // 含 schema_version, cluster_uid, lineage, seq, parent_seq, created_at, blocks[{key, sha256, size}]；
+  // key ∈ `global` | `site:<site_uid>` | `l4`（全局块也是一个块，**无并列 global{…}**，IMP-16）。
+  bytes manifest_json = 2;
+  RevisionSignature signature = 3;
+  // 注：RevisionRef.lineage 即 manifest.lineage（须一致）。
+  // bundle 的总字节数与 sha256（对完整未分块字节流）。
+  uint64 bundle_size = 4;
+  Digest bundle_digest = 5;
+  // bundle 格式。M1：tar（deterministic，条目按 manifest 顺序）+ zstd 压缩。
+  enum BundleFormat {
+    BUNDLE_FORMAT_UNSPECIFIED = 0;
+    BUNDLE_FORMAT_TAR_ZSTD = 1;
+  }
+  BundleFormat format = 6;
+  // 本修订是否为回滚产生（rollback_of 非空）；仅展示，应用逻辑相同。
+  string rollback_of_revision_uid = 7;
+  google.protobuf.Timestamp created_at = 8;
+}
+
+// RevisionSignature 对 "LINGEDGE-REVISION-V1\n" + manifest_json 的 Ed25519 签名。**无过期字段**（R-4）。
+message RevisionSignature {
+  string key_id = 1;
+  string algorithm = 2;  // "ed25519"
+  bytes signature = 3;   // 64 字节
+}
+
+message RevisionData {
+  uint64 offset = 1;  // 本块在 bundle 中的起始偏移，节点须校验连续
+  bytes chunk = 2;
+}
+
+message FetchCertificateRequest {
+  string certificate_uid = 1;
+  // 节点已有的证书版本号（certificate_deployments.cert_version）；服务端若无更新可返回 not_modified。
+  uint64 known_version = 2;
+}
+
+message FetchCertificateResponse {
+  bool not_modified = 1;
+  string certificate_uid = 2;
+  uint64 version = 3;
+  bytes fullchain_pem = 4;
+  // 私钥 PEM（PKCS#8）。敏感：日志/审计/trace 中必须脱敏；节点写盘权限 0600、属主 lingedge-node。
+  bytes private_key_pem = 5;
+  Digest fullchain_digest = 6;
+  google.protobuf.Timestamp not_before = 7;
+  google.protobuf.Timestamp not_after = 8;
+  repeated string hostnames = 9;  // 证书覆盖的主机名（SAN）
+}
+
+// ApplyStepResult 一次应用过程的逐步记录（用于 Admin 部署详情）。
+message ApplyStepResult {
+  ApplyState state = 1;
+  google.protobuf.Timestamp started_at = 2;
+  google.protobuf.Timestamp finished_at = 3;
+  string message = 4;  // 简短说明；不得含密钥/私钥内容
+}
+
+message ReportApplyRequest {
+  string deployment_uid = 1;
+  string deployment_target_uid = 2;
+  RevisionRef revision = 3;
+  ApplyState state = 4;               // 当前达到的状态（含终态 HEALTHY/FAILED/ROLLED_BACK）
+  uint32 attempt = 5;                 // 同一 target 的第几次尝试，从 1 开始
+  ErrorDetail error = 6;              // state=FAILED/ROLLED_BACK 时必填，如 "render.invalid_value"、"nginx.test_failed"、"health.check_failed"
+  bool restored_previous = 7;         // 是否已恢复到上一有效代（FAILED/ROLLED_BACK 时应为 true）
+  uint64 now_serving_seq = 8;         // 上报时节点实际正在服务的 seq（权威，写入 node_cluster_state）
+  Digest config_hash = 9;             // 当前生效产物哈希（健康检查回显一致性）
+  repeated ApplyStepResult steps = 10;
+  google.protobuf.Timestamp reported_at = 11;
+  // ---- 以下为 v1 新增字段（向后兼容）----
+  uint64 now_serving_lineage = 12;    // 与 now_serving_seq 配对：节点正在服务的修订 lineage
+  uint64 node_generation = 13;        // 上报时节点代编号 g<N> 的 N（回退以节点代为单位，ADR-020）
+  uint64 held_seq = 14;               // 非 0=节点级回滚后对本集群设置的 held_seq
+}
+
+message ReportApplyResponse {
+  bool acknowledged = 1;
+  // 若服务端希望节点重试（例如瞬时冲突），给出建议；否则为空。
+  string retry_hint = 2;
+}
+
+message GetSigningKeysetRequest {
+  uint64 known_version = 1;
+}
+
+message GetSigningKeysetResponse {
+  bool not_modified = 1;
+  // 返回从 known_version 之后的完整链（按版本升序），节点逐级验证 signed_by_key_id（链式轮换）。
+  repeated SigningKeyset chain = 2;
+}

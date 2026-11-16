@@ -1,0 +1,612 @@
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created, ready for development
+#   - in-progress: Developer actively working on implementation
+#   - review: Implementation complete, ready for review
+#   - done: Story completed
+
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+
+# Action Item Status:
+#   - open: Committed during a retrospective, not yet addressed
+#   - in-progress: Actively being worked on
+#   - done: Completed
+
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when its first story starts (via build's sprint sync)
+# - Stories can be worked in parallel if team capacity allows
+# - Developer typically creates the next story after the previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+# - Retrospective appends its action items to action_items; the status view surfaces open ones
+generated: 11-16-2026 23:18
+last_updated: 11-16-2026 23:54
+project: LingEdge（凌界云）
+project_key: NOKEY
+tracking_system: file-system
+story_location: docs/bmad/stories
+development_status:
+  epic-1: in-progress
+  1-1-go-monorepo-脚手架与目录骨架: review
+  1-2-静态质量门禁集-依赖方向-测试替身-固定口令-命令注入-品牌: review
+  1-3-契约工具链与契约冻结点-cf-1-openapi-proto-migrations: backlog
+  1-4-platform-基础库-配置-日志脱敏-统一错误-request-id: backlog
+  1-5-db-基础设施与租户-scope-构建器: backlog
+  1-6-migration-框架-goose-嵌入-分类-lint-migrate-子命令: backlog
+  1-7-m1-迁移-a-身份-租户-平台核心-审计-种子-密钥-000001-000005: backlog
+  1-8-m1-迁移-b-节点集群-站点-证书-源站-规则-缓存-000006-000011: backlog
+  1-9-m1-迁移-c-配置修订-发布队列-部署-观测-000012-000013-与契约冻结点-cf-2: backlog
+  1-10-redis-边界封装与降级-adr-025: backlog
+  1-11-密钥基础库-secretbox-keyprovider-主密钥: backlog
+  1-12-http-服务骨架-路由元数据-统一响应-幂等-健康检查: backlog
+  1-13-lingedge-server-进程装配-roles-子命令-sd_notify: backlog
+  1-14-任务运行时-tasks-队列-租约-围栏-白名单任务类型: backlog
+  1-15-scheduler-角色与内部周期任务: backlog
+  1-16-认证-i-登录-会话-csrf-登录节流-登录日志: backlog
+  1-17-认证-ii-totp-恢复码-近期-mfa: backlog
+  1-18-rbac-权限串-角色-用户管理-api: backlog
+  1-19-api-token-作用域-吊销-轮换: backlog
+  1-20-租户模块-scope-中间件与隔离测试框架: backlog
+  1-21-审计模块与审计-登录日志-api: backlog
+  1-22-系统设置-运行模式开关与能力注册表: backlog
+  1-23-签名与-ca-密钥初始化-信任域②③: backlog
+  1-24-server-setup-mode-与-web-安装向导后端-含-setup-token: backlog
+  1-25-tools-骨架-命令树-退出码-json-envelope-非交互约定: backlog
+  1-26-security-叶子包-安全解压-安全执行-脱敏-权限: backlog
+  1-27-manifest-与发行信任域①-验签-sequence-吊销-密钥轮换: backlog
+  1-28-downloader-与离线-bundle-完整校验链: backlog
+  1-29-registry-安装状态-journal-任务锁: backlog
+  1-30-resolver-依赖-版本-资源-端口求解-纯函数: backlog
+  1-31-系统与宝塔只读探测-baota-端口-依赖: backlog
+  1-32-service-包-systemd-unit-渲染-运行用户-目录-systemctl-封装: backlog
+  1-33-installer-编排-22-步安装状态机-journal-回滚-dry-run-recover: backlog
+  1-34-发行流水线与离线签名流程-待签清单-包-sbom: backlog
+  1-35-lingedge-install-server-tools-侧-server-安装-第一批终点: backlog
+  1-36-前端-workspace-基座-shared-tokens-三态-i18n-类型生成-门禁: backlog
+  1-37-安装向导-spa-go-embed: backlog
+  1-38-admin-工程与壳-登录-动态菜单-守卫-多标签-代管横幅: backlog
+  1-39-admin-系统管理页-系统设置-用户与角色-api-token-审计: backlog
+  1-40-静态前端安装器-admin-web-docs-status-console-website-static: backlog
+  1-41-backup-restore-uninstall-含主密钥指纹与加密: backlog
+  1-42-doctor-config-service-logs-status-list-完整: backlog
+  1-43-升级与回滚-update-check-升级编排-迁移决策表-rollback-update-self: backlog
+  1-44-tui-主菜单-多选安装-计划确认-进度-不可逆确认: backlog
+  1-45-epic-1-验收-全新-linux-服务器-cli-安装主控-闭环-a-的-mvp-子集-闭环-j-的-server: backlog
+  epic-1-retrospective: optional
+
+  epic-2: backlog
+  2-1-nuxt-3-官网工程脚手架-tailwind-i18n-主题-seo-骨架-ci-检查: backlog
+  2-2-全站路由与内容页框架-导航树-产品-解决方案-价格-开发者-帮助-能力声明: backlog
+  2-3-首页-13-区块与数据真实性机制: backlog
+  2-4-server-公共接口-public-stats-site-info-version: backlog
+  2-5-官网发行-运行时入口配置与-install-website-static-模式-ssr-预检: backlog
+  2-6-官网-mvp-验收-e2e-闭环-b-的-mvp-子集: backlog
+  2-7-cms-迁移与内容版本内核-website_-表-状态机-不可变版本: backlog
+  2-8-区块-schema-pkg-cmsblocks-与富文本净化: backlog
+  2-9-cms-内容-api-i-页面-banner-草稿-发布-定时-版本-回滚-预览链接: backlog
+  2-10-cms-内容-api-ii-产品-解决方案-文章-faq-分类-导航-设置: backlog
+  2-11-媒体资源模块-上传安全-引用-删除保护: backlog
+  2-12-seo-管理-多语言内容与套餐展示-读取正式-plans: backlog
+  2-13-public-cms-读取接口-预览令牌与-revalidate-hmac: backlog
+  2-14-官网-ssr-形态-nuxt-nitro-node-server-systemd-node-js-依赖声明: backlog
+  2-15-admin-官网运营-前端-15-个菜单-首页装修编辑器: backlog
+  2-16-官网内容驱动改造-public-cms-消费-新闻-博客-套餐区块: backlog
+  2-17-cms-prerender-静态降级模式-poc-可选: backlog
+  2-18-cms-验收-闭环-i-与-epic-2-验收: backlog
+  epic-2-retrospective: optional
+
+  epic-3: backlog
+  3-1-pkg-edgeconfig-值校验器-规则-ir-canonical-json-注入向量集-冻结点-cf-4: backlog
+  3-2-pkg-ssrf-连接时校验的出站守卫: backlog
+  3-3-站点聚合根-website-模块-站点-域名-分组-站点设置: backlog
+  3-4-源站模块-源站组-源站-回源配置-健康检查配置: backlog
+  3-5-规则模块-server-统一规则-crud-校验-版本-回滚-命中统计: backlog
+  3-6-缓存策略模块-策略-cache-key-维度-ttl-档位-危险开关: backlog
+  3-7-站点网络设置-真实-ip-传递-入站可信代理-出口-ip-清单-约束元数据: backlog
+  3-8-证书模块-手动上传-解析-加密存储-站点授权-部署记录: backlog
+  3-9-集群与节点模块-节点-集群-成员-站点绑定-维护-含多集群约束: backlog
+  3-10-ca-签发-吊销与配置签名-keyset-链式轮换: backlog
+  3-11-配置汇编与修订构建器-configcontributor-内容寻址块-签名: backlog
+  3-12-部署编排-灰度-目标状态机-回滚即新修订-n-m-生效汇总: backlog
+  3-13-grpc-骨架-proto-代码生成-双监听-拦截器-冻结点-cf-3: backlog
+  3-14-enroll-与节点注册-api-一次性-token-原子消费-续期: backlog
+  3-15-nodecontrol-heartbeat-在线状态-离线判定-节点事件: backlog
+  3-16-revisionservice-fetchrevision-reportapply-fetchcertificate-g: backlog
+  3-17-taskservice-与缓存失效任务-url-整站: backlog
+  3-18-telemetryservice-与服务端日志-指标-logsink-logquery-rollup-对账: backlog
+  3-19-agent-骨架-identity-enroll-客户端-心跳-state-json-l1: backlog
+  3-20-agent-渲染器-固定模板-类型化渲染-golden-注入向量: backlog
+  3-21-agent-修订管理器-验签-渲染-t-切换-reload-健康检查-回退: backlog
+  3-22-openresty-运行环境组件与-l3-l5-测试基座-含-make-edge-test-分级: backlog
+  3-23-poc-1-poc-3-缓存-ttl-档位-url-版本标记验证: backlog
+  3-24-poc-2-4-5-balancer-runtime-plane-lua-引擎开销-正则语义差分: backlog
+  3-25-lua-引擎核心-13-阶段-条件求值-real_ip-出站-header-覆盖: backlog
+  3-26-规则执行器-m1-子集-与命中统计: backlog
+  3-27-缓存数据面-缓存键-保守可缓存判定-缓存锁-range-磁盘限额-失效: backlog
+  3-28-回源与健康-balancer-主备-源站健康检查-源站信息不泄露: backlog
+  3-29-数据面协议能力-http-2-websocket-sse-自定义端口-sni-与证书热加载: backlog
+  3-30-访问日志与-rollup-管线-agent-侧-写盘-轮转-断点续传-限盘: backlog
+  3-31-节点自治与自愈-离线继续服务-重启恢复-热重载无中断-进程拉起: backlog
+  3-32-debug_request-任务-真实-ip-调试: backlog
+  3-33-tools-install-node-与-node-enroll-含宝塔冲突: backlog
+  3-34-节点升级路径-agent-staging-systemd-path-tools-受限入口-回滚: backlog
+  3-35-admin-网站管理-列表-创建向导-基本设置-域名-源站-分组-批量: backlog
+  3-36-admin-缓存管理与-ssl-tls-证书上传-页面: backlog
+  3-37-admin-网络设置-真实-ip-传递-入站可信代理-调试视图: backlog
+  3-38-admin-规则编辑器与发布-回滚-部署记录: backlog
+  3-39-admin-节点管理页面: backlog
+  3-40-admin-工作台-监控统计-访问日志-自动化运维: backlog
+  3-41-多租户隔离矩阵-m1-完整版-配置注入-ssrf-伪造头全量门禁: backlog
+  3-42-性能基线报告-nfr-30: backlog
+  3-43-mvp-出口验收-闭环-c-d-e-j-mvp-子集-epic-3-验收: backlog
+  3-44-acme-http-01-san-与自动续期-lego: backlog
+  3-45-缓存预热-cache-prefetch: backlog
+  3-46-目录-通配符失效-poc-8-与实现: backlog
+  3-47-页面规则-配置模板与批量操作: backlog
+  3-48-数据保留策略与清理任务-retention-cleanup: backlog
+  3-49-通知渠道-telegram-smtp-webhook-含-ssrf-防护: backlog
+  3-50-告警规则-去重与恢复通知-含证书到期-节点离线-部署失败: backlog
+  3-51-发布编排队列-publish_queue-集群串行-已确认基线-毒块隔离-离线追平: backlog
+  3-52-节点级回滚与-held_seq-node_rollback-action_hold: backlog
+  epic-3-retrospective: optional
+
+  epic-4: backlog
+  4-1-geoip-asn-数据源接入与规则条件启用: backlog
+  4-2-p3-契约-dns-调度-探测表-proto-dns-v1-reporter-v1-与-openapi-冻结-cf-7: backlog
+  4-3-dns-provider-接口与-cloudflare-实现: backlog
+  4-4-阿里云-dns-与-dnspod-provider-实现: backlog
+  4-5-dns-同步任务-dns-sync-重试-审计-告警: backlog
+  4-6-zone-记录管理-api-与记录类型校验: backlog
+  4-7-lingedge-dns-权威服务-miekg-dns-快照拉取-多-ns-一致: backlog
+  4-8-智能线路-geodns-运营商线路-权重应答: backlog
+  4-9-dns-防滥用与冗余-响应限速-any-策略-单-ns-doctor-告警: backlog
+  4-10-tools-install-dns-udp-tcp-53-冲突检测-与升级: backlog
+  4-11-reporter-http-https-tcp-tls-dns-探测与失败原因分类-linux: backlog
+  4-12-reporter-windows-amd64-构建与服务安装-t-1: backlog
+  4-13-reporter-上报与-probe_results-入库-区域查询: backlog
+  4-14-调度引擎-策略-节点池-选路因子-维护-备用节点池: backlog
+  4-15-防抖-联合判定-恢复-hold-down-fail-static-调度日志与告警: backlog
+  4-16-dns-01-与泛域名证书-经-provider: backlog
+  4-17-scheduler-worker-独立二进制与-tools-安装: backlog
+  4-18-统计页-报表导出与地域-运营商分析: backlog
+  4-19-admin-dns-管理-智能调度-地域-线路-ip-池页面: backlog
+  4-20-p3-阶段出口-闭环-f-验收与闭环-c-完整验收: backlog
+  epic-4-retrospective: optional
+
+  epic-5: backlog
+  5-1-p4-契约与数据模型-waf-ip-列表-安全事件-l4-表-openapi-修订块类型-cf-8: backlog
+  5-2-waf-检测引擎与托管规则-sqli-xss-路径遍历-自定义规则-动作: backlog
+  5-3-访问限制-ip-黑白名单-asn-国家地区-ua-referer-防盗链: backlog
+  5-4-bot-防护: backlog
+  5-5-cc-限速引擎-本地共享内存-临时封禁-近似全局-redis-不在请求路径: backlog
+  5-6-挑战-观察模式与规则例外-js-challenge-captcha-接口: backlog
+  5-7-安全事件管线-攻击日志与误拦截分析-一键例外: backlog
+  5-8-waf-误拦截测试集与测量-g-13: backlog
+  5-9-l4-代理架构与配置模型-先补-adr-再实现-stream-渲染: backlog
+  5-10-tcp-应用-监听-后端组-tcp-健康检查-连接数限制: backlog
+  5-11-udp-应用-监听-后端组-udp-独立健康检查语义: backlog
+  5-12-l4-通用控制-源-ip-访问控制-proxy-protocol-连接日志-流量统计: backlog
+  5-13-admin-安全中心与四层代理页面: backlog
+  5-14-安全边界声明落地与评审清单-官网-docs-console-三处: backlog
+  5-15-p4-阶段出口-闭环-g-验收: backlog
+  epic-5-retrospective: optional
+
+  epic-6: backlog
+  6-1-计费数据模型-pkg-money-与金额静态规则-cf-9: backlog
+  6-2-产品-套餐-定价规则-订阅-订单与配额开通: backlog
+  6-3-钱包与余额-只写流水-并发扣费-余额不足告警: backlog
+  6-4-用量计量-rollup-usage_records-幂等派生: backlog
+  6-5-账单生成-可重算对账与关闭后冲销: backlog
+  6-6-支付接口-回调验签-幂等入账-手工入账-对账差异: backlog
+  6-7-代理商-归属-隔离与分成接口占位: backlog
+  6-8-工单与站内消息: backlog
+  6-9-租户注册-团队成员-邀请-配额强制: backlog
+  6-10-console-工程-壳与-realm-隔离: backlog
+  6-11-console-功能页-站点-域名-源站-缓存-规则-真实-ip-ssl-waf-dns-四层-日志-财务-工单-tok: backlog
+  6-12-插件体系-provider-接口-插件配置-凭据加密-插件中心: backlog
+  6-13-docs-站-产品文档-api-文档-openapi-同源-接入指南-更新日志-退出码表-已知限制-install-do: backlog
+  6-14-status-站-真实监控驱动的状态页与历史事件: backlog
+  6-15-tools-全组件安装收尾-console-website-ssr-dns-reporter-scheduler-wor: backlog
+  6-16-官网商业联动-套餐价格读取-plans-注册-console-入口-商业模式运行时配置: backlog
+  6-17-域名所有权校验-f-1-商业模式强制: backlog
+  6-18-全组件备份恢复与升级回滚演练-nfr-18: backlog
+  6-19-安全审计-全量安全测试-威胁模型复核-供应链与密钥演练: backlog
+  6-20-全量性能测试与基线更新-p3-p4-p5-增量: backlog
+  6-21-生产部署手册与两种部署方式验证-宝塔-systemd-原生-nginx-systemd: backlog
+  6-22-闭环-h-验收与闭环-a-b-完整验收-epic-6-验收: backlog
+  6-23-p6-高级能力轨道-http-3-技术验证-quic-实现选型与功能等价测试: backlog
+  6-24-p6-高级能力轨道-l2-中间缓存验证与实现: backlog
+  6-25-p6-高级能力轨道-dnssec-验证与实现: backlog
+  6-26-p6-高级能力轨道-边缘计算可行性验证-需先新增-fr: backlog
+  epic-6-retrospective: optional
+conventions:   # LingEdge 约定（以键值保存，重新生成时不会丢失）
+  waiting_env_verification: "「等待环境验证」映射（ADR-023 §C、基线 §25）：技能状态枚举没有该状态，故约定——开发与本机可执行的测试全部完成、但仍缺所需真实环境的
+    Story，development_status 停在 review，不得写成 done；其缺口、已完成的测试层与待执行步骤登记在 environment_verification（验证人/日期留空待填），全部条件满足并填写后才允许改为
+    done。"
+  ready_for_dev: "ready-for-dev 的含义：epics.md 中的 Story 条目即规格（Epic 1 的 45 个 Story 均为单会话/验收，不另建
+    story 文件）；仅把全部前置依赖已满足且环境具备的 Story 标 ready-for-dev，其余按单线顺序在前一个 done 后推进（吸收前序经验）。"
+  extension_keys: "以下顶层键为 LingEdge 扩展（conventions、readiness_gate、sprint_plan、environment_verification、sprint_prerequisites），sprint_plan.py
+    作为未知键原样保留。"
+
+readiness_gate:
+  verdict: CONCERNS   # PASS | CONCERNS | FAIL；对『整体计划』= CONCERNS（见 findings）；对『第一批 Sprint 开工』= 可开工（1.1 前置全部满足），1.24 前须先关闭 AA-7
+  checked: "11-16-2026 23:18"
+  scope: "docs/bmad/{epics,dependency-map,traceability}.md 对照 PRD、architecture/ADR(25)、database(含
+    verification/)、api(openapi 307 路径/486 operation、node-protocol)、proto(6)、ux、architecture-revision-log.md"
+  passed:
+    - "FR 122 / NFR 31 每条均有『实现』Story（机械校验 0 遗漏）；闭环 AC 71、架构反馈 18、UX 决策 27 均有落点；架构评审项
+      51 条除 L23（纯文档悬空引用）外均有 Story 落点"
+    - "176 个 Story、依赖 DAG 无环、所有依赖指向存在的 Story；epics.md ↔ dependency-map.md ↔ traceability.md
+      三文件逐边/逐需求核对 0 差异（最大波次深度 W34，MVP 出口关键路径 24 个 Story）"
+    - "AA-6（BLK-01…07 前置检查）已关闭：架构修订日志 67 项已修 66、延后 1（MIN-09）；epics 已按修订后的迁移顺序（13 文件/61
+      表）、租户发布 API、节点代布局、发布编排、lineage、升级结果文件等就地修订，并新增 3.51/3.52"
+    - "Epic 1 全部 45 个 Story 为『单会话』或『验收 Story』，AC 可测试；每个 Story 均有环境标签与『等待环境验证条件』（缺环境不得标完成）"
+    - "契约冻结点 CF-1…CF-9 均有达成 Story 与冻结内容；UD-1…UD-30 全部给出已采纳默认值与推翻影响（docs/bmad/decisions-adopted.md）"
+    - "复核中发现并纠正 8 处 epics 与修订后上游的冲突（审计同事务、`available-clusters`、调试回环源站、升级结果目录、9100→9180、doctor
+      阈值、enroll 错误码、迁移分段），见 decisions-adopted.md §4"
+  failed_or_open:   # 完成度检查未通过/未关闭项；未降低任何标准，逐条列出
+    - id: "F-1"
+      severity: HIGH
+      item: "AA-7 数据库凭据交接未定义：向导（lingedge 用户进程）无权写 root 属主的 migrate.yaml，而步骤 4 需 migrate
+        凭据执行迁移；lingedge_app/lingedge_maint 口令落点同样未记录"
+      blocks: "阻塞 1.24 AC3/AC7 的凭据持久化部分、1.35 联调、1.43 升级的迁移凭据来源；不阻塞 1.1–1.23 与 Tools
+        泳道 1.25–1.34"
+      owner: "架构代理（bmad-architecture 补充 ADR-016/tools-design §13），须在 1.24 开工前完成"
+    - id: "F-2"
+      severity: MEDIUM
+      item: "AA-8 OpenAPI TaskType（唯一事实源）未含 partition.maintain 与内部周期作业，1.14 的一致性 CI
+        范围无法界定"
+      blocks: "须在 1.3 打 contract-v1 前对齐（已写入 1.3 AC9）；不阻塞 1.1–1.2"
+      owner: "1.3 内处理"
+    - id: "F-3"
+      severity: MEDIUM
+      item: "环境缺口：当前仅本机 macOS（Go 1.27.1、MySQL 8.0.46、Redis 8.10.1；无 systemd/OpenResty/宝塔/Linux）。B1
+        内需 ENV-LNX/ENV-BT/8.0.16 实例的 Story 最多做到 review（等待环境验证）：1.6、1.9、1.24、1.26、1.28、1.29、1.31、1.32、1.33、1.34、1.35"
+      blocks: "Epic 1 验收（1.45）与 MVP 出口（3.43）在无 Linux 验收机时不可能关闭；不阻塞开发"
+      owner: "用户/运维提供验收机（UD-2）；建议 1.31/1.32 前首台 Linux，3.22 前 OpenResty 机"
+    - id: "F-4"
+      severity: MEDIUM
+      item: "Epic 级前向依赖：Epic 2 的 2.6/2.7 等依赖 Epic 3（3.15/3.3），Epic 3 的 3.43 依赖 1.45/2.6，Epic
+        4/5/6 依赖 3.43。Epic 固定为基线 §22 的 6 个，已用 DAG 文档化"
+      blocks: "Sprint 不能按 Epic 编号顺序排，须按 dependency-map.md 的波次；Epic 2 的 M1 官网部分（2.1–2.5）仅依赖
+        CF-1/1.36/平台接口，可与 Epic 1 并行"
+      owner: "排序遵循 dependency-map §4；无需修改 Epic 划分"
+    - id: "F-5"
+      severity: MEDIUM
+      item: "83/176 个 Story 规模为『需细化』（Epic 2：11；Epic 3：18，含新增 3.51；Epic 4：19；Epic 5：14；Epic
+        6：21），开工前须再拆分/补全 AC，不得直接标 ready-for-dev"
+      blocks: "不影响 Epic 1（45 个均单会话/验收）"
+      owner: "各 Story 开工前用 bmad-create-epics-and-stories/bmad-spec 细化"
+    - id: "F-6"
+      severity: MEDIUM
+      item: "后续阶段前置缺口：AA-1（缺 L4 ADR，阻塞 5.9）、AA-2（P3 proto/OpenAPI/迁移缺口，阻塞 4.2/CF-7）、AA-3（ADR-021
+        故障注入脚本）、AA-4（UX 线框缺口：4.19/5.13/6.11）、AA-5（public/plans 阶段标注，2.12）；UD-8 GeoIP/ASN
+        数据源无默认（4.1/4.8/4.18/5.3）；UD-4 OpenResty 包来源（3.22）；UD-3 真实发行签名人（真实发行验收）"
+      blocks: "均不阻塞第一批 Sprint；分别阻塞 P2/P3/P4 的对应 Story"
+      owner: "架构代理/UX 代理/用户，按各自阶段前"
+    - id: "F-7"
+      severity: LOW
+      item: "工程前置：仓库已 git init 但无任何提交（docs/、proto/ 未跟踪），contract-v1 标签需先有提交（已写入 1.1
+        AC7/1.3 AC10）；本机缺 buf/oasdiff/golangci-lint/goose（1.2/1.3/1.6 实现时安装并锁定版本）；本机
+        MySQL 为共享常驻实例且不在 PATH（/opt/homebrew/opt/mysql@8.0/bin），1.5–1.9 的账号/binlog/触发器用例必须用独立临时实例，禁止触碰既有实例与
+        SmartCDN 数据；Redis 已安装但未运行（1.10 用独立端口实例）"
+      blocks: "不阻塞 1.1；需在对应 Story 内处理"
+      owner: "执行各 Story 的 bmad-build 会话"
+    - id: "F-8"
+      severity: LOW
+      item: "项目未初始化 _bmad 配置，技能无法解析 planning/implementation artifacts 目录；按任务指示 fallback
+        到 docs/bmad/（sprint-status.yaml 与 stories 目录 docs/bmad/stories，story 文件按需创建）"
+      blocks: "无"
+      owner: "如日后初始化 _bmad，需把 story_location 与产物目录迁移到其配置"
+    - id: "F-9"
+      severity: LOW
+      item: "待环境验证的架构项仍开放（修订日志 §4）：① MySQL 8.0.16 空库迁移；② PoC-5 lua_regex_match_limit
+        在 JIT/解释下的差异；③ PoC-3 shm 容量变化时 reload 是否新建 zone；④ Agent 单元内 openresty -t 与生产一致；⑤
+        PoC-1 ngx.var.le_* 跨 ngx.exec 保留与 access 不重入"
+      blocks: "已写入 1.6/1.9/1.32/3.22/3.23/3.24/3.43 的等待环境验证条件；设计已修，验证待 Linux/OpenResty/旧版
+        MySQL"
+      owner: "3.43 验收时逐项给结论"
+    - id: "F-10"
+      severity: INFO
+      item: "sprint_plan.py 对 epics.md 报 6 条『类 Epic/Story 标题未识别』警告（概览/字段约定/状态机/DoD/FR
+        覆盖地图/Epic 列表等非 Story 标题），已接受"
+      blocks: "无"
+      owner: "—"
+
+sprint_plan:
+  sprint-1:
+    name: "Sprint 1（Epic 1 第一批 B1）：Go monorepo 脚手架 → lingedge install server（单线）"
+    status: planned   # planned | active | done
+    goal: "工程基线 + 契约冻结 CF-1/CF-2 + 平台内核 + 身份/租户/审计 + Tools 核心 + install server，使 Tools
+      能物化主控并以 setup mode 启动（向导 SPA 与 Admin 在 B2）"
+    first_story: "1-1-go-monorepo-脚手架与目录骨架"
+    first_story_prerequisites_met: true   # 1.1 无依赖；本机 Go 1.27.1 就绪；UD-1 默认模块路径已采纳；仅有『仓库尚无提交』这一待办，属 1.1 自身 AC7
+    order_rule: "单线：编号顺序即构建顺序；Tools 泳道 1.25–1.34 仅依赖 1.1–1.3，可与平台泳道 1.4–1.24 并行，汇合点
+      1.35（需 1.24）"
+    hard_gates:
+      - "1.3 打 contract-v1 前：复核修订日志验证项全绿 + 完成 AC9（AA-8）+ 1.1 已有首个提交"
+      - "1.9 完成后打 migrations-m1（CF-2）；8.0.16 空库迁移标等待环境验证"
+      - "1.24 开工前：AA-7 必须已由架构补充（凭据交接）"
+      - "1.35 真实验证需 ENV-LNX；缺则 review（等待环境验证），不得 done"
+    stories:
+      - key: "1-1-go-monorepo-脚手架与目录骨架"
+        id: "1.1"
+        depends_on: []
+        env: "本机（Go 1.27.1、macOS）"
+        waiting_env_verification: false
+      - key: "1-2-静态质量门禁集-依赖方向-测试替身-固定口令-命令注入-品牌"
+        id: "1.2"
+        depends_on: ["1.1"]
+        env: "本机"
+        waiting_env_verification: false
+      - key: "1-3-契约工具链与契约冻结点-cf-1-openapi-proto-migrations"
+        id: "1.3"
+        depends_on: ["1.1"]
+        env: "本机"
+        waiting_env_verification: false
+      - key: "1-4-platform-基础库-配置-日志脱敏-统一错误-request-id"
+        id: "1.4"
+        depends_on: ["1.1"]
+        env: "本机"
+        waiting_env_verification: false
+      - key: "1-5-db-基础设施与租户-scope-构建器"
+        id: "1.5"
+        depends_on: ["1.4"]
+        env: "本机 MySQL 8.0（8.0.46；常规用例用独立 `lingedge_test` 库与账号；账号/binlog/触发器权限类用例用独立临时
+          mysqld 实例〔独立 datadir 与端口、`--log-bin`、`log_bin_trust_function_creators=0`，用后删除〕；均不触碰已在运行的
+          MySQL 实例与 SmartCDN 数据；`mysqld` 位于 `/opt/homebrew/opt/mysql@8.0/bin`，不在 PATH
+          内）"
+        waiting_env_verification: false
+      - key: "1-6-migration-框架-goose-嵌入-分类-lint-migrate-子命令"
+        id: "1.6"
+        depends_on: ["1.4", "1.5"]
+        env: "本机 MySQL 8.0（8.0.46；权限/binlog 类用例用独立临时 mysqld 实例，同 1.5）"
+        waiting_env_verification: true
+      - key: "1-7-m1-迁移-a-身份-租户-平台核心-审计-种子-密钥-000001-000005"
+        id: "1.7"
+        depends_on: ["1.6"]
+        env: "本机 MySQL 8.0"
+        waiting_env_verification: false
+      - key: "1-8-m1-迁移-b-节点集群-站点-证书-源站-规则-缓存-000006-000011"
+        id: "1.8"
+        depends_on: ["1.7"]
+        env: "本机 MySQL 8.0"
+        waiting_env_verification: false
+      - key: "1-9-m1-迁移-c-配置修订-发布队列-部署-观测-000012-000013-与契约冻结点-cf-2"
+        id: "1.9"
+        depends_on: ["1.8"]
+        env: "本机 MySQL 8.0"
+        waiting_env_verification: true
+      - key: "1-10-redis-边界封装与降级-adr-025"
+        id: "1.10"
+        depends_on: ["1.4"]
+        env: "本机 Redis 8.x（独立端口实例，用于故障注入）"
+        waiting_env_verification: false
+      - key: "1-11-密钥基础库-secretbox-keyprovider-主密钥"
+        id: "1.11"
+        depends_on: ["1.4"]
+        env: "本机"
+        waiting_env_verification: false
+      - key: "1-12-http-服务骨架-路由元数据-统一响应-幂等-健康检查"
+        id: "1.12"
+        depends_on: ["1.3", "1.4", "1.7", "1.10"]
+        env: "本机 MySQL + Redis"
+        waiting_env_verification: false
+      - key: "1-13-lingedge-server-进程装配-roles-子命令-sd_notify"
+        id: "1.13"
+        depends_on: ["1.12"]
+        env: "本机"
+        waiting_env_verification: false
+      - key: "1-14-任务运行时-tasks-队列-租约-围栏-白名单任务类型"
+        id: "1.14"
+        depends_on: ["1.7", "1.12"]
+        env: "本机 MySQL（+ Redis 唤醒）"
+        waiting_env_verification: false
+      - key: "1-15-scheduler-角色与内部周期任务"
+        id: "1.15"
+        depends_on: ["1.14"]
+        env: "本机 MySQL"
+        waiting_env_verification: false
+      - key: "1-16-认证-i-登录-会话-csrf-登录节流-登录日志"
+        id: "1.16"
+        depends_on: ["1.7", "1.10", "1.12"]
+        env: "本机 MySQL + Redis"
+        waiting_env_verification: false
+      - key: "1-17-认证-ii-totp-恢复码-近期-mfa"
+        id: "1.17"
+        depends_on: ["1.11", "1.16"]
+        env: "本机 MySQL + Redis"
+        waiting_env_verification: false
+      - key: "1-18-rbac-权限串-角色-用户管理-api"
+        id: "1.18"
+        depends_on: ["1.16"]
+        env: "本机 MySQL + Redis"
+        waiting_env_verification: false
+      - key: "1-19-api-token-作用域-吊销-轮换"
+        id: "1.19"
+        depends_on: ["1.17", "1.18"]
+        env: "本机 MySQL + Redis"
+        waiting_env_verification: false
+      - key: "1-20-租户模块-scope-中间件与隔离测试框架"
+        id: "1.20"
+        depends_on: ["1.5", "1.18"]
+        env: "本机 MySQL"
+        waiting_env_verification: false
+      - key: "1-21-审计模块与审计-登录日志-api"
+        id: "1.21"
+        depends_on: ["1.12", "1.15", "1.20"]
+        env: "本机 MySQL"
+        waiting_env_verification: false
+      - key: "1-22-系统设置-运行模式开关与能力注册表"
+        id: "1.22"
+        depends_on: ["1.18", "1.21"]
+        env: "本机 MySQL + Redis"
+        waiting_env_verification: false
+      - key: "1-23-签名与-ca-密钥初始化-信任域②③"
+        id: "1.23"
+        depends_on: ["1.7", "1.11"]
+        env: "本机 MySQL"
+        waiting_env_verification: false
+      - key: "1-24-server-setup-mode-与-web-安装向导后端-含-setup-token"
+        id: "1.24"
+        depends_on: ["1.13", "1.20", "1.22", "1.23"]
+        env: "本机 MySQL + Redis；宝塔 MySQL 场景需 ENV-BT"
+        waiting_env_verification: true
+      - key: "1-25-tools-骨架-命令树-退出码-json-envelope-非交互约定"
+        id: "1.25"
+        depends_on: ["1.1", "1.2"]
+        env: "本机（Go）"
+        waiting_env_verification: false
+      - key: "1-26-security-叶子包-安全解压-安全执行-脱敏-权限"
+        id: "1.26"
+        depends_on: ["1.25"]
+        env: "本机；Linux 专属行为（O_NOFOLLOW/权限）需 ENV-LNX"
+        waiting_env_verification: true
+      - key: "1-27-manifest-与发行信任域①-验签-sequence-吊销-密钥轮换"
+        id: "1.27"
+        depends_on: ["1.26"]
+        env: "本机"
+        waiting_env_verification: false
+      - key: "1-28-downloader-与离线-bundle-完整校验链"
+        id: "1.28"
+        depends_on: ["1.26", "1.27"]
+        env: "本机（测试内 HTTPS 清单服务器，限 testdouble）"
+        waiting_env_verification: true
+      - key: "1-29-registry-安装状态-journal-任务锁"
+        id: "1.29"
+        depends_on: ["1.25", "1.26"]
+        env: "本机（macOS 支持 flock）；`/proc` 相关与 root 目录布局需 ENV-LNX"
+        waiting_env_verification: true
+      - key: "1-30-resolver-依赖-版本-资源-端口求解-纯函数"
+        id: "1.30"
+        depends_on: ["1.27", "1.29"]
+        env: "本机"
+        waiting_env_verification: false
+      - key: "1-31-系统与宝塔只读探测-baota-端口-依赖"
+        id: "1.31"
+        depends_on: ["1.26", "1.29"]
+        env: "ENV-LNX、ENV-BT（含宝塔面板的 Linux 机）"
+        waiting_env_verification: true
+      - key: "1-32-service-包-systemd-unit-渲染-运行用户-目录-systemctl-封装"
+        id: "1.32"
+        depends_on: ["1.26", "1.29"]
+        env: "ENV-LNX（systemd）"
+        waiting_env_verification: true
+      - key: "1-33-installer-编排-22-步安装状态机-journal-回滚-dry-run-recover"
+        id: "1.33"
+        depends_on: ["1.28", "1.29", "1.30", "1.31", "1.32"]
+        env: "本机（fake 组件，限 testdouble）；真实安装见 1.35/1.45"
+        waiting_env_verification: true
+      - key: "1-34-发行流水线与离线签名流程-待签清单-包-sbom"
+        id: "1.34"
+        depends_on: ["1.9", "1.27", "1.28"]
+        env: "本机；真实离线签名需 UD-3（签名人/硬件密钥）"
+        waiting_env_verification: true
+      - key: "1-35-lingedge-install-server-tools-侧-server-安装-第一批终点"
+        id: "1.35"
+        depends_on: ["1.24", "1.33", "1.34"]
+        env: "ENV-LNX（全新 Debian/Ubuntu LTS 与 RHEL 系各一，D-14）、本机 MySQL/Redis"
+        waiting_env_verification: true
+  sprint-2:
+    name: "Sprint 2（Epic 1 第二批 B2）：前端基座 → 向导 SPA → Admin → 静态前端安装 → 备份/升级/TUI → Epic
+      1 验收"
+    status: backlog
+    note: "仅占位，待 Sprint 1 的 1.24/1.33/1.34/1.35 完成后再细排；1.36 仅依赖 1.1/1.3，可提前与 Sprint
+      1 并行"
+    order: ["1-36-前端-workspace-基座-shared-tokens-三态-i18n-类型生成-门禁", "1-37-安装向导-spa-go-embed",
+      "1-38-admin-工程与壳-登录-动态菜单-守卫-多标签-代管横幅", "1-39-admin-系统管理页-系统设置-用户与角色-api-token-审计",
+      "1-40-静态前端安装器-admin-web-docs-status-console-website-static", "1-41-backup-restore-uninstall-含主密钥指纹与加密",
+      "1-42-doctor-config-service-logs-status-list-完整", "1-43-升级与回滚-update-check-升级编排-迁移决策表-rollback-update-self",
+      "1-44-tui-主菜单-多选安装-计划确认-进度-不可逆确认", "1-45-epic-1-验收-全新-linux-服务器-cli-安装主控-闭环-a-的-mvp-子集-闭环-j-的-server"]
+
+environment_verification:   # 『等待环境验证』登记（验证人/日期留空待填；status: not_started|partial|verified）
+  1-6-migration-框架-goose-嵌入-分类-lint-migrate-子命令:
+    status: not_started
+    required_env: "本机 MySQL 8.0（8.0.46；权限/binlog 类用例用独立临时 mysqld 实例，同 1.5）"
+    condition: "8.0.16 最低版本空库全量迁移（修订日志 §4 ①）待 CI/验收机；本机 8.0.46 通过不得代替该项。"
+    verified_by: ""
+    verified_on: ""
+  1-9-m1-迁移-c-配置修订-发布队列-部署-观测-000012-000013-与契约冻结点-cf-2:
+    status: not_started
+    required_env: "本机 MySQL 8.0"
+    condition: "8.0.16 最低版本空库全量迁移（修订日志 §4 ①）待 CI/验收机。"
+    verified_by: ""
+    verified_on: ""
+  1-24-server-setup-mode-与-web-安装向导后端-含-setup-token:
+    status: not_started
+    required_env: "本机 MySQL + Redis；宝塔 MySQL 场景需 ENV-BT"
+    condition: "本机真实 MySQL/Redis 路径完成即可验证主体；宝塔 MySQL 专用库创建场景待 ENV-BT。"
+    verified_by: ""
+    verified_on: ""
+  1-26-security-叶子包-安全解压-安全执行-脱敏-权限:
+    status: not_started
+    required_env: "本机；Linux 专属行为（O_NOFOLLOW/权限）需 ENV-LNX"
+    condition: "纯 Go 逻辑与向量测试本机完成；Linux 文件系统语义（符号链接、权限位）在 ENV-LNX 复验前标「等待环境验证」。"
+    verified_by: ""
+    verified_on: ""
+  1-28-downloader-与离线-bundle-完整校验链:
+    status: not_started
+    required_env: "本机（测试内 HTTPS 清单服务器，限 testdouble）"
+    condition: "针对真实发行源的下载待 UD-3；本 Story 的「通过」仅代表校验链逻辑正确。"
+    verified_by: ""
+    verified_on: ""
+  1-29-registry-安装状态-journal-任务锁:
+    status: not_started
+    required_env: "本机（macOS 支持 flock）；`/proc` 相关与 root 目录布局需 ENV-LNX"
+    condition: "逻辑与故障注入本机完成；真实 `/var/lib/lingedge` root 目录与 `kill -9` 系统级恢复在 ENV-LNX
+      验证。"
+    verified_by: ""
+    verified_on: ""
+  1-31-系统与宝塔只读探测-baota-端口-依赖:
+    status: not_started
+    required_env: "ENV-LNX、ENV-BT（含宝塔面板的 Linux 机）"
+    condition: "解析器与输出模型用真实命令输出样本（`tests/fixtures`）本机完成；真实宝塔/端口探测在 ENV-LNX/ENV-BT
+      验证前标「等待环境验证」。"
+    verified_by: ""
+    verified_on: ""
+  1-32-service-包-systemd-unit-渲染-运行用户-目录-systemctl-封装:
+    status: not_started
+    required_env: "ENV-LNX（systemd）"
+    condition: "模板渲染与 `ValidateUnitValue` 本机完成；`systemd-analyze verify`、真实 `systemctl`
+      与 `LoadCredential` 最低版本在 ENV-LNX 验证前标「等待环境验证」。"
+    verified_by: ""
+    verified_on: ""
+  1-33-installer-编排-22-步安装状态机-journal-回滚-dry-run-recover:
+    status: not_started
+    required_env: "本机（fake 组件，限 testdouble）；真实安装见 1.35/1.45"
+    condition: "编排逻辑本机以 fake 组件完成；真实 Linux 安装验证标「等待环境验证」，不得因 fake 组件通过而标完成。"
+    verified_by: ""
+    verified_on: ""
+  1-34-发行流水线与离线签名流程-待签清单-包-sbom:
+    status: not_started
+    required_env: "本机；真实离线签名需 UD-3（签名人/硬件密钥）"
+    condition: "流水线与测试签名闭环本机完成；真实发行密钥签名与公开发行源待 UD-3。"
+    verified_by: ""
+    verified_on: ""
+  1-35-lingedge-install-server-tools-侧-server-安装-第一批终点:
+    status: not_started
+    required_env: "ENV-LNX（全新 Debian/Ubuntu LTS 与 RHEL 系各一，D-14）、本机 MySQL/Redis"
+    condition: "Plan/渲染/dry-run/fake 路径本机完成；真实 systemd 安装、LoadCredential、端口占用在 ENV-LNX
+      验证前标「等待环境验证」（汇总于 1.45）。"
+    verified_by: ""
+    verified_on: ""
+
+sprint_prerequisites:   # 开工前/开工中需就位的工程前置（均不阻塞 1.1）
+  - "git：仓库已初始化但无提交；1.1 形成首个提交（含 docs/、proto/）"
+  - "Go 1.27.1（已具备）、Node 26.8/pnpm（已具备，B2 前端使用）、uv（已具备）"
+  - "MySQL 8.0.46：本机常驻实例（勿触碰）；1.5–1.9 用独立临时 mysqld（/opt/homebrew/opt/mysql@8.0/bin/mysqld，独立
+    datadir/端口，--log-bin 且 log_bin_trust_function_creators=0）"
+  - "Redis 8.10.1 已安装未运行：1.10/1.12/1.16 起使用独立端口实例"
+  - "待安装并锁定版本：buf、oasdiff、golangci-lint（含 depguard/forbidigo）、goose v3（库形式嵌入）、protoc-gen-go/-grpc（已有
+    protoc）"
+  - "Linux 验收机（ENV-LNX/ENV-BT/ARM）：1.31/1.32/1.35 的真实验证与 1.45 验收前就位；OpenResty 机在 3.22
+    前就位"

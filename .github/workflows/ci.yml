@@ -1,0 +1,30 @@
+# 合并门禁（Story 1.2）：违规代码无法合并。本地等价命令：make verify-gates && make test && make race。
+# 注意：本工作流尚未在远端 CI 实际运行过（仓库尚无提交/远端），首次运行结果以实际为准。
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  merge_group:
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27.1"
+      - name: 构建（含交叉编译矩阵）
+        run: make build verify-build
+      - name: 静态门禁（lint：依赖方向 / 禁 exec 拼接；security：口令 / 测试替身 / 品牌）
+        run: make lint security
+      - name: 门禁自测（正向通过 + 负向必败）
+        run: make gate-selftest
+      - name: 单元测试与竞态
+        run: make test race

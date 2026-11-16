@@ -1,0 +1,12 @@
+# 固定假数据标记（G-11、NFR-1、ADR-023 §A.2）：这些字面量不得出现在生产源码/配置/迁移/生产构建产物中。
+# 一行一个，不区分大小写的子串匹配；# 开头为注释。新增标记须说明来源。
+FAKE_DATA
+MOCK_DATA
+fake-node-
+mock-node-
+sample-node-
+demo-node-
+example-node-
+fake-traffic
+mock-traffic
+lorem ipsum

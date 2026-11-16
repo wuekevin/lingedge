@@ -1,0 +1,256 @@
+// LingEdge Node 协议 · 遥测（访问日志、rollup、源站健康、事件）
+// 监听：Server :9443（mTLS）
+// 阶段：M1
+//
+// 所有上报均为「至少一次投递 + 服务端幂等去重」。节点本地 spool 限盘，主控离线时缓冲，恢复后补传（FR-57、FR-114）。
+syntax = "proto3";
+
+package lingedge.node.v1;
+
+import "google/protobuf/timestamp.proto";
+import "lingedge/node/v1/common.proto";
+
+option go_package = "github.com/wuekevin/lingedge/proto/lingedge/node/v1;nodev1";
+
+// TelemetryService 认证主体：ROLE_NODE（Reporter 的探测结果走 P3 的独立服务，不在此）。
+service TelemetryService {
+  // UploadAccessLogs 客户端流：Agent 在一个流内连续发送多个批次，流结束后返回逐批结果。
+  // 去重键 = (node_uid[来自证书], segment_seq, start_offset, end_offset)。
+  // Agent 应限制单流的批次数/字节数（默认值待基线测试），以缩小失败后的重传范围。
+  rpc UploadAccessLogs(stream LogBatch) returns (UploadLogsSummary);
+
+  // GetLogCheckpoint 查询某日志段已连续落盘的偏移，用于 Agent 本地状态丢失后的断点恢复。
+  rpc GetLogCheckpoint(GetLogCheckpointRequest) returns (GetLogCheckpointResponse);
+
+  // ReportRollups 上报 1 分钟（可配）窗口 rollup（同一份 rollup 供图表、告警、计量复用，ADR-008/010）。
+  rpc ReportRollups(ReportRollupsRequest) returns (ReportRollupsResponse);
+
+  // ReportOriginHealth 上报节点对源站的主动健康检查结果（写 origin_health）。
+  rpc ReportOriginHealth(ReportOriginHealthRequest) returns (ReportOriginHealthResponse);
+
+  // ReportEvents 上报节点事件（OpenResty 崩溃重启、磁盘限额触发、时钟偏差、回滚等），event_uid 去重。
+  rpc ReportEvents(ReportEventsRequest) returns (ReportEventsResponse);
+}
+
+// ---------- 访问日志 ----------
+
+message LogBatch {
+  string segment_id = 1;           // 日志段文件标识（展示/排障用，如 "access-000123.jsonl"）
+  uint64 segment_seq = 2;          // 节点内单调递增的日志段序号（Agent 在 rotate 时分配）
+  uint64 start_offset = 3;         // 本批在段内的起始字节偏移（未压缩）
+  uint64 end_offset = 4;           // 结束偏移（开区间）；批边界必须落在行边界
+  enum Compression {
+    COMPRESSION_UNSPECIFIED = 0;
+    COMPRESSION_NONE = 1;
+    COMPRESSION_ZSTD = 2;
+  }
+  Compression compression = 5;
+  // JSON Lines（可 zstd 压缩）。Server 入库前对每行 site_uid 强校验：须匹配 ULID 正则 ^[0-9A-HJKMNP-TV-Z]{26}$，
+  // 否则整批 REJECTED_INVALID；合法但不属于该节点所在集群当前绑定的站点 → 归入 _unattributed（site_id=0）。
+  bytes payload = 6;
+  uint64 uncompressed_size = 7;    // 必须等于 end_offset - start_offset
+  uint32 line_count = 8;
+  Digest content_digest = 9;       // 未压缩 JSONL 的 sha256
+  google.protobuf.Timestamp first_event_time = 10;
+  google.protobuf.Timestamp last_event_time = 11;
+  bool segment_complete = 12;      // 本批为该段最后一批（段已 rotate 并读完）
+  uint32 log_format_version = 13;  // JSONL 字段集版本，当前 1（字段见 docs/architecture ADR-008）
+}
+
+message LogBatchKey {
+  uint64 segment_seq = 1;
+  uint64 start_offset = 2;
+  uint64 end_offset = 3;
+}
+
+message LogBatchResult {
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    STATUS_ACCEPTED = 1;
+    STATUS_DUPLICATE = 2;           // 已接收过完全相同的键：视为成功
+    STATUS_REJECTED_INVALID = 3;    // 哈希/行数/大小不符、格式非法：不要重发同样内容
+    STATUS_REJECTED_OVERLAP = 4;    // 与已接收范围部分重叠：按 committed_offset 重新切批
+    STATUS_REJECTED_GAP = 5;        // 与已提交偏移之间有空洞（可选严格模式）
+    STATUS_REJECTED_QUOTA = 6;      // 服务端磁盘/配额限制：稍后重试
+  }
+  LogBatchKey key = 1;
+  Status status = 2;
+  uint64 committed_offset = 3;      // 该段服务端已连续提交到的偏移
+  ErrorDetail error = 4;
+}
+
+message UploadLogsSummary {
+  repeated LogBatchResult results = 1;
+  uint64 accepted_lines = 2;
+}
+
+message GetLogCheckpointRequest {
+  uint64 segment_seq = 1;
+}
+
+message GetLogCheckpointResponse {
+  uint64 committed_offset = 1;      // 未见过该段则为 0
+  bool segment_complete = 2;
+}
+
+// ---------- Rollup ----------
+
+// RollupMetrics 一个窗口×维度内的计数。全部为整数；不含任何金额。
+message RollupMetrics {
+  uint64 requests = 1;
+  uint64 bytes_out = 2;             // 返回客户端字节（`$bytes_sent`；计费口径由 billing 规则选择，见 ADR-010）
+  uint64 bytes_in = 3;              // 客户端请求字节（`$request_length`）
+  uint64 status_1xx = 4;
+  uint64 status_2xx = 5;
+  uint64 status_3xx = 6;
+  uint64 status_4xx = 7;
+  uint64 status_5xx = 8;
+  uint64 cache_hit = 9;
+  uint64 cache_miss = 10;
+  uint64 cache_expired = 11;
+  uint64 cache_stale = 12;
+  uint64 cache_bypass = 13;
+  uint64 cache_revalidated = 14;
+  uint64 cache_updating = 15;
+  uint64 cache_none = 16;           // 无缓存状态（未走缓存路径）
+  uint64 origin_requests = 17;
+  uint64 origin_bytes_in = 18;      // 回源下行字节
+  uint64 origin_latency_ms_sum = 19;
+  uint64 origin_latency_count = 20;
+  // 请求耗时直方图：桶上界（毫秒）固定为 bounds_version 对应的序列，最后一桶为 +Inf。
+  // bounds_version=1：{5,10,25,50,100,250,500,1000,2500,5000,10000,+Inf}（12 桶）。[ASSUMPTION] 实现前按基线测试调整。
+  uint32 latency_bounds_version = 21;
+  repeated uint64 request_time_buckets = 22;
+  // 规则命中统计（FR-67）：rule_uid → 命中次数；基数受限（服务端对超限窗口丢弃并记事件）。
+  map<string, uint64> rule_hits = 23;
+  uint64 websocket_upgrades = 24;
+  // ---- v1 新增（向后兼容）----
+  // TTFB 毫秒总和（平均值 = ttfb_ms_sum / requests，查询时计算）。
+  uint64 ttfb_ms_sum = 25;
+  // 窗口内按 **1 秒分桶**（日志 ts 秒级 + bytes_sent）的峰值出站带宽，单位 bps；聚合方式 **max**（非加总类，
+  // 1m→5m→1h→1d 下采样取 max）。DB metric 名 `bandwidth_peak_bps`（ADR-010 旧名 peak_bandwidth_bps 作废）。
+  uint64 bandwidth_peak_bps = 26;
+}
+
+// Rollup 一个 (node, site, window) 的聚合。幂等键 = (node_uid[证书], site_uid, window_start, window_seconds)。
+message Rollup {
+  string site_uid = 1;              // 为空表示节点级汇总（包含未匹配任何站点的请求）
+  google.protobuf.Timestamp window_start = 2;  // 窗口起点，必须对齐 window_seconds 的整数倍（确定性窗口 id）
+  uint32 window_seconds = 3;        // M1 固定 60
+  // 同一窗口的修订代数：窗口迟到日志导致更正时 +1。服务端规则：
+  //  - generation 更大 → 覆盖（计量以最高 generation 为准）；
+  //  - 相同且内容一致 → DUPLICATE；相同但内容不同 → CONFLICT（保留首次并记事件，**不静默覆盖**）。
+  // 数据库承载：rollup_windows（UNIQUE(node_id, site_id, window_start, window_seconds)，存 generation 与 content_sha256）
+  // 与 metric_rollups.generation；metric 对应表见 node-protocol §11。
+  uint32 generation = 4;
+  RollupMetrics metrics = 5;
+  // 溯源：该窗口所依据的日志段范围，便于对账（计量可追溯到来源）。
+  repeated LogBatchKey sources = 6;
+}
+
+message ReportRollupsRequest {
+  repeated Rollup rollups = 1;      // 单次数量受限
+}
+
+message RollupResult {
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    STATUS_ACCEPTED = 1;
+    STATUS_DUPLICATE = 2;
+    STATUS_REPLACED = 3;            // 更高 generation 覆盖
+    STATUS_CONFLICT = 4;
+    STATUS_REJECTED_INVALID = 5;    // 窗口未对齐/站点不属于本节点所在集群等
+  }
+  string site_uid = 1;
+  google.protobuf.Timestamp window_start = 2;
+  uint32 window_seconds = 3;
+  Status status = 4;
+}
+
+message ReportRollupsResponse {
+  repeated RollupResult results = 1;
+}
+
+// ---------- 源站健康 ----------
+
+message OriginHealthSample {
+  string origin_uid = 1;
+  string site_uid = 2;
+  google.protobuf.Timestamp checked_at = 3;
+  enum State {
+    STATE_UNSPECIFIED = 0;
+    STATE_UP = 1;
+    STATE_DOWN = 2;
+    STATE_UNKNOWN = 3;
+  }
+  State state = 4;
+  string check_protocol = 5;        // "http" | "https" | "tcp"
+  uint32 latency_ms = 6;
+  uint32 http_status = 7;           // 0=不适用
+  enum FailureReason {
+    FAILURE_REASON_UNSPECIFIED = 0;
+    FAILURE_REASON_NONE = 1;
+    FAILURE_REASON_TIMEOUT = 2;
+    FAILURE_REASON_CONNECTION_REFUSED = 3;
+    FAILURE_REASON_TLS_ERROR = 4;
+    FAILURE_REASON_DNS_ERROR = 5;
+    FAILURE_REASON_HTTP_STATUS = 6;
+    FAILURE_REASON_SSRF_BLOCKED = 7;  // 解析结果落在禁止地址段（NFR-10）
+    FAILURE_REASON_OTHER = 8;
+  }
+  FailureReason failure_reason = 8;
+  repeated string resolved_ips = 9;
+  uint32 consecutive_failures = 10;
+  uint32 consecutive_successes = 11;
+}
+
+message ReportOriginHealthRequest {
+  repeated OriginHealthSample samples = 1;
+}
+
+message ReportOriginHealthResponse {
+  bool acknowledged = 1;
+}
+
+// ---------- 节点事件 ----------
+
+enum NodeEventType {
+  NODE_EVENT_TYPE_UNSPECIFIED = 0;
+  NODE_EVENT_TYPE_AGENT_STARTED = 1;
+  NODE_EVENT_TYPE_OPENRESTY_RESTARTED = 2;   // 被 systemd 拉起
+  NODE_EVENT_TYPE_OPENRESTY_CRASHED = 3;
+  NODE_EVENT_TYPE_CONFIG_ROLLED_BACK = 4;
+  NODE_EVENT_TYPE_DISK_LIMIT_REACHED = 5;    // 缓存/日志磁盘限额触发
+  NODE_EVENT_TYPE_LOG_SPOOL_OVERFLOW = 6;    // spool 超限，已丢弃最旧段（须记录丢弃范围）
+  NODE_EVENT_TYPE_CLOCK_SKEW = 7;
+  NODE_EVENT_TYPE_CERT_EXPIRING = 8;         // 节点 mTLS 身份证书临近过期
+  NODE_EVENT_TYPE_SITE_CERT_EXPIRING = 9;    // 站点证书临近过期
+  NODE_EVENT_TYPE_MARKER_TABLE_PRESSURE = 10;// 失效标记共享字典告急（可能已升级整站失效）
+  NODE_EVENT_TYPE_ROLLUP_CARDINALITY_DROP = 11;
+  NODE_EVENT_TYPE_UPGRADE_STAGED = 12;
+  NODE_EVENT_TYPE_NODE_ROLLED_BACK = 13;     // 节点级回滚已完成（NodeRollback）
+}
+
+message NodeEvent {
+  string event_uid = 1;              // ULID，Agent 生成，幂等去重
+  NodeEventType type = 2;
+  enum Severity {
+    SEVERITY_UNSPECIFIED = 0;
+    SEVERITY_INFO = 1;
+    SEVERITY_WARNING = 2;
+    SEVERITY_ERROR = 3;
+  }
+  Severity severity = 3;
+  google.protobuf.Timestamp occurred_at = 4;
+  string message = 5;                // 简短描述，不含敏感信息
+  map<string, string> attributes = 6;
+}
+
+message ReportEventsRequest {
+  repeated NodeEvent events = 1;
+}
+
+message ReportEventsResponse {
+  uint32 accepted = 1;
+  uint32 duplicates = 2;
+}

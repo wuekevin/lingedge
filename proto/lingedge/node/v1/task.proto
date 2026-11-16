@@ -1,0 +1,203 @@
+// LingEdge Node 协议 · 任务（缓存、升级、证书重载、调试）
+// 监听：Server :9443（mTLS）
+// 阶段：M1（URL/整站失效、证书重载、升级、调试）；P2（预热、前缀失效 PoC）
+//
+// 安全约束：任务类型是封闭的 oneof 白名单；**没有 exec / shell / 任意文件写入 / 任意 URL 请求类消息**（NFR-14、FR-35）。
+// 所有任务由 Server 的 `tasks`/`cache_task_nodes` 驱动，节点拉取、执行、回执；任务必须幂等（以 task_uid 去重）。
+syntax = "proto3";
+
+package lingedge.node.v1;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "lingedge/node/v1/common.proto";
+
+option go_package = "github.com/wuekevin/lingedge/proto/lingedge/node/v1;nodev1";
+
+// TaskService 节点任务通道。认证主体：ROLE_NODE。节点只能拉取/回执分配给自己的任务。
+service TaskService {
+  // PullTasks 拉取分配给本节点的待执行任务（带租约）。可长轮询（wait）。离线期间累积的任务在重连后补发（补执行）。
+  rpc PullTasks(PullTasksRequest) returns (PullTasksResponse);
+
+  // ReportTask 回执任务进度/结果。重复回执幂等（task_uid+attempt+status）。
+  rpc ReportTask(ReportTaskRequest) returns (ReportTaskResponse);
+}
+
+message PullTasksRequest {
+  uint32 max_tasks = 1;                 // 单次最多拉取；服务端有上限
+  // Agent 支持的任务类型（NodeTask.payload 的字段名，如 "cache_purge_url"）；服务端不下发未声明类型的任务。
+  repeated string supported_types = 2;
+  // 长轮询等待时间；0=立即返回。
+  google.protobuf.Duration wait = 3;
+}
+
+message PullTasksResponse {
+  repeated NodeTask tasks = 1;
+  bool more = 2;                        // 仍有待拉取任务
+}
+
+// NodeTask 单个节点任务。
+message NodeTask {
+  string task_uid = 1;                  // 幂等键 = node_tasks.uid（逐节点任务队列表，含租约/attempt/回执；所有任务类型统一）
+  uint32 attempt = 2;                   // 第几次投递，从 1 开始
+  google.protobuf.Timestamp created_at = 3;
+  google.protobuf.Timestamp deadline = 4;     // 超过则 Agent 应放弃并回执 EXPIRED
+  google.protobuf.Timestamp lease_until = 5;  // 租约；到期未回执则 Server 视为失败并可重投
+  string request_id = 6;                // 发起该任务的 API 请求 ID（贯穿审计）
+  oneof payload {
+    CachePurgeUrl cache_purge_url = 10;       // M1
+    CachePurgeSite cache_purge_site = 11;     // M1
+    CachePurgePrefix cache_purge_prefix = 12; // P2（PoC 通过前 Server 不会下发）
+    CachePrefetch cache_prefetch = 13;        // P2
+    NodeUpgrade node_upgrade = 14;            // M1
+    CertReload cert_reload = 15;              // M1
+    DebugRequest debug_request = 16;          // M1
+    NodeRollback node_rollback = 17;          // M1（v1 新增）：节点级回滚到本地上一代
+  }
+}
+
+// CachePurgeUrl 精确 URL 失效：节点把 (site_uid, 规范化 URL) 的 url_ver 标记置为 marker_version（ADR-007）。
+// 旧对象不物理删除，自然淘汰；marker 在共享字典保存并持久化到 Agent 本地状态。
+message CachePurgeUrl {
+  string site_uid = 1;
+  string host = 2;                      // 必须是该站点的已绑定域名
+  string path_and_query = 3;            // 规范化后的 path+query（服务端先按站点 Query 策略规范化）
+  uint64 marker_version = 4;            // Server 分配的单调版本；节点取 max(本地, 该值)（比较键 (lineage, marker_version)）
+  // 标记需保留的最短时间（≥ 站点允许的最大缓存寿命 + 余量）；到期后 Agent 才可回收该 marker。
+  google.protobuf.Duration marker_ttl = 5;
+  uint64 lineage = 6;                   // v1 新增：修订谱系（ADR-002 §12）；0 视为 1
+}
+
+// CachePurgeSite 整站逻辑失效：置站点 epoch（同时也经 HeartbeatResponse.site_epochs 下发，任务用于回执）。
+message CachePurgeSite {
+  string site_uid = 1;
+  uint64 epoch = 2;
+  uint64 lineage = 3;                   // v1 新增
+}
+
+// CachePurgePrefix 目录/前缀失效（P2，PoC 通过前不可用）。
+message CachePurgePrefix {
+  string site_uid = 1;
+  string host = 2;
+  string path_prefix = 3;               // 以 / 开头，规范化目录
+  uint64 marker_version = 4;
+  google.protobuf.Duration marker_ttl = 5;
+  uint64 lineage = 6;                   // v1 新增
+}
+
+// CachePrefetch 预热（P2）：Agent 经本机回环以 Host 头请求自己的 OpenResty，使对象写入缓存；URL 经 SSRF/站点域名校验。
+message CachePrefetch {
+  string site_uid = 1;
+  string host = 2;
+  repeated string paths_and_queries = 3;  // 数量上限由服务端限制
+  uint32 max_concurrency = 4;
+}
+
+// NodeUpgrade 升级节点软件（ADR-024）。Agent 下载并验证到 staging，写请求文件，由 systemd .path 触发 root 侧 Tools 受限入口，
+// Tools 重新验签，不信任 Agent 的校验结果。
+message NodeUpgrade {
+  // "node" | "openresty"（ADR-024；与 OpenAPI NodeUpgradeRequest.component 一致）。
+  // Agent→root 的 upgrade.request 仅含 {component, version, task_uid}，**不含任何路径**；暂存文件名由 root 侧按
+  // component+version 固定推导（staging/<component>-<version>/{manifest.json,manifest.json.sig,package.tar.gz}）。
+  // root 侧结果写入 root 属主目录 /var/lib/lingedge-node-upgrade/<task_uid>.result.json（Agent 只读）。
+  string component = 1;
+  string target_version = 2;
+  string download_url = 3;              // HTTPS；host 须在节点本地允许的发行源列表内（防 SSRF/重定向）
+  Digest package_digest = 4;            // 包 sha256
+  uint64 package_size = 5;
+  // 发行清单引用：清单与包签名由 Tools 自行校验；此处只给出定位信息。
+  uint64 manifest_sequence = 6;
+  string manifest_key_id = 7;
+  bytes package_signature = 8;          // 包 Ed25519 签名（发行信任域，ADR-012）
+  // 含不可逆 Migration 的版本：节点升级不涉及数据库迁移，该字段仅用于 Server 侧编排提示，节点忽略。
+  bool allow_restart_window = 9;        // 是否允许在升级时短暂重启 Agent（OpenResty 不重启，数据面不中断）
+}
+
+// CertReload 证书已更新，Agent 应 FetchCertificate 并热加载（随后通常伴随新修订，也可单独触发）。
+message CertReload {
+  string certificate_uid = 1;
+  uint64 version = 2;
+}
+
+// NodeRollback 节点级回滚（POST /nodes/{id}/rollback）：切回本地**上一节点代**（不产生新修订）。
+// 回退后节点对各受影响集群设置 held_seq（被回退掉的 seq），Server 对 desired.seq ≤ held_seq 返回 ACTION_HOLD，
+// 直到平台发布更高 seq 的修订（decisions D-PUB-6）。回退以节点代为单位，需 `openresty -t` 与健康检查通过。
+message NodeRollback {
+  uint64 target_generation = 1;         // 0=上一代；非 0 须是本地仍保留的代
+  string reason = 2;                    // 简短说明，写审计（不含敏感信息）
+}
+
+// DebugRequest 真实 IP 调试（FR-73）：Agent 经本机 ctl socket 的封闭操作 `debug_simulate` 调用与请求路径**同一批纯函数**
+// （realip.resolve + origin_headers.build）进行模拟——**不向 OpenResty 发起请求、不开调试源站、不访问任何外部地址**；
+// 请求路径中不存在任何调试分支。
+message DebugRequest {
+  string site_uid = 1;
+  string host = 2;                      // 站点已绑定域名
+  string path = 3;                      // 以 / 开头；长度受限
+  // 模拟的访客请求头（如伪造 Ling-Client-IP / X-Forwarded-For），经名称/数量/长度白名单校验。
+  map<string, string> request_headers = 4;
+  // 模拟的对端地址（用于验证可信代理判定）：仅作为纯函数的**入参**，不进入请求路径；为空则用 127.0.0.1。
+  string simulated_peer_ip = 5;
+}
+
+enum TaskStatus {
+  TASK_STATUS_UNSPECIFIED = 0;
+  TASK_STATUS_RUNNING = 1;
+  TASK_STATUS_SUCCESS = 2;
+  TASK_STATUS_FAILED = 3;
+  TASK_STATUS_SKIPPED = 4;   // 已无意义（例如站点已删除；epoch 已更高）
+  TASK_STATUS_EXPIRED = 5;   // 超过 deadline 未执行
+}
+
+message CacheTaskResult {
+  uint64 applied_marker_version = 1;    // 节点本地最终的 marker/epoch
+  uint32 items_processed = 2;           // 预热成功数等
+  repeated string failed_items = 3;     // 失败项（URL 级；数量受限）
+  bool escalated_to_site_epoch = 4;     // 共享字典满载/站点标记配额超限，已升级为整站失效（ADR-007）
+  // ---- v1 新增 ----
+  uint64 applied_lineage = 5;           // 与 applied_marker_version 配对
+  // escalated_to_site_epoch=true 时节点本地升级后的新 site epoch；Server 据此**权威上调**该站点 cache_epoch（全局单调）。
+  uint64 escalated_epoch = 6;
+}
+
+message UpgradeResult {
+  string staged_version = 1;
+  bool staged = 2;                      // 已验证并写入 staging 请求；实际切换由 root 侧完成并在重启后经心跳体现
+  // root 侧结果文件内容摘要（Agent 读取 /var/lib/lingedge-node-upgrade/<task_uid>.result.json 后填写）。
+  string result_status = 3;             // "success" | "rolled_back" | "failed" | ""（尚未产生）
+}
+
+// RollbackResult 节点级回滚结果。
+message RollbackResult {
+  uint64 restored_generation = 1;       // 回退后正在服务的节点代 N
+  repeated string held_cluster_uids = 2;// 设置了 held_seq 的集群
+}
+
+// DebugResult 调试结果：节点识别到的客户端 IP 与最终向（调试）源站传递的头。
+message DebugResult {
+  string recognized_client_ip = 1;      // $le_client_ip
+  bool peer_in_trusted_proxies = 2;
+  string trusted_proxy_rule = 3;        // 命中的可信 CIDR（若有）
+  map<string, string> origin_request_headers = 4;  // 回显的 Header（名→值），已对 Cookie/Authorization 脱敏
+}
+
+message ReportTaskRequest {
+  string task_uid = 1;
+  uint32 attempt = 2;
+  TaskStatus status = 3;
+  ErrorDetail error = 4;                // FAILED 时必填
+  google.protobuf.Timestamp finished_at = 5;
+  uint32 progress_percent = 6;          // RUNNING 时的进度，0–100
+  oneof result {
+    CacheTaskResult cache = 20;
+    UpgradeResult upgrade = 21;
+    DebugResult debug = 22;
+    RollbackResult rollback = 23;       // v1 新增
+  }
+}
+
+message ReportTaskResponse {
+  bool acknowledged = 1;
+  // 非空表示 Server 要求重试该任务（例如瞬时失败且未超过最大尝试数），由下一次 PullTasks 重新投递。
+  string retry_hint = 2;
+}
