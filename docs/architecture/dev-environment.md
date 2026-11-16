@@ -20,7 +20,7 @@ inputs:
 
 | 组件 | 基线要求 | 本机已确认 | 2026-11-16 查询的最新稳定版 | 固定策略 / 备注 |
 |---|---|---|---|---|
-| Go | Go（基线 §2.1） | go1.27.1 darwin/arm64 | — | `go.mod` 写 `go` 与 `toolchain` 行，固定到本机已确认的 1.27.1 起（实现时核对 Linux 目标可用）；CI 与验收机同一 toolchain |
+| Go | Go（基线 §2.1） | go1.27.1 darwin/arm64 | — | `go.mod` 写 `go` 与 `toolchain` 行，固定到 1.27.4（1.27.1 的标准库有已公布漏洞 GO-2026-6859 等，2026-11-17 升级）（实现时核对 Linux 目标可用）；CI 与验收机同一 toolchain |
 | MySQL | MySQL 8.0 | mysqld 8.0.46（Homebrew `mysql@8.0`）；本机 `mysql` 客户端不在 PATH，见 §2 | — | **最低支持版本 ≥ 8.0.16**（CHECK 约束自 8.0.16 起才强制执行，设计依赖它；`lingedge-server migrate` 与安装向导均校验 `VERSION()`）；生产在宝塔/原生 Linux 上的小版本 **实现时核对**；迁移测试须同时覆盖 **8.0.16（最低）** 与**当前 8.0.x**（本机已有 8.0.46，已做 DDL 实测，结果见 `docs/database/README.md`「DDL 实测」；8.0.16 需在 CI/验收机另行安装验证，未验证前标「等待环境验证」） |
 | Redis | Redis 8 | redis-server 8.10.1；redis-cli 8.10.1 | — | 目标 Redis 8.x；Linux 验收机来源与小版本实现时核对 |
 | OpenResty | OpenResty | **本机无** | 上游仓库 tag `v1.31.8.1`（GitHub tags 查询） | 固定版本**待核对**：Linux amd64/arm64 官方仓库/二进制包的可用性、与 Lua 第三方库及所选模块的兼容性均实现时核对；作为随 Node 发行包一部分按清单签名分发（ADR-012） |

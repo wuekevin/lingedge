@@ -22,7 +22,7 @@ LingEdge（凌界云）是一套从零开发的商业级 CDN 平台：官方网�
 
 ## 开发
 
-前置：Go 1.27.1（`go.mod` 固定 `go 1.27.0` 与 `toolchain go1.27.1`）。其余工具版本见 [`docs/architecture/dev-environment.md`](docs/architecture/dev-environment.md)。
+前置：Go 1.27.4 工具链（`go.mod` 固定 `go 1.27.0` 与 `toolchain go1.27.4`，修复 go1.27.1 的标准库已公布漏洞）。其余工具版本见 [`docs/architecture/dev-environment.md`](docs/architecture/dev-environment.md)。
 
 ```sh
 make build          # 构建全部 cmd：linux/amd64、linux/arm64，reporter 另含 windows/amd64，产物在 dist/

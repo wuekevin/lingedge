@@ -123,8 +123,8 @@ func TestGoMod(t *testing.T) {
 	if !regexp.MustCompile(`(?m)^go 1\.27\.0$`).MatchString(mod) {
 		t.Error("go 行应固定为 go 1.27.0（语言基线）")
 	}
-	if !regexp.MustCompile(`(?m)^toolchain go1\.27\.1$`).MatchString(mod) {
-		t.Error("toolchain 行应固定为 go1.27.1")
+	if !regexp.MustCompile(`(?m)^toolchain go1\.27\.4$`).MatchString(mod) {
+		t.Error("toolchain 行应固定为 go1.27.4")
 	}
 	for _, line := range strings.Split(mod, "\n") {
 		if strings.Contains(line, "=>") && regexp.MustCompile(`=>\s*["]?(\.|/|~)`).MatchString(line) {

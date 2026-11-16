@@ -22,7 +22,7 @@ jobs:
           fetch-tags: true
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.27.1"
+          go-version: "1.27.4"
       - name: 构建（含交叉编译矩阵）
         run: make build verify-build
       - name: 静态门禁（lint：依赖方向 / 禁 exec 拼接；security：口令 / 测试替身 / 品牌）
