@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -440,5 +441,66 @@ func TestRunDispatch(t *testing.T) {
 	}
 	if c := run(nil); c != 2 {
 		t.Errorf("无参数退出码应为 2，实际 %d", c)
+	}
+}
+
+// ---- Repository Scope 门禁的元数据（Story 1.5 AC5）----
+
+// 平台级表清单里的每张表都必须在 docs/database 里有对应的表定义标题（防拼写错误与悬空条目），
+// 且文档里该表若带 tenant_id 列则不得列入（租户表不能豁免 Scope 首参）。
+func TestPlatformTablesMatchDocs(t *testing.T) {
+	docs, err := filepath.Glob("../../docs/database/*.md")
+	if err != nil || len(docs) == 0 {
+		t.Skip("未找到 docs/database（在仓库副本中运行时跳过）")
+	}
+	var text strings.Builder
+	for _, d := range docs {
+		b, err := os.ReadFile(d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		text.Write(b)
+		text.WriteString("\n")
+	}
+	all := text.String()
+	for tbl := range platformTables() {
+		heading := regexp.MustCompile("(?m)^#{3,4} [0-9.]+ `" + regexp.QuoteMeta(tbl) + "`")
+		loc := heading.FindStringIndex(all)
+		if loc == nil {
+			t.Errorf("平台级表清单含 %q，但 docs/database 中没有该表的定义标题", tbl)
+			continue
+		}
+		section := all[loc[1]:]
+		if next := regexp.MustCompile(`(?m)^#{2,4} `).FindStringIndex(section); next != nil {
+			section = section[:next[0]]
+		}
+		if regexp.MustCompile(`(?m)^\|\s*tenant_id\s*\|`).MatchString(section) {
+			t.Errorf("表 %q 在文档中有 tenant_id 列，不得列为平台级表", tbl)
+		}
+	}
+}
+
+func TestRepositoryPathRegex(t *testing.T) {
+	yes := []string{
+		"internal/website/internal/repository/site.go",
+		"internal/platform/task/repository/task.go",
+		"internal/auth/internal/repository/sub/x.go",
+	}
+	no := []string{
+		"internal/website/internal/service/site.go",
+		"internal/website/internal/repositoryx/site.go",
+		"internal/platform/db/pool.go",
+		"cmd/lingedge-server/repository/x.go",
+		"internal/website/repository.go",
+	}
+	for _, p := range yes {
+		if !inRepositoryPackage(p) {
+			t.Errorf("%s 应判定为 repository 包", p)
+		}
+	}
+	for _, p := range no {
+		if inRepositoryPackage(p) {
+			t.Errorf("%s 不应判定为 repository 包", p)
+		}
 	}
 }

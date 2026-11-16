@@ -70,3 +70,9 @@
 - §5（BLK-02、H3、IMP-12、M18）：新增**规则 R-T1**（租户响应不得含 node/cluster 内部标识，聚合计数除外）及落实清单（脱敏的 `SiteDeploymentView`/`OriginHealthView`/`EgressIpList`、去掉灰度与节点参数、集群绑定平台独占、不提供 `available-clusters`）；明确 `tenant:impersonate` 与 `either` 的授权语义。原因：评审发现租户可枚举节点、指定灰度节点与策略、读取节点内部错误，违反 NFR-14。
 - §3（MIN-13）：复合外键扩展到 `origins`（已实测）。
 - §10（MIN-06）：Redis 键命名统一到 ADR-025 §4。
+
+## 修订记录 2026-11-17（Story 1.5 实现备注）
+
+- §1/§2/§6 的落地形态：`Scope` 与构造入口在 `internal/platform/tenantscope`（字段未导出，包外无法构造非零 Scope；`internal/platform/scope` 仅为类型别名），查询构建器在 `internal/platform/db/tenantdb`，SQL 文本只接受编译期常量（`db.Q`）或构建器产物；静态防线为 depguard（sqlx/database/sql/驱动仅限 `internal/platform/db` 与 repository 包）、forbidigo（Repository 内禁 SQL 拼接；受限池与 Scope 构造入口的调用白名单，来源 `scripts/gates/spec.go`）与 `make repo-check`（Repository 导出方法/接口方法的 Scope 首参；平台级表须登记在 `scripts/gates/data/platform-tables.txt`）。
+- 「租户表清单来自 docs/database 元数据生成」未采用：文档对 T / T? / 平台级的标注是叙述性的，无法可靠解析；改为「默认全部要求 Scope、平台级表显式登记」的反向清单（漏登记只会多报）。
+- 白名单变更须先改本 ADR 与 ADR-016，再改 `spec.go` 并 `make gen-lint`。

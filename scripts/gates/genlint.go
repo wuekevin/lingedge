@@ -105,6 +105,16 @@ func buildDepRules() []depRule {
 		},
 	})
 
+	// 8. 数据库访问只在 internal/platform/db 与 repository 包内（Story 1.5 AC5、ADR-009 §6）；测试、tests/、scripts/ 另行豁免。
+	sqlRule := depRule{name: "no-sql-outside-repository", files: []string{"!$test", "!" + base + "/tests/**", "!" + base + "/scripts/**"}}
+	for _, g := range sqlImportGlobsAllowed {
+		sqlRule.files = append(sqlRule.files, "!"+base+"/"+g)
+	}
+	for _, d := range sqlImportDenied {
+		sqlRule.deny = append(sqlRule.deny, denyEntry{d.pkg, d.why})
+	}
+	rules = append(rules, sqlRule)
+
 	sort.SliceStable(rules, func(i, j int) bool { return rules[i].name < rules[j].name })
 	return rules
 }
@@ -160,6 +170,12 @@ func renderLintConfig() string {
 		w("        - pattern: %s\n          msg: %s\n", q(p.pattern), q(p.msg))
 	}
 	w("        - pattern: %s\n          msg: %s\n", q(clockForbid.pattern), q(clockForbid.msg))
+	for _, p := range sqlConcatForbid {
+		w("        - pattern: %s\n          msg: %s\n", q(p), q(sqlConcatMarker+" Repository 包内禁止用字符串拼接/格式化构造 SQL（NFR-9）：SQL 只能是 db.Q 的编译期常量或 tenantdb 构建器的产物，值一律用 ? 占位符"))
+	}
+	w("        - pattern: %s\n          msg: %s\n", q(`^(?:.*/)?db\.OpenMaint$`), q(maintPoolMarker+" 禁止在白名单之外构造 maint 连接池（Story 1.5 AC6）：maint 仅 retention.cleanup/partition.maintain 使用，请求路径不得持有；白名单见 scripts/gates/spec.go"))
+	w("        - pattern: %s\n          msg: %s\n", q(`^(?:.*/)?db\.OpenMigrate$`), q(migratePoolMarker+" 禁止在白名单之外构造 migrate 连接池（Story 1.5 AC6）：migrate 仅 lingedge-server migrate 与向导迁移步骤使用；白名单见 scripts/gates/spec.go"))
+	w("        - pattern: %s\n          msg: %s\n", q(`^(?:.*/)?tenantscope\.(FromPrincipal|FromTask|PlatformForJob|NewContext)$`), q(scopeMintMarker+" 禁止在白名单之外构造租户 Scope（Story 1.5 AC2、ADR-009 §1）：Handler/Service/Repository 只能经 tenantscope.FromContext 取得中间件放入 context 的 Scope；白名单见 scripts/gates/spec.go"))
 	w("  exclusions:\n    generated: lax\n    rules:\n")
 	w("      # 唯一白名单入口：internal/tools/security（其内部仍受 `gates shell` 的参数数组/无 shell 检查约束）。\n")
 	w("      - path: %s\n        linters:\n          - forbidigo\n", q(`^internal/tools/security/`))
@@ -170,6 +186,11 @@ func renderLintConfig() string {
 	w("      # 直接读时钟的禁令（%s）只约束 Server 业务代码 internal/<Server 模块>/，其余路径整体豁免；时钟包自身是唯一出口。\n", noDirectClockMarker)
 	w("      - path-except: %s\n        linters:\n          - forbidigo\n        text: %s\n", q(`^internal/(`+strings.Join(serverModules, "|")+`)/`), q(regexpQuote(noDirectClockMarker)))
 	w("      - path: %s\n        linters:\n          - forbidigo\n        text: %s\n", q(`^`+clockPackage+`/`), q(regexpQuote(noDirectClockMarker)))
+	// Repository 拼接 SQL 的禁令只约束 repository 包；受限池与 Scope 构造入口的禁令对白名单路径豁免。
+	w("      - path-except: %s\n        linters:\n          - forbidigo\n        text: %s\n", q(repositoryPathRegex), q(regexpQuote(sqlConcatMarker)))
+	w("      - path: %s\n        linters:\n          - forbidigo\n        text: %s\n", q(maintPoolPaths), q(regexpQuote(maintPoolMarker)))
+	w("      - path: %s\n        linters:\n          - forbidigo\n        text: %s\n", q(migratePoolPaths), q(regexpQuote(migratePoolMarker)))
+	w("      - path: %s\n        linters:\n          - forbidigo\n        text: %s\n", q(scopeMintPaths), q(regexpQuote(scopeMintMarker)))
 	return b.String()
 }
 

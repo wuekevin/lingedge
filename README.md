@@ -28,8 +28,8 @@ LingEdge（凌界云）是一套从零开发的商业级 CDN 平台：官方网�
 ```sh
 make build          # 构建全部 cmd：linux/amd64、linux/arm64，reporter 另含 windows/amd64，产物在 dist/
 make verify-build   # 校验交叉编译矩阵产物
-make test           # go test ./...
-make lint           # gofmt + go vet + 脚手架测试 + 依赖方向/结构检查 + golangci-lint（depguard、forbidigo）+ shell 拼接检查
+make test           # go test ./...（含 MySQL 集成测试：自动起停独立临时 mysqld；无 mysqld 8.0 时跳过并标「等待环境验证」，见 tests/mysqltest）
+make lint           # gofmt + go vet + 脚手架测试 + 依赖方向/结构检查 + golangci-lint（depguard、forbidigo）+ shell 拼接检查 + Repository Scope 首参检查（repo-check）
 make security       # 固定口令（G-6）、测试替身隔离（G-11）、命令注入（G-12）、品牌残留（NFR-29）
 make gate-selftest  # 门禁自测：在仓库副本里写入故意违规的样例，断言被拦截、合法写法不误伤
 make gen-lint       # 据依赖图（scripts/gates/spec.go ← ADR-001）重新生成 .golangci.yml；改依赖图后必须运行

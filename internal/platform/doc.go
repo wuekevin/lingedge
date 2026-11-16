@@ -8,5 +8,10 @@
 //   - clock：唯一允许读取系统时钟的位置（其余 internal/ 业务代码由 lint 禁止直接调用 time.Now）；
 //   - uid：ULID 生成与校验。
 //
-// 其余基础设施（db、httpx、task 运行时、keyprovider、eventbus、audit 等）随后续 Story 增加；ports 子包见其自身说明。
+// 已交付（Story 1.5）：
+//   - db：MySQL 连接（UTC/utf8mb4/parseTime/参数化）、三类账号（app/maint/migrate）的独立连接池与经 context 传播的事务；
+//     db/tenantdb：租户范围表的查询构建器（自动追加 tenant_id、INSERT 强制写入 Scope 租户、AcrossTenants 方法族）；
+//   - tenantscope：租户 Scope 的类型与唯一构造入口（FromPrincipal/FromTask/PlatformForJob，包外无法构造非零 Scope）；scope：Scope 的类型别名（Repository 签名用）。
+//
+// 其余基础设施（httpx、task 运行时、keyprovider、eventbus、audit 等）随后续 Story 增加；ports 子包见其自身说明。
 package platform

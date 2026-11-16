@@ -36,8 +36,8 @@ inputs:
 | 模块 | 用途 | 查询版本 | 备注 |
 |---|---|---|---|
 | github.com/gin-gonic/gin | HTTP 框架 | v1.12.0 | 基线固定 |
-| github.com/jmoiron/sqlx | SQL 访问（唯一 DB 访问层） | v1.4.0 | 基线固定；最近发布于 2024-04，维护活跃度实现时评估 |
-| github.com/go-sql-driver/mysql | MySQL 驱动 | v1.10.1 | |
+| github.com/jmoiron/sqlx | SQL 访问（唯一 DB 访问层） | v1.4.0 | 基线固定；最近发布于 2024-04，维护活跃度实现时评估；**已在 go.mod 固定 v1.4.0**（Story 1.5，仅 `internal/platform/db` 与 repository 包可 import，depguard） |
+| github.com/go-sql-driver/mysql | MySQL 驱动 | v1.10.1 | **已在 go.mod 固定 v1.10.1**（Story 1.5；间接引入 filippo.io/edwards25519 v1.2.0）；`make vuln` 无漏洞 |
 | github.com/redis/go-redis/v9 | Redis 客户端 | v9.23.0 | |
 | go.uber.org/zap | 日志 | v1.28.0 | 基线固定；**已在 go.mod 固定**（Story 1.4，经 `internal/platform/logx` 统一脱敏） |
 | google.golang.org/grpc | gRPC | v1.85.0 | 基线固定；**已在 go.mod 固定**（Story 1.4 起仅 `grpc/metadata` 等用于 Request ID 元数据与测试；间接依赖 `golang.org/x/net` 升至 v0.62.0 以消除 GO-2026-6860/6866） |
@@ -104,7 +104,7 @@ inputs:
 | 平台 | macOS（Darwin 25.6.0，arm64） | **不是目标运行平台**。Server 可在 macOS 上开发与运行；Node（Agent+OpenResty）、Tools 的 systemd/宝塔逻辑**必须在 Linux 上验证** |
 | Go 1.27.1 | 已安装 | 可编译 Server/Agent/Tools 的纯 Go 部分与跨平台交叉编译（`GOOS=linux`） |
 | Node v26.8.2 / npm 11.19.1 | 已安装 | 可构建前端；pnpm 未确认，实现时安装 |
-| MySQL 8.0.46 | `mysqld` 在 `/opt/homebrew/opt/mysql@8.0/bin/`，`mysql` 客户端不在 PATH | 可用于 Server 集成/迁移测试。启动可用 `brew services start mysql@8.0`；连接用 `/opt/homebrew/opt/mysql@8.0/bin/mysql -u<用户> -p`。**本文不启动、不修改本机服务**；测试库用独立库名（如 `lingedge_test`）与独立账号，避免触碰本机其它项目；做 DDL 实测应使用**临时 datadir + 非默认端口**的独立 `mysqld`，测试后关闭并清理，不得影响他人数据 |
+| MySQL 8.0.46 | `mysqld` 在 `/opt/homebrew/opt/mysql@8.0/bin/`，`mysql` 客户端不在 PATH | 可用于 Server 集成/迁移测试。启动可用 `brew services start mysql@8.0`；连接用 `/opt/homebrew/opt/mysql@8.0/bin/mysql -u<用户> -p`。**本文不启动、不修改本机服务**；测试库用独立库名（如 `lingedge_test`）与独立账号，避免触碰本机其它项目；做 DDL 实测应使用**临时 datadir + 非默认端口**的独立 `mysqld`，测试后关闭并清理，不得影响他人数据。**Story 1.5 起此做法已固化为测试辅助 `tests/mysqltest`**：集成测试自动在 `--no-defaults`、独立 datadir/端口/socket、`--mysqlx=OFF`、`--log-bin` + `log_bin_trust_function_creators=0` 的临时实例上运行，结束即关闭并删除；找不到 mysqld 8.0 时跳过并标「等待环境验证」；开关：`LINGEDGE_MYSQL_TESTS=off` 显式跳过、`LINGEDGE_REQUIRE_MYSQL=1` 缺失即失败、`LINGEDGE_MYSQLD=<路径>` 指定 mysqld |
 | Redis 8.10.1 | 已安装 | `brew services start redis` 或 `redis-server <conf>`；测试使用独立端口/数据库编号；同上不在本文中真的启动 |
 | nginx 1.31.8（Homebrew） | 已安装，无 Lua | 仅作静态/反代用，**不满足 Node 测试需求** |
 | protoc libprotoc 36.1 | 已安装 | 修订期用于编译校验；Story 1.3 起 lint/生成/破坏性检测统一走 buf（`make proto`、`make proto-check`），不再依赖本机 protoc |

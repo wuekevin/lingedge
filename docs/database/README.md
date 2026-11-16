@@ -395,12 +395,13 @@ END;
 
 | 账号 | 权限 | 使用者 |
 |---|---|---|
-| `lingedge_app` | `SELECT, INSERT, UPDATE, DELETE ON db.*`；对 `audit_logs`、`wallet_entries` **仅** `SELECT, INSERT`（表级授权） | Server 常规请求路径、Worker |
+| `lingedge_app` | **逐表**授权 `SELECT, INSERT, UPDATE, DELETE ON db.<表>`；对 `audit_logs`、`wallet_entries` **仅** `SELECT, INSERT`（库级授权无法在表级收窄，见下文「实现备注」） | Server 常规请求路径、Worker |
 | `lingedge_maint` | **表级** `SELECT, ALTER, DROP` 仅授予分区表（`audit_logs`、`node_heartbeats`、`probe_results`、`security_events`） | Worker 的 `retention.cleanup`（TaskType）与 `partition.maintain`（**内部周期作业**，非 TaskType，AA-8）（独立连接池）；执行 `REORGANIZE PARTITION`（滚动预建）与 `DROP PARTITION`（保留期） |
 | `lingedge_migrate` | `ALL ON db.* WITH GRANT OPTION` + 全局 `SET_USER_ID` | 仅 `lingedge-server migrate` / Tools；**在迁移 SQL 内**为 `lingedge_maint` 做表级授权（每个新分区表所在迁移末尾 `GRANT SELECT, ALTER, DROP ON db.<表> TO lingedge_maint`）；不在常规请求路径持有 |
 
 - 实测（MySQL 8.0.46，`log_bin=ON`、`log_bin_trust_function_creators=0`）：仅 `ALL ON db.*` 的账号建触发器报 **ERROR 1419**（需要 SUPER）；同账号另被授予全局 `SET_USER_ID`，或 `log_bin_trust_function_creators=1`，即可建成。宝塔 MySQL 常默认开启 binlog，故**安装向导预检**：读取 `@@log_bin`、`@@log_bin_trust_function_creators`，并用迁移账号在临时表上建/删一个探针触发器；失败则提示两种处置（授予 `SET_USER_ID`，或在 `my.cnf` 设 `log_bin_trust_function_creators=1` 后重启）。
 - 表级授权的 `lingedge_maint` 不能 `DROP` 其它表（实测 ERROR 1142）；`lingedge_app` 对 `audit_logs` 的 UPDATE/DROP 被拒。
+- **实现备注（Story 1.5 实测，MySQL 8.0.46）**：上表 `lingedge_app` 一行写作 `ON db.*`，但库级授权与「`audit_logs`、`wallet_entries` 仅 `SELECT, INSERT`」无法同时成立——权限取并集，且不能从库级授权上做表级 `REVOKE`（报 ERROR 1147）。因此 **`lingedge_app` 必须逐表授权**：每个迁移在建表后由 `lingedge_migrate`（持有 `GRANT OPTION`）执行 `GRANT SELECT, INSERT, UPDATE, DELETE ON db.<表> TO lingedge_app`（不可变表只授 `SELECT, INSERT`），与 `lingedge_maint` 的表级授权同一机制，Story 1.6/1.7 的迁移与 lint 须据此实现（回归：`tests/integration/db/accounts_test.go`）。
 - **审计写入与业务变更同事务**；分区表一律含 `pmax VALUES LESS THAN (MAXVALUE)` 兜底分区，写入永远不会因“缺下月分区”报 ERROR 1526（实测无 `pmax` 时越界 INSERT 报该错误）；`partition.maintain`（内部周期作业，非 TaskType）每日把 `pmax` `REORGANIZE` 出未来 N 个月的新分区，失败告警（不影响写入）。
 
 ## 6. 租户隔离在数据库层的落点（ADR-009）

@@ -1288,6 +1288,21 @@ linters:
               desc: "依赖方向违规：internal/website 不得 import internal/reporter（architecture §5.3 / ADR-001 §4；必需的跨模块调用经 internal/platform/ports，实现在 cmd/lingedge-server 装配层注入）"
             - pkg: "github.com/wuekevin/lingedge/internal/tools"
               desc: "internal/website 不得 import internal/tools（Tools 与 Server 无编译依赖，architecture §5.3 规则 5）"
+        no-sql-outside-repository:
+          list-mode: lax
+          files:
+            - "!$test"
+            - "!${base-path}/tests/**"
+            - "!${base-path}/scripts/**"
+            - "!${base-path}/internal/platform/db/**"
+            - "!${base-path}/internal/**/repository/**"
+          deny:
+            - pkg: "github.com/jmoiron/sqlx"
+              desc: "只有 internal/platform/db 与 repository 包可以 import sqlx（*sqlx.DB/*sqlx.Tx 不得出现在 Repository 之外；ADR-009 §6、ADR-001 §9）"
+            - pkg: "database/sql"
+              desc: "只有 internal/platform/db 与 repository 包可以 import database/sql；Service/Handler 经 Repository 与 db.WithTx 访问数据库，用 db.ErrNotFound/db.Result 代替 sql 类型"
+            - pkg: "github.com/go-sql-driver/mysql"
+              desc: "只有 internal/platform/db 与 repository 包可以 import MySQL 驱动；需要错误号时用 db.MySQLErrorNumber/db.IsDuplicate"
         no-test-infra-in-production:
           list-mode: lax
           files:
@@ -1380,6 +1395,16 @@ linters:
           msg: "禁止直接创建进程（G-12/NFR-9）：只能经 internal/tools/security 白名单入口"
         - pattern: "^time\\.(Now|Since|Until)$"
           msg: "[no-direct-clock] 禁止直接读取系统时钟（Story 1.4 AC5）：经注入的 internal/platform/clock.Clock 取时间（clock.Since/clock.Until 代替 time.Since/time.Until）；仅 internal/platform/clock 可调用"
+        - pattern: "^fmt\\.(Sprintf|Sprint|Sprintln)$"
+          msg: "[no-sql-concat] Repository 包内禁止用字符串拼接/格式化构造 SQL（NFR-9）：SQL 只能是 db.Q 的编译期常量或 tenantdb 构建器的产物，值一律用 ? 占位符"
+        - pattern: "^strings\\.(Join|Replace|ReplaceAll|NewReplacer|Builder)$"
+          msg: "[no-sql-concat] Repository 包内禁止用字符串拼接/格式化构造 SQL（NFR-9）：SQL 只能是 db.Q 的编译期常量或 tenantdb 构建器的产物，值一律用 ? 占位符"
+        - pattern: "^(?:.*/)?db\\.OpenMaint$"
+          msg: "[db-pool-maint] 禁止在白名单之外构造 maint 连接池（Story 1.5 AC6）：maint 仅 retention.cleanup/partition.maintain 使用，请求路径不得持有；白名单见 scripts/gates/spec.go"
+        - pattern: "^(?:.*/)?db\\.OpenMigrate$"
+          msg: "[db-pool-migrate] 禁止在白名单之外构造 migrate 连接池（Story 1.5 AC6）：migrate 仅 lingedge-server migrate 与向导迁移步骤使用；白名单见 scripts/gates/spec.go"
+        - pattern: "^(?:.*/)?tenantscope\\.(FromPrincipal|FromTask|PlatformForJob|NewContext)$"
+          msg: "[tenantscope-mint] 禁止在白名单之外构造租户 Scope（Story 1.5 AC2、ADR-009 §1）：Handler/Service/Repository 只能经 tenantscope.FromContext 取得中间件放入 context 的 Scope；白名单见 scripts/gates/spec.go"
   exclusions:
     generated: lax
     rules:
@@ -1406,3 +1431,19 @@ linters:
         linters:
           - forbidigo
         text: "\\[no-direct-clock\\]"
+      - path-except: "^internal/(?:[^/]+/)*repository(?:/|$)"
+        linters:
+          - forbidigo
+        text: "\\[no-sql-concat\\]"
+      - path: "^(?:internal/platform/db/|internal/scheduler/|cmd/lingedge-(?:server|worker|scheduler)/)"
+        linters:
+          - forbidigo
+        text: "\\[db-pool-maint\\]"
+      - path: "^(?:internal/platform/db/|internal/platform/migrate/|cmd/lingedge-server/)"
+        linters:
+          - forbidigo
+        text: "\\[db-pool-migrate\\]"
+      - path: "^(?:internal/platform/|internal/tenant/|internal/scheduler/|cmd/lingedge-(?:server|worker|scheduler)/)"
+        linters:
+          - forbidigo
+        text: "\\[tenantscope-mint\\]"

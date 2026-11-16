@@ -1,0 +1,33 @@
+# 平台级表（无 tenant_id 的表）：repository 方法访问它们时才可豁免「Scope 首参」规则（Story 1.5 AC5）。
+# 豁免写法：方法/函数的文档注释中加一行 `lingedge:platform-table=<表名>`；表名必须在本清单内，否则门禁失败。
+# 清单来自 docs/database/*.md 中标注「平台级」或明确无 tenant_id 的表；doc 中带 tenant_id（含可空 T?）的表一律不得列入。
+# 保守原则：拿不准的表不列入——列入需随对应 Story 评审，并由 gates_test 核对表名在 docs/database 中存在。
+tenants
+users
+user_recovery_codes
+permissions
+role_permissions
+system_settings
+system_installations
+job_locks
+signing_keys
+plugins
+nodes
+clusters
+cluster_nodes
+node_heartbeats
+enroll_tokens
+node_certificates
+node_events
+regions
+isp_lines
+ip_pools
+ip_pool_members
+config_revisions
+config_revision_blocks
+node_cluster_state
+deployment_target_steps
+products
+plans
+pricing_rules
+resellers

@@ -40,7 +40,7 @@ define not_implemented
 endef
 
 .PHONY: help build verify-build test race lint fmt vet check-scaffold clean \
-        gen-lint arch-check golangci shell-check gate-selftest vuln verify-gates \
+        gen-lint arch-check golangci shell-check repo-check gate-selftest vuln verify-gates \
         contract-bin contract-selftest openapi-breaking migrations-check migrations-seal freeze-check contract-check \
         print-ldflags migrate migrate-test proto proto-check openapi-check frontend e2e edge-test security release
 
@@ -84,11 +84,11 @@ vet:
 	$(GO) vet ./...
 	$(GO) vet -tags lingedge_testdouble ./...
 
-# make lint：gofmt + go vet + 脚手架结构测试 + 依赖图/结构检查 + golangci-lint（depguard 依赖方向、forbidigo 禁 exec）+ shell 拼接检查。
+# make lint：gofmt + go vet + 脚手架结构测试 + 依赖图/结构检查 + golangci-lint（depguard 依赖方向与 sqlx 边界、forbidigo 禁 exec/直接读时钟/SQL 拼接/受限池与 Scope 构造）+ shell 拼接检查 + Repository Scope 首参检查。
 lint: vet
 	@out=$$(gofmt -l .); if [ -n "$$out" ]; then echo "gofmt 未格式化:" >&2; echo "$$out" >&2; exit 1; fi
 	$(GO) test -short -count=1 ./tests/scaffold/...
-	$(MAKE) --no-print-directory arch-check golangci shell-check
+	$(MAKE) --no-print-directory arch-check golangci shell-check repo-check
 
 # 据 ADR-001 依赖图（scripts/gates/spec.go）重新生成 .golangci.yml；改依赖图后必须运行并提交。
 gen-lint:
@@ -105,6 +105,11 @@ golangci:
 # 命令注入：禁止经 shell 解释器执行命令串、禁止字符串拼接的 exec.Command（G-12、NFR-9）；白名单入口 internal/tools/security 同样不得绕过。
 shell-check:
 	$(GATES) shell
+
+# Repository 的 Scope 首参（Story 1.5 AC5、ADR-009 §1）：internal/**/repository 包内导出方法的首个业务参数必须是 scope.Scope；
+# 平台级表需在文档注释登记 lingedge:platform-table=<表>（清单 scripts/gates/data/platform-tables.txt）。
+repo-check:
+	$(GATES) repo
 
 # 门禁自身的正向/负向自测：在仓库副本里写入故意违规的样例，断言被拦截、合法写法不误伤，副本用后删除。
 gate-selftest:

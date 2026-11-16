@@ -208,6 +208,23 @@ func TestLintGatesBlockViolationsAndAllowLegitimate(t *testing.T) {
 		"internal/cache/internal/service/prod_now_alias.go": {"package service\n\nimport \"time\"\n\nvar Now = time.Now\n", "forbidigo", "[no-direct-clock]"},
 		"internal/platform/other/prod_now.go":               {"package other\n\nimport \"time\"\n\nvar Stamp = func() time.Time {\n\treturn time.Now()\n}\n", "forbidigo", "[no-direct-clock]"},
 		"internal/auth/internal/service/prod_exec_alias.go": {"package service\n\nimport (\n\t\"context\"\n\tx \"os/exec\"\n)\n\nvar Run2 = func(ctx context.Context, a string) error {\n\treturn x.CommandContext(ctx, \"ls\", a).Run()\n}\n", "forbidigo", "os/exec"},
+		// 数据库访问边界（Story 1.5 AC5）：sqlx / database/sql / MySQL 驱动只允许出现在 internal/platform/db 与 repository 包。
+		"internal/website/internal/service/sqlx_in_service.go": {"package service\n\nimport \"github.com/jmoiron/sqlx\"\n\nvar _ *sqlx.DB\n", "depguard", "只有 internal/platform/db 与 repository 包可以 import sqlx"},
+		"internal/origin/internal/handler/sql_in_handler.go":   {"package handler\n\nimport \"database/sql\"\n\nvar _ *sql.DB\n", "depguard", "database/sql"},
+		"internal/cache/internal/service/driver_in_service.go": {"package service\n\nimport _ \"github.com/go-sql-driver/mysql\"\n", "depguard", "MySQL 驱动"},
+		"internal/platform/other/sqlx_in_platform.go":          {"package other\n\nimport \"github.com/jmoiron/sqlx\"\n\nvar _ *sqlx.Tx\n", "depguard", "只有 internal/platform/db 与 repository 包可以 import sqlx"},
+		"cmd/lingedge-server/sqlx_in_cmd.go":                   {"package main\n\nimport \"github.com/jmoiron/sqlx\"\n\nvar _ *sqlx.DB\n", "depguard", "只有 internal/platform/db 与 repository 包可以 import sqlx"},
+		"internal/website/internal/repository/sql_concat.go":   {"package repository\n\nimport \"fmt\"\n\nvar Concat = func(uid string) string {\n\treturn fmt.Sprintf(\"SELECT id FROM sites WHERE uid = '%s'\", uid)\n}\n", "forbidigo", "[no-sql-concat]"},
+		"internal/website/internal/repository/sql_join.go":     {"package repository\n\nimport \"strings\"\n\nvar Join = func(cols []string) string {\n\treturn \"SELECT \" + strings.Join(cols, \",\")\n}\n", "forbidigo", "[no-sql-concat]"},
+		// 受限池构造函数（AC6）：maint/migrate 池只能由白名单包构造；别名导入同样被识别。
+		"internal/auth/internal/service/maint_pool.go":        {"package service\n\nimport (\n\t\"context\"\n\n\t\"github.com/wuekevin/lingedge/internal/platform/db\"\n)\n\nvar OpenMaintBad = func(ctx context.Context) {\n\t_, _ = db.OpenMaint(ctx, db.Config{})\n}\n", "forbidigo", "[db-pool-maint]"},
+		"internal/auth/internal/handler/maint_pool_alias.go":  {"package handler\n\nimport (\n\t\"context\"\n\n\tdbx \"github.com/wuekevin/lingedge/internal/platform/db\"\n)\n\nvar OpenMaintAliasBad = func(ctx context.Context) {\n\t_, _ = dbx.OpenMaint(ctx, dbx.Config{})\n}\n", "forbidigo", "[db-pool-maint]"},
+		"internal/billing/internal/service/migrate_pool.go":   {"package service\n\nimport (\n\t\"context\"\n\n\t\"github.com/wuekevin/lingedge/internal/platform/db\"\n)\n\nvar OpenMigrateBad = func(ctx context.Context) {\n\t_, _ = db.OpenMigrate(ctx, db.Config{})\n}\n", "forbidigo", "[db-pool-migrate]"},
+		"internal/scheduler/internal/service/migrate_pool.go": {"package service\n\nimport (\n\t\"context\"\n\n\t\"github.com/wuekevin/lingedge/internal/platform/db\"\n)\n\nvar OpenMigrateSchedBad = func(ctx context.Context) {\n\t_, _ = db.OpenMigrate(ctx, db.Config{})\n}\n", "forbidigo", "[db-pool-migrate]"},
+		// Scope 构造入口（AC2）：Handler/Service/Repository 不得自己造 Scope。
+		"internal/auth/internal/handler/mint_scope.go":       {"package handler\n\nimport \"github.com/wuekevin/lingedge/internal/platform/tenantscope\"\n\nvar Mint = func() {\n\t_, _ = tenantscope.FromTask(1, 1)\n}\n", "forbidigo", "[tenantscope-mint]"},
+		"internal/website/internal/service/mint_ctx.go":      {"package service\n\nimport (\n\t\"context\"\n\n\t\"github.com/wuekevin/lingedge/internal/platform/tenantscope\"\n)\n\nvar Mint = func(ctx context.Context) context.Context {\n\treturn tenantscope.NewContext(ctx, tenantscope.PlatformForJob(1))\n}\n", "forbidigo", "[tenantscope-mint]"},
+		"internal/website/internal/repository/mint_alias.go": {"package repository\n\nimport ts \"github.com/wuekevin/lingedge/internal/platform/tenantscope\"\n\nvar Mint = ts.PlatformForJob\n", "forbidigo", "[tenantscope-mint]"},
 	}
 	// 必须通过（合法依赖与白名单用法）。
 	legit := map[string]string{
@@ -231,6 +248,22 @@ func TestLintGatesBlockViolationsAndAllowLegitimate(t *testing.T) {
 		"cmd/lingedge-node/ok_now.go":                   "package main\n\nimport \"time\"\n\nvar Stamp = func() time.Time {\n\treturn time.Now()\n}\n",
 		"pkg/version/ok_now.go":                         "package version\n\nimport \"time\"\n\nvar Stamp = func() time.Time {\n\treturn time.Now()\n}\n",
 		"internal/auth/internal/service/ok_injected.go": "package service\n\nimport (\n\t\"time\"\n\n\t\"github.com/wuekevin/lingedge/internal/platform/clock\"\n)\n\nvar StampInjected = func(c clock.Clock) time.Time {\n\treturn c.Now()\n}\n",
+		// 数据库边界与受限入口的合法用法（Story 1.5）。
+		"internal/website/internal/repository/ok_sqlx.go":   "package repository\n\nimport (\n\t\"database/sql\"\n\t\"fmt\"\n\n\t_ \"github.com/go-sql-driver/mysql\"\n\t\"github.com/jmoiron/sqlx\"\n)\n\ntype Raw struct {\n\tX *sqlx.DB\n\tR sql.Result\n}\n\nvar Wrap = func(err error) error {\n\treturn fmt.Errorf(\"repository: %w\", err)\n}\n",
+		"internal/platform/task/repository/ok_sqlx.go":      "package repository\n\nimport \"github.com/jmoiron/sqlx\"\n\nvar _ *sqlx.Tx\n",
+		"internal/platform/db/ok_extra.go":                  "package db\n\nimport \"github.com/jmoiron/sqlx\"\n\nvar _ *sqlx.DB\n",
+		"internal/website/internal/service/ok_sqlx_test.go": "package service\n\nimport \"github.com/jmoiron/sqlx\"\n\nvar _ *sqlx.DB\n",
+		"internal/website/internal/service/ok_sprintf.go":   "package service\n\nimport \"fmt\"\n\nvar Label = func(n int) string {\n\treturn fmt.Sprintf(\"site-%d\", n)\n}\n",
+		"internal/scheduler/internal/service/ok_maint.go":   "package service\n\nimport (\n\t\"context\"\n\n\t\"github.com/wuekevin/lingedge/internal/platform/db\"\n)\n\nvar OpenMaintOK = func(ctx context.Context) {\n\t_, _ = db.OpenMaint(ctx, db.Config{})\n}\n",
+		"cmd/lingedge-worker/ok_maint.go":                   "package main\n\nimport (\n\t\"context\"\n\n\t\"github.com/wuekevin/lingedge/internal/platform/db\"\n)\n\nvar Open = func(ctx context.Context) {\n\t_, _ = db.OpenMaint(ctx, db.Config{})\n\t_, _ = db.OpenApp(ctx, db.Config{})\n}\n",
+		"cmd/lingedge-server/ok_migrate.go":                 "package main\n\nimport (\n\t\"context\"\n\n\t\"github.com/wuekevin/lingedge/internal/platform/db\"\n)\n\nvar Migrate = func(ctx context.Context) {\n\t_, _ = db.OpenMigrate(ctx, db.Config{})\n}\n",
+		"internal/platform/migrate/ok_migrate.go":           "package migrate\n\nimport (\n\t\"context\"\n\n\t\"github.com/wuekevin/lingedge/internal/platform/db\"\n)\n\nvar OpenMigrateOK = func(ctx context.Context) {\n\t_, _ = db.OpenMigrate(ctx, db.Config{})\n}\n",
+		"internal/auth/internal/service/ok_app_pool.go":     "package service\n\nimport (\n\t\"context\"\n\n\t\"github.com/wuekevin/lingedge/internal/platform/db\"\n)\n\nvar OpenAppOK = func(ctx context.Context) {\n\t_, _ = db.OpenApp(ctx, db.Config{})\n}\n",
+		"internal/tenant/internal/handler/ok_mint.go":       "package handler\n\nimport \"github.com/wuekevin/lingedge/internal/platform/tenantscope\"\n\nvar Mint = func(p tenantscope.Principal) {\n\t_, _ = tenantscope.FromPrincipal(p, tenantscope.RouteTenant, tenantscope.NoTarget())\n}\n",
+		"internal/platform/task/ok_scope.go":                "package task\n\nimport \"github.com/wuekevin/lingedge/internal/platform/tenantscope\"\n\nvar Mint = func() {\n\t_, _ = tenantscope.FromTask(1, 0)\n\t_ = tenantscope.PlatformForJob(1)\n}\n",
+		"cmd/lingedge-server/ok_scope.go":                   "package main\n\nimport \"github.com/wuekevin/lingedge/internal/platform/tenantscope\"\n\nvar _ = tenantscope.PlatformForJob\n",
+		"internal/website/internal/handler/ok_scope_ctx.go": "package handler\n\nimport (\n\t\"context\"\n\n\t\"github.com/wuekevin/lingedge/internal/platform/tenantscope\"\n)\n\nvar Get = func(ctx context.Context) bool {\n\t_, ok := tenantscope.FromContext(ctx)\n\treturn ok\n}\n",
+		"internal/website/internal/service/ok_mint_test.go": "package service\n\nimport \"github.com/wuekevin/lingedge/internal/platform/tenantscope\"\n\nvar _ = tenantscope.FromTask\n",
 	}
 	put(t, dst, "internal/cache/internal/domain/d.go", "package domain\n") // ok_own_impl.go 引用的自有实现包
 	for rel, v := range violations {
@@ -308,7 +341,7 @@ func TestGateCommandsNegativeAndCleanup(t *testing.T) {
 	}
 	dst := copyRepo(t)
 	// 门禁在 gates 目录自身被跳过；副本里的 docs/ 不存在，品牌与口令门禁只看代码与配置。
-	for _, g := range []string{"arch", "testdouble", "passwords", "brand", "shell"} {
+	for _, g := range []string{"arch", "testdouble", "passwords", "brand", "shell", "repo"} {
 		if code, out := runGate(t, dst, g); code != 0 {
 			t.Fatalf("干净副本的 %s 门禁应通过，退出码 %d:\n%s", g, code, out)
 		}
@@ -372,6 +405,46 @@ func TestGateCommandsNegativeAndCleanup(t *testing.T) {
 			files: map[string]string{"deploy/systemd/x.service": "ExecStart=/bin/" + "sh -" + "c 'run'\n"},
 		},
 		{
+			name: "Repository 方法缺少 Scope", gate: "repo", wantRule: "repo-scope", wantText: "scope.Scope",
+			files: map[string]string{"internal/website/internal/repository/bad.go": repoSrc("func (SiteRepo) GetByUID(ctx context.Context, uid string) error { return nil }")},
+		},
+		{
+			name: "Scope 不是首个业务参数", gate: "repo", wantRule: "repo-scope", wantText: "第一个业务参数",
+			files: map[string]string{"internal/origin/internal/repository/bad.go": repoSrc("func (SiteRepo) Get(ctx context.Context, uid string, sc scope.Scope) error { return nil }")},
+		},
+		{
+			name: "自造同名 Scope 类型不算数", gate: "repo", wantRule: "repo-scope", wantText: "Get",
+			files: map[string]string{"internal/cache/internal/repository/bad.go": "package repository\n\nimport \"context\"\n\ntype Scope struct{ TenantID uint64 }\n\ntype R struct{}\n\nfunc (R) Get(ctx context.Context, sc Scope) error { return nil }\n"},
+		},
+		{
+			name: "租户表不能用平台表豁免", gate: "repo", wantRule: "repo-scope", wantText: "不在平台级表清单",
+			files: map[string]string{"internal/website/internal/repository/bad.go": repoSrc("// ListAll 读全部站点。\n// lingedge:platform-table=sites\nfunc (SiteRepo) ListAll(ctx context.Context) error { return nil }")},
+		},
+		{
+			name: "AcrossTenants 方法缺少 Scope", gate: "repo", wantRule: "repo-scope", wantText: "ListAcrossTenants",
+			files: map[string]string{"internal/origin/internal/repository/bad.go": repoSrc("func (SiteRepo) ListAcrossTenants(ctx context.Context) error { return nil }")},
+		},
+		{
+			name: "AcrossTenants 方法不得用平台表豁免", gate: "repo", wantRule: "repo-scope", wantText: "不得用平台表豁免",
+			files: map[string]string{"internal/website/internal/repository/bad.go": repoSrc("// lingedge:platform-table=nodes\nfunc (SiteRepo) ListNodesAcrossTenants(ctx context.Context) error { return nil }")},
+		},
+		{
+			name: "逗号分隔的多表豁免夹带租户表", gate: "repo", wantRule: "repo-scope", wantText: "表 sites 不在平台级表清单",
+			files: map[string]string{"internal/website/internal/repository/bad.go": repoSrc("// lingedge:platform-table=nodes,sites\nfunc (SiteRepo) Mixed(ctx context.Context) error { return nil }")},
+		},
+		{
+			name: "接口方法缺少 Scope", gate: "repo", wantRule: "repo-scope", wantText: "接口方法",
+			files: map[string]string{"internal/origin/internal/repository/bad.go": repoSrc("type Reader interface {\n\tGet(ctx context.Context, uid string) error\n}")},
+		},
+		{
+			name: "New 前缀的非构造函数不豁免", gate: "repo", wantRule: "repo-scope", wantText: "NewestSites",
+			files: map[string]string{"internal/cache/internal/repository/bad.go": repoSrc("func NewestSites(ctx context.Context, uid string) error { return nil }")},
+		},
+		{
+			name: "导出的包级函数同样要求 Scope", gate: "repo", wantRule: "repo-scope", wantText: "FindSite",
+			files: map[string]string{"internal/platform/task/repository/bad.go": repoSrc("func FindSite(ctx context.Context, uid string) error { return nil }")},
+		},
+		{
 			name: "字符串拼接的 exec", gate: "shell", wantRule: "shell-exec",
 			files: map[string]string{"internal/tools/security/cat.go": "package security\n\nimport \"os/exec\"\n\nfunc f(s string) { _ = exec.Command(\"systemctl \" + s) }\n"},
 		},
@@ -395,5 +468,57 @@ func TestGateCommandsNegativeAndCleanup(t *testing.T) {
 				t.Errorf("清理样例后 %s 门禁应恢复通过，退出码 %d:\n%s", c.gate, code, out)
 			}
 		})
+	}
+}
+
+// repoSrc 生成 Repository 包源码：固定导入 context 与 scope，附一个接收者类型与给定声明。
+func repoSrc(decl string) string {
+	return "package repository\n\nimport (\n\t\"context\"\n\n\t\"" + mod + "/internal/platform/scope\"\n)\n\nvar _ scope.Scope\n\ntype SiteRepo struct{}\n\n" + decl + "\n"
+}
+
+// repo 门禁不得误伤合法写法：ctx+Scope、仅 Scope、别名导入、平台级表豁免、构造函数、未导出方法、测试文件、非 repository 包。
+func TestRepoGateAllowsLegitimate(t *testing.T) {
+	dst := copyRepo(t)
+	put(t, dst, "internal/website/internal/repository/ok.go", `package repository
+
+import (
+	"context"
+
+	sc "`+mod+`/internal/platform/tenantscope"
+	"`+mod+`/internal/platform/scope"
+)
+
+type SiteRepo struct{}
+
+func NewSiteRepo() SiteRepo { return SiteRepo{} }
+
+func (SiteRepo) Get(ctx context.Context, s scope.Scope, uid string) error { return nil }
+
+func (SiteRepo) Count(s sc.Scope) (int, error) { return 0, nil }
+
+func (SiteRepo) ListAcrossTenants(ctx context.Context, s scope.Scope) error { return nil }
+
+func (SiteRepo) helper(uid string) {}
+
+// ListNodes 读平台级的 nodes 表。
+// lingedge:platform-table=nodes
+func (SiteRepo) ListNodes(ctx context.Context) error { return nil }
+
+//lingedge:platform-table=clusters
+func (SiteRepo) ListClusters(ctx context.Context) error { return nil }
+
+type Reader interface {
+	Get(ctx context.Context, s scope.Scope, uid string) error
+	helper(uid string)
+}
+
+func NewSiteReader() Reader { return nil }
+
+func Find(ctx context.Context, a, b scope.Scope) error { return nil }
+`)
+	put(t, dst, "internal/website/internal/repository/ok_test.go", "package repository\n\nimport \"context\"\n\nfunc (SiteRepo) NoScopeInTest(ctx context.Context) {}\n")
+	put(t, dst, "internal/website/internal/service/ok.go", "package service\n\nimport \"context\"\n\nfunc Do(ctx context.Context) {}\n")
+	if code, out := runGate(t, dst, "repo"); code != 0 {
+		t.Fatalf("合法写法不应被 repo 门禁拦截，退出码 %d:\n%s", code, out)
 	}
 }
