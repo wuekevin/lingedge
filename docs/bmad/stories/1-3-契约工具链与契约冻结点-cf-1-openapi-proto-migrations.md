@@ -141,7 +141,10 @@ context:
 
 ### 提交与标签
 
-（见下方由收尾步骤填写的实际结果。）
+- 本地提交 `ee6445a832a8a4047bcde78da333c83de2244892`（`feat: Story 1.3 契约工具链与冻结点 CF-1…`，父提交 `1ef0f8c`）；`git add` 逐路径，未含 `_bmad/`、`dist/`、`bin/`、二进制；使用 `git -c user.name=… -c user.email=…`，未改 `git config`；**未 push 任何内容**。
+- `git tag -a contract-v1 ee6445a`（annotated，本地）：`git cat-file -t contract-v1` → `tag`，`git rev-parse 'contract-v1^{commit}'` → `ee6445a832a8a4047bcde78da333c83de2244892`。打标签前核对：AA-6 关闭依据 `architecture-revision-log.md` 与契约一致（`freeze-check` 的 AC7(a)(b)(c)(d)(e) + AC9 全部成立）、1.1 首个提交 `1ef0f8c` 已形成。标签指向的提交即复核通过的提交；之后仅追加本节记录的文档提交，不改契约文件。
+- 打标签后以默认基线复跑 `make contract-check`（`CONTRACT_BASE=contract-v1`）：自测 40 个通过；`openapi-check`、`openapi-breaking`（相对 `contract-v1` 无破坏）、`proto-check`（`buf breaking` 相对标签通过）、`migrations-check`、`freeze-check` 全部通过。
+- 标签**尚未推送**：推送时须 `git push origin main contract-v1`（由用户决定）。
 
 ### 遗留与后续
 
