@@ -1,0 +1,9 @@
+# oasdiff 严重级别覆盖（Story 1.3 AC2）。格式：<check-id> <info|warn|err>，其余检查沿用 oasdiff 默认。
+# 依据：docs/api/README.md §3「新增字段/路径/枚举值允许（expand）」、AC9（TaskType 新增枚举值为非破坏 expand）。
+# oasdiff 默认把「响应枚举新增值」判为 error（客户端可能不认识新值）；本项目约定客户端必须容忍未知枚举值
+# （README §5：未知错误码回退「发生未知错误」+ Request ID；前端枚举映射须有兜底），故降为 info。
+# 枚举「删除值」「收紧为枚举」等仍按 oasdiff 默认判为破坏。
+response-property-enum-value-added info
+response-mediatype-enum-value-added info
+# 以下为「升级」：oasdiff 默认视为 info 的字段删除，在已冻结契约中按 AC2 一律为破坏性（前端类型由契约生成，ADR-014）。
+response-optional-property-removed err

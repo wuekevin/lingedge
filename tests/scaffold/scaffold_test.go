@@ -264,12 +264,13 @@ func TestMakefileTargets(t *testing.T) {
 	root := repoRoot(t)
 	notImplemented := map[string]string{
 		"migrate": "1.6", "migrate-test": "1.6",
-		"proto": "1.3", "proto-check": "1.3", "openapi-check": "1.3",
 		"frontend": "1.36", "e2e": "1.37", "edge-test": "3.22",
 		"release": "1.34",
 	}
 	// security 自 Story 1.2 起为真实目标（运行静态门禁，不再是占位）；其余新增门禁目标同理。
-	implemented := []string{"build", "verify-build", "test", "race", "lint", "security", "gen-lint", "arch-check", "golangci", "shell-check", "gate-selftest", "vuln", "verify-gates"}
+	implemented := []string{"build", "verify-build", "test", "race", "lint", "security", "gen-lint", "arch-check", "golangci", "shell-check", "gate-selftest", "vuln", "verify-gates",
+		// Story 1.3 起为真实目标（契约工具链）。
+		"proto", "proto-check", "openapi-check", "openapi-breaking", "migrations-check", "migrations-seal", "freeze-check", "contract-selftest", "contract-check", "contract-bin"}
 
 	for _, tgt := range implemented {
 		cmd := exec.Command("make", "-n", "--no-print-directory", tgt)
@@ -312,6 +313,14 @@ func TestMakefileWiresGates(t *testing.T) {
 		"security":      {"scripts/gates testdouble", "scripts/gates passwords", "scripts/gates brand", "scripts/gates shell"},
 		"gate-selftest": {"./scripts/gates/...", "GOLANGCI_LINT=", "./tests/gates/..."},
 		"verify-gates":  {"golangci-lint", "scripts/gates testdouble", "./tests/gates/..."},
+		// Story 1.3：契约工具链必须真实接入（任一子命令从配方消失即失败）。
+		"openapi-check":     {"bin/contract openapi-check", "bin/contract openapi-breaking", "-base-ref 'contract-v1'", "oasdiff@v1.38.0"},
+		"proto-check":       {"buf@v1.75.0", " lint", " breaking proto --against '.git#ref=contract-v1,subdir=proto'", "scripts/proto-check-gen.sh"},
+		"proto":             {"buf@v1.75.0", "generate"},
+		"migrations-check":  {"bin/contract migrations-check", "-base-ref 'contract-v1'"},
+		"freeze-check":      {"bin/contract freeze-check"},
+		"contract-selftest": {"scripts/contract", "go vet ./...", "go test -count=1 ./..."},
+		"contract-check":    {"bin/contract openapi-check", "scripts/proto-check-gen.sh", "bin/contract migrations-check", "bin/contract freeze-check", "go test -count=1 ./..."},
 	}
 	for target, parts := range want {
 		out := expand(target)

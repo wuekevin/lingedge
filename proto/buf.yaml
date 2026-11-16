@@ -1,0 +1,20 @@
+# Story 1.3：Node 协议（lingedge.node.v1）的 buf 配置。
+# 工具版本固定在仓库根 Makefile（BUF_VERSION），此处只管规则。
+version: v2
+modules:
+  - path: .
+lint:
+  use:
+    - STANDARD
+  # 已冻结（contract-v1）的命名偏差。改名即破坏线上兼容与文档引用，故登记为例外而不改 .proto；
+  # 理由与评审见 docs/bmad/contract-changes/CF-1.md §proto 例外。新增 .proto 不得再扩大此名单。
+  ignore_only:
+    ENUM_VALUE_PREFIX:
+      - lingedge/node/v1/control.proto      # OPENRESTY_STATE_*：OpenResty 为产品专名，按单词拆分为 OPEN_RESTY 不可读
+    RPC_REQUEST_STANDARD_NAME:
+      - lingedge/node/v1/telemetry.proto    # UploadAccessLogs(LogBatch)：LogBatch 为跨 RPC 复用的批次消息
+    RPC_RESPONSE_STANDARD_NAME:
+      - lingedge/node/v1/telemetry.proto    # UploadAccessLogs → UploadLogsSummary
+breaking:
+  use:
+    - FILE

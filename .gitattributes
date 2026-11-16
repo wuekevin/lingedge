@@ -1,0 +1,2 @@
+# 迁移文件按字节哈希登记（migrations/CHECKSUMS）：强制 LF，避免 Windows autocrlf 令哈希误报。
+migrations/** text eol=lf

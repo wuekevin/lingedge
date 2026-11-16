@@ -57,6 +57,7 @@ updated: 2026-11-16
 - 每个响应返回 `X-Request-ID`；错误体统一 `{"error":{"code","message","message_key","details[]","request_id"}}`。
 - 分页：页码 `page/page_size`（默认 20，最大 200）→ `{items,page,page_size,total}`；游标 `cursor/limit` → `{items,next_cursor}`。
 - 异步：耗时操作 `202 + Task`（`Location: /api/v1/tasks/{uid}`）；任务类型为白名单枚举。
+- **TaskType 事实源与内部周期作业（AA-8，Story 1.3 AC9）**：OpenAPI `TaskType`（25 项）是 API 可见任务类型的**唯一事实源**。**内部周期作业**（`tasks.reap`、`idempotency.cleanup`、`sessions.cleanup`、`partition.maintain`）由 Scheduler 注册，不属于 `TaskType`、不对外暴露、不可经 API 入队；"注册表 ⊆ TaskType" 的一致性 CI（Story 1.14）只覆盖 `TaskType` 范围，内部周期作业以此清单为界（`scripts/contract` 的 `freeze-check` 断言二者互不相交）。
 - 幂等：创建类 `POST` 支持 `Idempotency-Key`；乐观并发：`If-Match` + 资源 `version`。
 - 租户：Console 主体=其租户；Admin 代租户须带 `X-Tenant-ID`（须 `tenant:impersonate`）；`x-tenant-scope` 取值 `platform|tenant|either|public`；跨租户访问一律 `404 resource.not_found`。
 - **租户响应脱敏（R-T1，NFR-14）**：`tenant|either` 的 operation 请求/响应不得含 node/cluster 内部标识；灰度/批次/集群放置仅平台可见可设；租户发布请求只有 `config_version` 与 `change_note`。
@@ -65,9 +66,9 @@ updated: 2026-11-16
 
 ## 3. 契约冻结与破坏性变更检测（PRD D-11）
 
-1. 架构阶段末给 `openapi.yaml` 与 `proto/` 打标签（如 `contract-v0.1`），官网与基础平台才可并行开发。
-2. CI 将 PR 与标签版本比较：**删除字段 / 收紧约束 / 改变语义 = 破坏性**，需 ADR 与版本号变更；新增字段/路径/枚举值允许（expand）。工具选型：OpenAPI 用 openapi-diff 或等效，proto 用 buf breaking 或等效——均「实现时核对」。
-3. 路由一致性（NFR-4、NFR-22）：CI 校验每条已注册路由在本文件存在，且声明 `x-permissions`、`x-tenant-scope`、`x-audit`、`x-phase`；未声明者构建失败；**路径段不得含 `:`**（Gin 通配歧义，IMP-21）；`x-tenant-scope: tenant|either` 的 schema 不得含 node/cluster 标识（R-T1 静态扫描，见 §6）。
+1. 冻结点 CF-1（Story 1.3）：`openapi.yaml`、`proto/` 与 ERD/迁移结构设计打 git 标签 `contract-v1`，官网与基础平台自此可并行开发；评审记录见 `docs/bmad/contract-changes/CF-1.md`。
+2. CI 将 PR 与标签版本比较：**删除字段 / 收紧约束 / 改变语义 = 破坏性**，需 ADR 与版本号变更；新增字段/路径/枚举值允许（expand）。工具（Story 1.3 已落地，版本固定在 Makefile）：OpenAPI 用 **oasdiff v1.38.0**（`make openapi-check`，另加 operationId/`x-permissions`/`x-tenant-scope`/`x-reauth` 与本文 §5 错误码索引的比较），proto 用 **buf v1.75.0**（`make proto-check`），迁移用 `migrations/CHECKSUMS`（`make migrations-check`）。破坏性变更须附变更说明与 ADR：`make openapi-check CONTRACT_NOTE=docs/bmad/contract-changes/<说明>.md`（模板 `_template.md`）。oasdiff 默认把「响应枚举新增值」判为破坏，本项目按 expand 约定降级（`scripts/contract/data/oasdiff-severity-levels.txt`），客户端须容忍未知枚举值；而「删除响应可选字段」默认只算提示，本项目升级为破坏。
+3. 路由一致性（NFR-4、NFR-22）：CI 校验每条已注册路由在本文件存在，且声明 `x-permissions`、`x-tenant-scope`、`x-audit`、`x-phase`；未声明者构建失败；**路径段不得含 `:`**（Gin 通配歧义，IMP-21）；`x-tenant-scope: tenant|either` 的 schema 不得含 node/cluster 标识（R-T1 静态扫描，见 §6）。以上静态规则已由 `make openapi-check` 落地，另含：`x-reauth: true` 的 operation 集合由 `scripts/contract/data/x-reauth.txt` 固定（IMP-12）；list 类 operation 必须声明分页参数；对外 schema 不得暴露内部整型 `id`（L22）。
 4. 前端 API 类型自本文件生成，禁止手写重复类型（ADR-014）。
 5. 未交付阶段（`x-phase` 晚于当前阶段）的接口：服务端不注册或返回 `403 feature.disabled`；前端不渲染（NFR-1/2）。
 
@@ -215,7 +216,7 @@ updated: 2026-11-16
 
 ## 6. 生成与维护
 
-`openapi.yaml` 是**手工维护的事实源**（改动用定点文本编辑，不要整文件重新序列化）。2026-11-16 修订后已验证：`openapi-spec-validator` 0.7.2 报 `OK`；Ruby `YAML` 可解析；所有 `$ref` 可解析；operationId 唯一；每个操作带 `x-permissions/x-tenant-scope/x-audit/x-phase`；路径段不含 `:`；**租户脱敏静态扫描通过**（规则：对 `x-tenant-scope ∈ {tenant, either}` 的 operation，递归展开请求参数/请求体/响应 schema（跟随 `$ref`），断言不出现属性名匹配 `^(node|cluster)_(uid|name|id|uids)$`、`node_*`、`cluster_*`、`egress_node*`、`targets` 的字段；实现时应把同一规则放进 `make openapi-check`）。实现阶段建议：`oapi-codegen` 生成服务端类型（实现时核对）、`openapi-typescript` 生成前端类型（实现时核对）。
+`openapi.yaml` 是**手工维护的事实源**（改动用定点文本编辑，不要整文件重新序列化）。2026-11-16 修订后已验证：`openapi-spec-validator` 0.7.2 报 `OK`；Ruby `YAML` 可解析；所有 `$ref` 可解析；operationId 唯一；每个操作带 `x-permissions/x-tenant-scope/x-audit/x-phase`；路径段不含 `:`；**租户脱敏静态扫描通过**（规则：对 `x-tenant-scope ∈ {tenant, either}` 的 operation，递归展开请求参数/请求体/响应 schema（跟随 `$ref`），断言不出现属性名匹配 `^(node|cluster)_(uid|name|id|uids)$`、`node_*`、`cluster_*`、`egress_node*`、`targets` 的字段；该规则已由 `make openapi-check`（`scripts/contract`）落地，附负向自测）。实现阶段建议：`oapi-codegen` 生成服务端类型（实现时核对）、`openapi-typescript` 生成前端类型（实现时核对）。
 
 ## 7. API 枚举 → UX 固定词映射（唯一映射表）
 

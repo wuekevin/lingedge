@@ -240,7 +240,7 @@ C2。`role_id` FK→roles CASCADE；`permission_id` FK→permissions CASCADE。�
 
 - 主键：`(id, created_at)`；唯一 `uk_audit_logs_uid(uid, created_at)`（分区表唯一键必含分区键）。
 - 索引：`idx_audit_tenant(tenant_id, created_at)`、`idx_audit_actor(actor_user_id, created_at)`、`idx_audit_resource(resource_type, resource_uid, created_at)`、`idx_audit_request(request_id)`、`idx_audit_action(action, created_at)`。
-- 分区：`PARTITION BY RANGE COLUMNS(created_at)` 按月，**含 `pmax VALUES LESS THAN (MAXVALUE)` 兜底分区**（无 `pmax` 时越界 INSERT 报 ERROR 1526，实测）；Worker 的 `partition.maintain` 任务用 `lingedge_maint`（表级 ALTER/DROP）每日把 `pmax` `REORGANIZE` 出未来 N 个月分区，保留期到期 `DROP PARTITION`（README §5.1）。
+- 分区：`PARTITION BY RANGE COLUMNS(created_at)` 按月，**含 `pmax VALUES LESS THAN (MAXVALUE)` 兜底分区**（无 `pmax` 时越界 INSERT 报 ERROR 1526，实测）；Worker 的内部周期作业 `partition.maintain`（非 OpenAPI TaskType，AA-8）用 `lingedge_maint`（表级 ALTER/DROP）每日把 `pmax` `REORGANIZE` 出未来 N 个月分区，保留期到期 `DROP PARTITION`（README §5.1）。
 - 与业务变更**同事务**写入；分区表无外键（实测 ERROR 1506）。
 - 不可变：BEFORE UPDATE/DELETE 触发器（README §5；建触发器需迁移账号具 `SET_USER_ID` 或 `log_bin_trust_function_creators=1`，README §5.1）；应用账号仅 `INSERT, SELECT`。
 - 保留：365 天 `[ASSUMPTION]`（OQ-6），DROP PARTITION。

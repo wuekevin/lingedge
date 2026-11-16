@@ -15,6 +15,19 @@ GOLANGCI_LINT ?= $(GO) run github.com/golangci/golangci-lint/v2/cmd/golangci-lin
 GOVULNCHECK   ?= $(GO) run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
 GATES         ?= $(GO) run ./scripts/gates
 
+# 契约工具链（Story 1.3）：buf、oasdiff 同样 go run <pkg>@<固定版本>；契约检查程序 scripts/contract 是独立 module
+# （kin-openapi 不进根 go.mod），先编译到 bin/contract 再从仓库根运行。
+BUF_VERSION     := v1.75.0
+OASDIFF_VERSION := v1.38.0
+BUF             ?= $(GO) run github.com/bufbuild/buf/cmd/buf@$(BUF_VERSION)
+OASDIFF         ?= $(GO) run github.com/oasdiff/oasdiff@$(OASDIFF_VERSION)
+CONTRACT_BIN    := bin/contract
+CONTRACT        ?= $(CONTRACT_BIN)
+# 冻结基线：与哪个 git ref 比较破坏性变更（CF-1 之后恒为 contract-v1；CF-2 起改为新标签）。
+CONTRACT_BASE   ?= contract-v1
+# 破坏性变更放行：make openapi-check CONTRACT_NOTE=docs/bmad/contract-changes/<变更说明>.md（须含 ADR，见 _template.md）。
+CONTRACT_NOTE   ?=
+
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 0.0.0-dev)
 COMMIT  ?= $(shell git rev-parse --verify --quiet HEAD 2>/dev/null || echo unknown)
 LDFLAGS := -s -w -X $(MODULE)/pkg/version.Version=$(VERSION) -X $(MODULE)/pkg/version.Commit=$(COMMIT)
@@ -28,11 +41,13 @@ endef
 
 .PHONY: help build verify-build test race lint fmt vet check-scaffold clean \
         gen-lint arch-check golangci shell-check gate-selftest vuln verify-gates \
+        contract-bin contract-selftest openapi-breaking migrations-check migrations-seal freeze-check contract-check \
         print-ldflags migrate migrate-test proto proto-check openapi-check frontend e2e edge-test security release
 
 help:
 	@echo "目标: build verify-build test race lint migrate migrate-test proto proto-check openapi-check frontend e2e edge-test security release"
 	@echo "辅助: fmt vet check-scaffold clean gen-lint arch-check golangci shell-check gate-selftest vuln verify-gates"
+	@echo "契约(Story 1.3): contract-check（= contract-selftest openapi-check proto-check migrations-check freeze-check）migrations-seal"
 	@echo "未实现的目标会输出 NOT_IMPLEMENTED(story X.Y) 并以非零退出。"
 
 # 生产构建不得带 lingedge_testdouble 标签（此处从不传入 -tags）。
@@ -112,14 +127,50 @@ migrate:
 migrate-test:
 	$(call not_implemented,1.6)
 
+# --- 契约工具链（Story 1.3）---------------------------------------------------------------------------
+
+contract-bin:
+	@$(GO) build -C scripts/contract -o ../../$(CONTRACT_BIN) .
+
+# 契约检查程序自身的单元自测（含缺元数据 / R-T1 泄漏 / 破坏性变更 / 改动已发布迁移 / buf 破坏性检测的负向用例必须失败）。
+contract-selftest:
+	cd scripts/contract && $(GO) vet ./... && BUF='$(BUF)' OASDIFF='$(OASDIFF)' $(GO) test -count=1 ./...
+
+# 生成 gRPC/Protobuf Go 代码到 $(PROTO_OUT)（buf generate；插件版本固定在 proto/buf.gen.yaml）。
+# 生成物暂不入库、不进根 go.mod，原因见 scripts/proto-check-gen.sh 头注释（go1.27.1 标准库 net/http 的已公布漏洞）。
+PROTO_OUT ?= dist/proto-gen
 proto:
-	$(call not_implemented,1.3)
+	rm -rf $(PROTO_OUT)
+	cd proto && $(BUF) generate --output ../$(PROTO_OUT)
+	printf 'module github.com/wuekevin/lingedge/proto\n\ngo 1.27.0\n' > $(PROTO_OUT)/go.mod
 
+# buf lint + 对 $(CONTRACT_BASE) 的 breaking 检测 + 代码生成可再现且可编译（生成两次比对 + 临时 module 真实编译）。
 proto-check:
-	$(call not_implemented,1.3)
+	cd proto && $(BUF) lint
+	$(BUF) breaking proto --against '.git#ref=$(CONTRACT_BASE),subdir=proto'
+	BUF='$(BUF)' bash scripts/proto-check-gen.sh
 
-openapi-check:
-	$(call not_implemented,1.3)
+# OpenAPI 3.1 校验 + 元数据/路径无冒号/R-T1/x-reauth/分页/无内部 id 静态规则（AC1、AC8），再相对 $(CONTRACT_BASE) 做破坏性变更检测（AC2）。
+openapi-check: contract-bin
+	$(CONTRACT) openapi-check
+	$(CONTRACT) openapi-breaking -base-ref '$(CONTRACT_BASE)' -oasdiff '$(OASDIFF)' $(if $(CONTRACT_NOTE),-note '$(CONTRACT_NOTE)')
+
+openapi-breaking: contract-bin
+	$(CONTRACT) openapi-breaking -base-ref '$(CONTRACT_BASE)' -oasdiff '$(OASDIFF)' $(if $(CONTRACT_NOTE),-note '$(CONTRACT_NOTE)')
+
+# migrations/CHECKSUMS：已发布迁移被改动/删除即失败；新增迁移须带 lingedge:class 标注（细则随 Story 1.6）。
+migrations-check: contract-bin
+	$(CONTRACT) migrations-check -base-ref '$(CONTRACT_BASE)'
+
+# 把未登记的迁移追加登记为「已发布」（只追加，不改写已有行；由评审后的发布动作调用）。
+migrations-seal: contract-bin
+	$(CONTRACT) migrations-seal
+
+# CF-1 冻结前置复核（AC7/AC9）：M1=200 operation、proto 符号、迁移顺序与骨架一致、待环境验证登记、评审记录、TaskType 口径。
+freeze-check: contract-bin
+	$(CONTRACT) freeze-check
+
+contract-check: contract-selftest openapi-check proto-check migrations-check freeze-check
 
 frontend:
 	$(call not_implemented,1.36)

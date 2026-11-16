@@ -89,7 +89,9 @@ inputs:
 | golangci-lint | Go 静态检查（含 depguard、forbidigo） | 未全局安装；Makefile 以 `go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0` 固定版本调用（2026-11-16 在本机 go1.27.1 上实测可编译运行，`make lint` 通过） | Story 1.2 已落地；升级版本须单独变更并跑完整门禁 |
 | depguard / go-arch-lint | 模块依赖方向强制（ADR-001） | 选用 **depguard**（内置于 golangci-lint v2.15.0，无需另装）；go-arch-lint 未采用 | 规则由 `scripts/gates/spec.go` 经 `make gen-lint` 机械生成到 `.golangci.yml`（Story 1.2） |
 | goose | Migration CLI / 库 | 未安装 | 以库形式嵌入，CLI 仅开发用 |
-| buf | proto lint / breaking（ADR-017） | 未安装 | 备选：`protoc` + 自写兼容检查；实现时核对 |
+| buf | proto lint / breaking / 代码生成（ADR-017） | 未全局安装；Makefile 以 `go run github.com/bufbuild/buf/cmd/buf@v1.75.0` 固定版本调用（2026-11-17 在本机 go1.27.1 上实测：lint、build、breaking、generate 均可运行） | Story 1.3 已落地；插件 `protoc-gen-go@v1.36.12`、`protoc-gen-go-grpc@v1.6.2` 同样 `go run` 固定（`proto/buf.gen.yaml`）；生成物暂不入库（`make proto` 输出到 `dist/proto-gen/`，`make proto-check` 生成两次比对并在临时 module 真实编译；入库时机见 `scripts/proto-check-gen.sh` 头注释） |
+| oasdiff | OpenAPI 破坏性变更检测（D-11） | 未全局安装；Makefile 以 `go run github.com/oasdiff/oasdiff@v1.38.0` 固定版本调用（本机实测支持 OpenAPI 3.1） | Story 1.3 已落地；严重级别覆盖见 `scripts/contract/data/oasdiff-severity-levels.txt` |
+| kin-openapi | OpenAPI 3.1 校验与静态规则 | 独立 module `scripts/contract`（kin-openapi v0.153.0），不进根 `go.mod` | Story 1.3 已落地；`make openapi-check` |
 | oapi-codegen / openapi-typescript | OpenAPI 代码/类型生成 | 未安装 | 实现时核对 |
 | OpenResty `resty` CLI / busted | Lua 引擎测试 | 未安装 | 实现时核对 |
 | 依赖/漏洞扫描、SBOM 工具 | 供应链门禁（NFR-15） | 漏洞扫描：govulncheck 经 `go run golang.org/x/vuln/cmd/govulncheck@v1.9.0` 调用（`make vuln`，本机实测可运行）；SBOM / 许可证扫描：**实现时选型** | `make vuln` 需访问 vuln.go.dev，未纳入 `make security`；完整供应链门禁属 Story 1.34 |
@@ -104,7 +106,7 @@ inputs:
 | MySQL 8.0.46 | `mysqld` 在 `/opt/homebrew/opt/mysql@8.0/bin/`，`mysql` 客户端不在 PATH | 可用于 Server 集成/迁移测试。启动可用 `brew services start mysql@8.0`；连接用 `/opt/homebrew/opt/mysql@8.0/bin/mysql -u<用户> -p`。**本文不启动、不修改本机服务**；测试库用独立库名（如 `lingedge_test`）与独立账号，避免触碰本机其它项目；做 DDL 实测应使用**临时 datadir + 非默认端口**的独立 `mysqld`，测试后关闭并清理，不得影响他人数据 |
 | Redis 8.10.1 | 已安装 | `brew services start redis` 或 `redis-server <conf>`；测试使用独立端口/数据库编号；同上不在本文中真的启动 |
 | nginx 1.31.8（Homebrew） | 已安装，无 Lua | 仅作静态/反代用，**不满足 Node 测试需求** |
-| protoc libprotoc 36.1 | 已安装 | 可生成 Go 代码；插件 `protoc-gen-go(-grpc)` 实现时安装 |
+| protoc libprotoc 36.1 | 已安装 | 修订期用于编译校验；Story 1.3 起 lint/生成/破坏性检测统一走 buf（`make proto`、`make proto-check`），不再依赖本机 protoc |
 | **OpenResty** | **缺失** | 关键缺口：见 §6。macOS 上编译/安装 OpenResty 不作为必需路径（且与 Linux 行为差异大） |
 | Docker | 不使用 | 基线禁止作为必选组件（NFR-7） |
 | 宝塔面板、systemd | 本机不可用 | 仅在 Linux 验收机验证 |
@@ -125,7 +127,7 @@ inputs:
 | `make race` | Go `-race` 测试 |
 | `make lint` | golangci-lint（含 depguard/依赖方向）、前端 lint（禁用 `v-html` 规则）、`sh -c` 拼接检查 |
 | `make migrate` | 本地执行 goose 迁移（`migrate plan/up/status`）；迁移测试 `make migrate-test`（升/降级路径与 `lingedge:class` 标注检查，**并含 DDL 预检门禁**，见 §5） |
-| `make proto` | 生成 gRPC/Protobuf 代码；`make proto-check` 破坏性变更检测 |
+| `make proto` | 生成 gRPC/Protobuf 代码；`make proto-check` 破坏性变更检测（**Story 1.3 已实现**：buf lint + `buf breaking` 对 `contract-v1` + 生成可再现且可编译；另有 `make openapi-check`、`make migrations-check`、`make freeze-check`、`make contract-check`） |
 | `make openapi-check` | 校验 `docs/api/openapi.yaml`、路由与契约一致性、破坏性变更检测（D-11）。**路径约束**：路径段内不得含 `:`——Gin v1.12.0 已实测 `POST /sites/:siteId/rules:validate` 被解析为静态 `rules` + 通配参数，`/sites/S1/rulesXXX` 也会命中该 handler（IMP-21），故契约使用 `/rule-validations`、`/certificate-parses`；CI 增“OpenAPI 路径模板无 `:`”检查 |
 | `make frontend` | 构建 admin/console/website；`console` 产物不含 admin 路由的检查 |
 | `make e2e` | Playwright E2E（需运行环境，见 §6） |
