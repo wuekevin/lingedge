@@ -13,5 +13,9 @@
 //     db/tenantdb：租户范围表的查询构建器（自动追加 tenant_id、INSERT 强制写入 Scope 租户、AcrossTenants 方法族）；
 //   - tenantscope：租户 Scope 的类型与唯一构造入口（FromPrincipal/FromTask/PlatformForJob，包外无法构造非零 Scope）；scope：Scope 的类型别名（Repository 签名用）。
 //
+// 已交付（Story 1.6）：
+//   - migrate：迁移框架（goose v3 嵌入；分类标注与结构 lint、DDL 预检、逐表授权检查；`lingedge-server migrate plan|up|down|status|recover|lint`：
+//     版本门槛、迁移互斥、dirty/校验和、不可逆确认）；迁移文件在仓库根 migrations/（migrations.FS）。
+//
 // 其余基础设施（httpx、task 运行时、keyprovider、eventbus、audit 等）随后续 Story 增加；ports 子包见其自身说明。
 package platform

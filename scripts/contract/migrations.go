@@ -45,7 +45,8 @@ func parseChecksums(data string) ([]checksumEntry, error) {
 
 // isMigrationFile 判断目录内文件是否为迁移文件（排除清单本身与占位文件）。
 func isMigrationFile(name string) bool {
-	if name == checksumsName || strings.HasPrefix(name, ".") {
+	// embed.go 是把迁移目录嵌入二进制的 Go 文件（Story 1.6），不是迁移。
+	if name == checksumsName || name == "embed.go" || strings.HasPrefix(name, ".") {
 		return false
 	}
 	ext := strings.ToLower(filepath.Ext(name))
@@ -84,9 +85,10 @@ func sha256File(path string) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
-// classHookRe 是「新增迁移须带 lingedge:class 标注」的预留钩子（AC4）：此处只检查标注存在；
-// 取值集合（expand/contract/…）与语法细则由 Story 1.6 的迁移 lint 落地并收紧。
-var classHookRe = regexp.MustCompile(`lingedge:class\b`)
+// classHookRe 是「新增迁移须带合法 lingedge:class 标注」的检查（Story 1.3 AC4，Story 1.6 收紧）：
+// 文件第一行必须是 `-- lingedge:class=reversible|expand|irreversible`。其余规则（命名、Down、幂等、授权、DDL 预检）由
+// internal/platform/migrate 的迁移 lint 执行（make migrate-test），本工具只守住「已发布迁移只追加」与标注这一底线。
+var classHookRe = regexp.MustCompile(`\A-- lingedge:class=(reversible|expand|irreversible)[ \t]*\r?\n`)
 
 // checkMigrations 校验目录与清单：已发布迁移哈希一致、未登记迁移带 class 标注、清单相对基线只增不改。
 // baseChecksums 为基线 ref 中的清单内容（nil 表示无基线，跳过追加性检查）。
@@ -124,7 +126,7 @@ func checkMigrations(dir string, baseChecksums []byte) ([]finding, error) {
 			return nil, rerr
 		}
 		if !classHookRe.Match(b) {
-			fs = append(fs, finding{"migrations", n, "新增迁移缺少 `lingedge:class` 标注（分类 lint 随 Story 1.6 落地）"})
+			fs = append(fs, finding{"migrations", n, "新增迁移第一行必须是 `-- lingedge:class=reversible|expand|irreversible`（完整分类 lint 见 make migrate-test）"})
 		}
 	}
 	if baseChecksums != nil {
@@ -187,7 +189,7 @@ func sealMigrations(dir string) ([]string, error) {
 			return nil, rerr
 		}
 		if !classHookRe.Match(b) {
-			return nil, fmt.Errorf("%s 缺少 `lingedge:class` 标注，不能登记为已发布", n)
+			return nil, fmt.Errorf("%s 第一行不是合法的 `-- lingedge:class=…` 标注，不能登记为已发布", n)
 		}
 		h, _ := sha256File(filepath.Join(dir, n))
 		out += h + "  " + n + "\n"

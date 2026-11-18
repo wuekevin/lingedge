@@ -115,6 +115,14 @@ func buildDepRules() []depRule {
 	}
 	rules = append(rules, sqlRule)
 
+	// 9. 迁移库 goose 只在迁移框架包内使用（Story 1.6、ADR-016）；测试、tests/、scripts/ 另行豁免。
+	gooseRule := depRule{name: "goose-only-in-migrate", files: []string{"!$test", "!" + base + "/tests/**", "!" + base + "/scripts/**"}}
+	for _, g := range gooseImportGlobsAllowed {
+		gooseRule.files = append(gooseRule.files, "!"+base+"/"+g)
+	}
+	gooseRule.deny = append(gooseRule.deny, denyEntry{gooseImportPkg, "只有 internal/platform/migrate 可以 import goose：迁移的分类标注、校验和、dirty、互斥与版本门槛都在该包实现，直接使用 goose 会绕过这些保证（ADR-016）；其他代码经 migrate.Runner 调用"})
+	rules = append(rules, gooseRule)
+
 	sort.SliceStable(rules, func(i, j int) bool { return rules[i].name < rules[j].name })
 	return rules
 }

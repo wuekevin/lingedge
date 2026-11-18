@@ -1,0 +1,8 @@
+-- lingedge:class=expand
+-- lingedge:summary=第二条语句长时间休眠，用于在迁移中途杀死进程
+-- +goose Up
+CREATE TABLE IF NOT EXISTS crash_a (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY) ENGINE=InnoDB;
+DO SLEEP(120);
+CREATE TABLE IF NOT EXISTS crash_b (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY) ENGINE=InnoDB;
+GRANT SELECT, INSERT, UPDATE, DELETE ON `crash_a` TO lingedge_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON `crash_b` TO lingedge_app;

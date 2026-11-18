@@ -69,7 +69,7 @@ func copyRepo(t *testing.T) string {
 			t.Fatal(err)
 		}
 	}
-	for _, d := range []string{"cmd", "internal", "pkg", "scripts"} {
+	for _, d := range []string{"cmd", "internal", "migrations", "pkg", "scripts"} {
 		err := filepath.WalkDir(filepath.Join(root, d), func(p string, e fs.DirEntry, err error) error {
 			if err != nil || e.IsDir() {
 				return err
@@ -209,13 +209,17 @@ func TestLintGatesBlockViolationsAndAllowLegitimate(t *testing.T) {
 		"internal/platform/other/prod_now.go":               {"package other\n\nimport \"time\"\n\nvar Stamp = func() time.Time {\n\treturn time.Now()\n}\n", "forbidigo", "[no-direct-clock]"},
 		"internal/auth/internal/service/prod_exec_alias.go": {"package service\n\nimport (\n\t\"context\"\n\tx \"os/exec\"\n)\n\nvar Run2 = func(ctx context.Context, a string) error {\n\treturn x.CommandContext(ctx, \"ls\", a).Run()\n}\n", "forbidigo", "os/exec"},
 		// 数据库访问边界（Story 1.5 AC5）：sqlx / database/sql / MySQL 驱动只允许出现在 internal/platform/db 与 repository 包。
-		"internal/website/internal/service/sqlx_in_service.go": {"package service\n\nimport \"github.com/jmoiron/sqlx\"\n\nvar _ *sqlx.DB\n", "depguard", "只有 internal/platform/db 与 repository 包可以 import sqlx"},
+		"internal/website/internal/service/sqlx_in_service.go": {"package service\n\nimport \"github.com/jmoiron/sqlx\"\n\nvar _ *sqlx.DB\n", "depguard", "只有 internal/platform/db、internal/platform/migrate 与 repository 包可以 import sqlx"},
 		"internal/origin/internal/handler/sql_in_handler.go":   {"package handler\n\nimport \"database/sql\"\n\nvar _ *sql.DB\n", "depguard", "database/sql"},
 		"internal/cache/internal/service/driver_in_service.go": {"package service\n\nimport _ \"github.com/go-sql-driver/mysql\"\n", "depguard", "MySQL 驱动"},
-		"internal/platform/other/sqlx_in_platform.go":          {"package other\n\nimport \"github.com/jmoiron/sqlx\"\n\nvar _ *sqlx.Tx\n", "depguard", "只有 internal/platform/db 与 repository 包可以 import sqlx"},
-		"cmd/lingedge-server/sqlx_in_cmd.go":                   {"package main\n\nimport \"github.com/jmoiron/sqlx\"\n\nvar _ *sqlx.DB\n", "depguard", "只有 internal/platform/db 与 repository 包可以 import sqlx"},
-		"internal/website/internal/repository/sql_concat.go":   {"package repository\n\nimport \"fmt\"\n\nvar Concat = func(uid string) string {\n\treturn fmt.Sprintf(\"SELECT id FROM sites WHERE uid = '%s'\", uid)\n}\n", "forbidigo", "[no-sql-concat]"},
-		"internal/website/internal/repository/sql_join.go":     {"package repository\n\nimport \"strings\"\n\nvar Join = func(cols []string) string {\n\treturn \"SELECT \" + strings.Join(cols, \",\")\n}\n", "forbidigo", "[no-sql-concat]"},
+		"internal/platform/other/sqlx_in_platform.go":          {"package other\n\nimport \"github.com/jmoiron/sqlx\"\n\nvar _ *sqlx.Tx\n", "depguard", "只有 internal/platform/db、internal/platform/migrate 与 repository 包可以 import sqlx"},
+		"cmd/lingedge-server/sqlx_in_cmd.go":                   {"package main\n\nimport \"github.com/jmoiron/sqlx\"\n\nvar _ *sqlx.DB\n", "depguard", "只有 internal/platform/db、internal/platform/migrate 与 repository 包可以 import sqlx"},
+		// 迁移库 goose 只允许出现在 internal/platform/migrate（Story 1.6）；迁移框架包本身可以用 database/sql 与 sqlx，db 包不得用 goose。
+		"internal/website/internal/service/goose_in_service.go": {"package service\n\nimport _ \"github.com/pressly/goose/v3\"\n", "depguard", "只有 internal/platform/migrate 可以 import goose"},
+		"internal/platform/db/goose_in_db.go":                   {"package db\n\nimport _ \"github.com/pressly/goose/v3\"\n", "depguard", "只有 internal/platform/migrate 可以 import goose"},
+		"cmd/lingedge-server/goose_in_cmd.go":                   {"package main\n\nimport _ \"github.com/pressly/goose/v3\"\n", "depguard", "只有 internal/platform/migrate 可以 import goose"},
+		"internal/website/internal/repository/sql_concat.go":    {"package repository\n\nimport \"fmt\"\n\nvar Concat = func(uid string) string {\n\treturn fmt.Sprintf(\"SELECT id FROM sites WHERE uid = '%s'\", uid)\n}\n", "forbidigo", "[no-sql-concat]"},
+		"internal/website/internal/repository/sql_join.go":      {"package repository\n\nimport \"strings\"\n\nvar Join = func(cols []string) string {\n\treturn \"SELECT \" + strings.Join(cols, \",\")\n}\n", "forbidigo", "[no-sql-concat]"},
 		// 受限池构造函数（AC6）：maint/migrate 池只能由白名单包构造；别名导入同样被识别。
 		"internal/auth/internal/service/maint_pool.go":        {"package service\n\nimport (\n\t\"context\"\n\n\t\"github.com/wuekevin/lingedge/internal/platform/db\"\n)\n\nvar OpenMaintBad = func(ctx context.Context) {\n\t_, _ = db.OpenMaint(ctx, db.Config{})\n}\n", "forbidigo", "[db-pool-maint]"},
 		"internal/auth/internal/handler/maint_pool_alias.go":  {"package handler\n\nimport (\n\t\"context\"\n\n\tdbx \"github.com/wuekevin/lingedge/internal/platform/db\"\n)\n\nvar OpenMaintAliasBad = func(ctx context.Context) {\n\t_, _ = dbx.OpenMaint(ctx, dbx.Config{})\n}\n", "forbidigo", "[db-pool-maint]"},
@@ -257,6 +261,7 @@ func TestLintGatesBlockViolationsAndAllowLegitimate(t *testing.T) {
 		"internal/scheduler/internal/service/ok_maint.go":   "package service\n\nimport (\n\t\"context\"\n\n\t\"github.com/wuekevin/lingedge/internal/platform/db\"\n)\n\nvar OpenMaintOK = func(ctx context.Context) {\n\t_, _ = db.OpenMaint(ctx, db.Config{})\n}\n",
 		"cmd/lingedge-worker/ok_maint.go":                   "package main\n\nimport (\n\t\"context\"\n\n\t\"github.com/wuekevin/lingedge/internal/platform/db\"\n)\n\nvar Open = func(ctx context.Context) {\n\t_, _ = db.OpenMaint(ctx, db.Config{})\n\t_, _ = db.OpenApp(ctx, db.Config{})\n}\n",
 		"cmd/lingedge-server/ok_migrate.go":                 "package main\n\nimport (\n\t\"context\"\n\n\t\"github.com/wuekevin/lingedge/internal/platform/db\"\n)\n\nvar Migrate = func(ctx context.Context) {\n\t_, _ = db.OpenMigrate(ctx, db.Config{})\n}\n",
+		"internal/platform/migrate/ok_goose.go":             "package migrate\n\nimport (\n\t\"database/sql\"\n\n\t\"github.com/jmoiron/sqlx\"\n\t\"github.com/pressly/goose/v3\"\n)\n\ntype Raw struct {\n\tD *sql.DB\n\tX *sqlx.DB\n\tP *goose.Provider\n}\n",
 		"internal/platform/migrate/ok_migrate.go":           "package migrate\n\nimport (\n\t\"context\"\n\n\t\"github.com/wuekevin/lingedge/internal/platform/db\"\n)\n\nvar OpenMigrateOK = func(ctx context.Context) {\n\t_, _ = db.OpenMigrate(ctx, db.Config{})\n}\n",
 		"internal/auth/internal/service/ok_app_pool.go":     "package service\n\nimport (\n\t\"context\"\n\n\t\"github.com/wuekevin/lingedge/internal/platform/db\"\n)\n\nvar OpenAppOK = func(ctx context.Context) {\n\t_, _ = db.OpenApp(ctx, db.Config{})\n}\n",
 		"internal/tenant/internal/handler/ok_mint.go":       "package handler\n\nimport \"github.com/wuekevin/lingedge/internal/platform/tenantscope\"\n\nvar Mint = func(p tenantscope.Principal) {\n\t_, _ = tenantscope.FromPrincipal(p, tenantscope.RouteTenant, tenantscope.NoTarget())\n}\n",

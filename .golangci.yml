@@ -115,6 +115,16 @@ linters:
           deny:
             - pkg: "github.com/wuekevin/lingedge/internal/tools"
               desc: "cmd/lingedge-worker 不得 import internal/tools（Tools 与 Server 无编译依赖）"
+        goose-only-in-migrate:
+          list-mode: lax
+          files:
+            - "!$test"
+            - "!${base-path}/tests/**"
+            - "!${base-path}/scripts/**"
+            - "!${base-path}/internal/platform/migrate/**"
+          deny:
+            - pkg: "github.com/pressly/goose/v3"
+              desc: "只有 internal/platform/migrate 可以 import goose：迁移的分类标注、校验和、dirty、互斥与版本门槛都在该包实现，直接使用 goose 会绕过这些保证（ADR-016）；其他代码经 migrate.Runner 调用"
         module-auth:
           list-mode: lax
           files:
@@ -1295,14 +1305,15 @@ linters:
             - "!${base-path}/tests/**"
             - "!${base-path}/scripts/**"
             - "!${base-path}/internal/platform/db/**"
+            - "!${base-path}/internal/platform/migrate/**"
             - "!${base-path}/internal/**/repository/**"
           deny:
             - pkg: "github.com/jmoiron/sqlx"
-              desc: "只有 internal/platform/db 与 repository 包可以 import sqlx（*sqlx.DB/*sqlx.Tx 不得出现在 Repository 之外；ADR-009 §6、ADR-001 §9）"
+              desc: "只有 internal/platform/db、internal/platform/migrate 与 repository 包可以 import sqlx（*sqlx.DB/*sqlx.Tx 不得出现在 Repository 之外；ADR-009 §6、ADR-001 §9）"
             - pkg: "database/sql"
-              desc: "只有 internal/platform/db 与 repository 包可以 import database/sql；Service/Handler 经 Repository 与 db.WithTx 访问数据库，用 db.ErrNotFound/db.Result 代替 sql 类型"
+              desc: "只有 internal/platform/db、internal/platform/migrate 与 repository 包可以 import database/sql；Service/Handler 经 Repository 与 db.WithTx 访问数据库，用 db.ErrNotFound/db.Result 代替 sql 类型"
             - pkg: "github.com/go-sql-driver/mysql"
-              desc: "只有 internal/platform/db 与 repository 包可以 import MySQL 驱动；需要错误号时用 db.MySQLErrorNumber/db.IsDuplicate"
+              desc: "只有 internal/platform/db、internal/platform/migrate 与 repository 包可以 import MySQL 驱动；需要错误号时用 db.MySQLErrorNumber/db.IsDuplicate"
         no-test-infra-in-production:
           list-mode: lax
           files:

@@ -48,6 +48,7 @@ help:
 	@echo "目标: build verify-build test race lint migrate migrate-test proto proto-check openapi-check frontend e2e edge-test security release"
 	@echo "辅助: fmt vet check-scaffold clean gen-lint arch-check golangci shell-check gate-selftest vuln verify-gates"
 	@echo "契约(Story 1.3): contract-check（= contract-selftest openapi-check proto-check migrations-check freeze-check）migrations-seal"
+	@echo "迁移(Story 1.6): migrate（MIGRATE_ARGS=plan|up|down|status|recover|lint ...）migrate-test"
 	@echo "未实现的目标会输出 NOT_IMPLEMENTED(story X.Y) 并以非零退出。"
 
 # 生产构建不得带 lingedge_testdouble 标签（此处从不传入 -tags）。
@@ -126,11 +127,24 @@ verify-gates: lint security gate-selftest
 check-scaffold:
 	$(GO) test -count=1 -v ./tests/scaffold/...
 
+# --- 迁移框架（Story 1.6）----------------------------------------------------------------------------
+# `make migrate MIGRATE_ARGS="status --host 127.0.0.1 --database lingedge"`：构建 lingedge-server 并运行其 migrate 子命令
+# （迁移账号口令经环境变量 LINGEDGE_MIGRATE_DB_PASSWORD 或 LINGEDGE_MIGRATE_DB_PASSWORD_FILE，不经命令行）。
+MIGRATE_ARGS ?= help
 migrate:
-	$(call not_implemented,1.6)
+	@mkdir -p bin
+	@$(GOBUILD) -o bin/lingedge-server ./cmd/lingedge-server
+	@bin/lingedge-server migrate $(MIGRATE_ARGS)
 
+# 迁移测试台（AC5/AC6）：① 内嵌迁移的静态 lint（分类标注/命名/幂等/逐表授权/DDL 预检）；② 迁移包单元测试；
+# ③ tests/migrations：真实 MySQL 上的 DDL 规则 26 例、M1 骨架 61+6 表、13 个迁移经框架重放、升降级/校验和/dirty/崩溃/互斥/预检、lint 负向夹具。
+# 用独立临时 mysqld 实例（tests/mysqltest；不触碰本机常驻实例，用后删除）。MySQL 缺失时缺省视为失败：
+# MIGRATE_TEST_REQUIRE_MYSQL=0 可降级为「跳过并标等待环境验证」（跳过不代表通过）。8.0.16 最低版本需在 CI/验收机另行验证。
+MIGRATE_TEST_REQUIRE_MYSQL ?= 1
 migrate-test:
-	$(call not_implemented,1.6)
+	$(GO) run ./cmd/lingedge-server migrate lint
+	$(GO) test -count=1 ./internal/platform/migrate/...
+	LINGEDGE_REQUIRE_MYSQL=$(MIGRATE_TEST_REQUIRE_MYSQL) $(GO) test -count=1 -v ./tests/migrations/...
 
 # --- 契约工具链（Story 1.3）---------------------------------------------------------------------------
 
@@ -163,7 +177,7 @@ openapi-check: contract-bin
 openapi-breaking: contract-bin
 	$(CONTRACT) openapi-breaking -base-ref '$(CONTRACT_BASE)' -oasdiff '$(OASDIFF)' $(if $(CONTRACT_NOTE),-note '$(CONTRACT_NOTE)')
 
-# migrations/CHECKSUMS：已发布迁移被改动/删除即失败；新增迁移须带 lingedge:class 标注（细则随 Story 1.6）。
+# migrations/CHECKSUMS：已发布迁移被改动/删除即失败；新增迁移须带合法的 lingedge:class 首行标注（完整 lint 见 make migrate-test）。
 migrations-check: contract-bin
 	$(CONTRACT) migrations-check -base-ref '$(CONTRACT_BASE)'
 

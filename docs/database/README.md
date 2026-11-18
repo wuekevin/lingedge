@@ -21,7 +21,7 @@ updated: 2026-11-16
 | [dns-scheduling-security.md](dns-scheduling-security.md) | DNS/调度/健康检查、WAF/IP 列表/安全事件、四层代理、rollup/探测、告警/通知 |
 | [billing-support.md](billing-support.md) | 产品/套餐/订阅/订单/钱包/计量/账单/支付/代理商、工单 |
 | [cms.md](cms.md) | 官网 CMS（`website_*`） |
-| [verification/](verification/) | DDL 规则实测脚本：`m1-fk-skeleton.sql`（M1 迁移顺序骨架）、`ddl-rules.sql` + `run_ddl_rules.py`（规则回归，§9） |
+| [verification/](verification/) | DDL 规则实测脚本：`m1-fk-skeleton.sql`（M1 迁移顺序骨架）、`ddl-rules.sql` + `run_ddl_rules.py`（规则回归，§9）；**Story 1.6 起在 `tests/migrations/` 有逐字节副本并纳入 `make migrate-test`**（原件被 CF-1 冻结复核引用，两份一致由测试守住） |
 
 ## 2. 全局约定
 
@@ -402,6 +402,7 @@ END;
 - 实测（MySQL 8.0.46，`log_bin=ON`、`log_bin_trust_function_creators=0`）：仅 `ALL ON db.*` 的账号建触发器报 **ERROR 1419**（需要 SUPER）；同账号另被授予全局 `SET_USER_ID`，或 `log_bin_trust_function_creators=1`，即可建成。宝塔 MySQL 常默认开启 binlog，故**安装向导预检**：读取 `@@log_bin`、`@@log_bin_trust_function_creators`，并用迁移账号在临时表上建/删一个探针触发器；失败则提示两种处置（授予 `SET_USER_ID`，或在 `my.cnf` 设 `log_bin_trust_function_creators=1` 后重启）。
 - 表级授权的 `lingedge_maint` 不能 `DROP` 其它表（实测 ERROR 1142）；`lingedge_app` 对 `audit_logs` 的 UPDATE/DROP 被拒。
 - **实现备注（Story 1.5 实测，MySQL 8.0.46）**：上表 `lingedge_app` 一行写作 `ON db.*`，但库级授权与「`audit_logs`、`wallet_entries` 仅 `SELECT, INSERT`」无法同时成立——权限取并集，且不能从库级授权上做表级 `REVOKE`（报 ERROR 1147）。因此 **`lingedge_app` 必须逐表授权**：每个迁移在建表后由 `lingedge_migrate`（持有 `GRANT OPTION`）执行 `GRANT SELECT, INSERT, UPDATE, DELETE ON db.<表> TO lingedge_app`（不可变表只授 `SELECT, INSERT`），与 `lingedge_maint` 的表级授权同一机制，Story 1.6/1.7 的迁移与 lint 须据此实现（回归：`tests/integration/db/accounts_test.go`）。
+- **逐表授权已在迁移 lint 中强制（Story 1.6）**：每个 `CREATE TABLE` 之后必须有 `GRANT SELECT, INSERT, UPDATE, DELETE ON <表> TO lingedge_app`（追加只写表 `audit_logs`、`wallet_entries` 恰为 `SELECT, INSERT`）；分区表另须 `GRANT SELECT, ALTER, DROP ON <表> TO lingedge_maint`，且 `lingedge_maint` 只能授权给分区表；授权必须是不带库名的表级语句（库名由连接决定，禁止 `ON db.*`/`*.*`/列级），只允许授权给这两个账号。账号主机部分未写时 MySQL 取 `'%'`，向导（Story 1.24）创建 `lingedge_app`/`lingedge_maint` 时须与之一致（或迁移里显式写 `'lingedge_app'@'<主机>'`，lint 同样识别）。
 - **审计写入与业务变更同事务**；分区表一律含 `pmax VALUES LESS THAN (MAXVALUE)` 兜底分区，写入永远不会因“缺下月分区”报 ERROR 1526（实测无 `pmax` 时越界 INSERT 报该错误）；`partition.maintain`（内部周期作业，非 TaskType）每日把 `pmax` `REORGANIZE` 出未来 N 个月的新分区，失败告警（不影响写入）。
 
 ## 6. 租户隔离在数据库层的落点（ADR-009）
@@ -446,7 +447,7 @@ END;
 
 ## 8. Migration 分级与命名
 
-- 工具：goose v3（ADR-016），文件位于 `migrations/`，嵌入 `lingedge-server` 二进制，表名 `schema_migrations`。
+- 工具：goose v3（ADR-016，固定 v3.30.1，仅 `internal/platform/migrate` 可 import），文件位于 `migrations/`，经 `migrations.FS`（`embed.FS`）嵌入 `lingedge-server` 二进制，版本表名 `schema_migrations`；入口 `lingedge-server migrate plan|up|down|status|recover|lint`，实现与运行语义见 §8.3。
 - 命名：`NNNNNN_<snake_name>.sql`（六位递增，如 `000007_nodes_clusters.sql`），头两行：
   ```sql
   -- lingedge:class=expand            -- reversible | expand | irreversible（必填，CI lint）
@@ -492,6 +493,34 @@ END;
 2. 静态规则：STORED 生成列的基列 FK 不得为 CASCADE/SET NULL；被 CHECK 引用的 FK 列不得为 SET NULL/ON UPDATE CASCADE；分区表不得出现在任何 FK 的任一端；FK 目标表须出现在更早的迁移中（或同一迁移内更早）；
 3. 以 `verification/ddl-rules.sql` 作为回归断言（期望的成功/失败项在文件内逐条注明）。
 
+**Story 1.6 的落地**：以上三项都已接入 `make migrate-test`（见 §8.3）：静态规则由 `internal/platform/migrate`（`ddlcheck.go`）实现并在 `lint` 时按迁移顺序执行；`tests/migrations` 在真实 MySQL 上逐例执行 ddl-rules.sql 的 26 个用例，并要求「静态预检的判定与真实库错误号逐例一致」；M1 骨架（61 表 + 6 张后续阶段样例）空库整体执行与「13 个迁移经框架重放」都是回归项。**最低版本 8.0.16 仍为「等待环境验证」**：本机只有 8.0.46，不得代替。
+
+### 8.3 迁移框架（Story 1.6）
+
+| 项 | 约定 |
+|---|---|
+| 入口 | `lingedge-server migrate plan\|up\|down\|status\|recover\|lint`；开发期 `make migrate MIGRATE_ARGS="status …"`；迁移账号口令只经环境变量 `LINGEDGE_MIGRATE_DB_PASSWORD` 或 `LINGEDGE_MIGRATE_DB_PASSWORD_FILE`（绝对路径、权限 0400/0600），**不经命令行**（AA-7 定稿前的过渡约定） |
+| `plan` | 输出 JSON：每项 `version/name/file/class/has_down/checksum`，汇总 `has_irreversible`、`max_class`；连库时只列待执行迁移，并像 `up` 一样先校验完整性（dirty/校验和/乱序/二进制比数据库旧时拒绝，另一个 migrate 正在运行时返回退出码 7）——升级前的 plan 不应给出一份 `up` 必然拒绝的计划；不连库（`--offline` 或无连接选项）列全部内嵌迁移；`has_irreversible` 是 Tools 升级前展示与强制备份的唯一判据 |
+| `up` | 先 lint（未通过即拒绝）→ `SELECT VERSION()` ≥ 8.0.16 → 账号探针（**GRANT OPTION**：向探针表授权；`@@log_bin=1 且 trust=0` 时另建探针触发器，ERROR 1419 即拒绝并给出两种处置）→ 迁移互斥 → 校验 dirty/未知迁移/校验和/乱序 → 逐个迁移「标记 running → goose 执行 → 标记 applied」；含 `irreversible` 的待执行集须带 `--accept-irreversible`（退出码 9），否则**一个迁移都不执行** |
+| `down` | 只回退 `reversible`；缺省 1 步，`--steps N`/`--to N`/`--all`；先整体校验再执行，路径上有 `expand`/`irreversible` 则整体拒绝（`expand` 的即时回滚只需切回旧二进制，ADR-013 §1） |
+| 互斥 | `GET_LOCK('lingedge.migrate.<库名摘要>')` 始终是互斥本身（会话级，进程崩溃即释放）；持锁连接由心跳协程（缺省 30 秒）周期性校验并续约，丢锁后立即中止（长迁移期间这条连接是空闲的，可能被 `wait_timeout`/代理回收）；`job_locks` 表（000002 创建）存在后，另在名为 `migrate` 的行记录租约（`holder`、递增 `fence`、`lease_until`，结束时立即过期），供 doctor/其他组件观察；因为 000002 创建 `job_locks` 的那一刻互斥不能换机制，否则两个进程会各拿各的锁 |
+| 版本表与运行记录 | goose 版本表 `schema_migrations`（自定义表名）；框架自己的 `schema_migrations_runs` 记录每个迁移的 `status`（running/failed/applied）、`direction`、`checksum`（文件字节的 SHA-256，与 `migrations/CHECKSUMS` 同口径）、错误文本 |
+| recover 的防呆 | `recover` 不是绕过校验的通道：除 dirty 的那个迁移外，其余完整性问题照常拒绝；「up 已落库只缺 applied 标记」的分支保持原校验和并核对文件未被改动；「down 已完成只缺清理」的分支删除运行记录，避免之后撞上主键冲突 |
+| dirty | 任一迁移处于 running/failed 即 dirty：`up/down` 拒绝继续（退出码 4）并给出恢复步骤；操作者排除原因后 `migrate recover --version N` 清除标记（up 方向：goose 未记录 → 删除运行记录以便重跑；goose 已记录 → 补记 applied；down 方向：恢复为 applied），再重新 `up`。MySQL DDL 隐式提交，失败的迁移可能已留下部分对象（半成品）——**失败的迁移不会被记为已应用**，纯 DML 迁移则在事务内整体回滚 |
+| 校验和 | 已应用迁移的文件内容与应用时记录不一致 → 拒绝（退出码 5）；数据库里有而二进制没有的迁移、乱序迁移同样拒绝 |
+| 退出码 | 0 成功；1 失败；2 用法；3 lint；4 dirty；5 校验和；6 数据库版本；7 互斥超时/另一个 migrate 正在运行；8 账号预检；9 含不可逆迁移未确认；**10 数据库与二进制的迁移集合不一致**（二进制比数据库旧、乱序、版本表与运行记录矛盾——Tools 据此区分「换二进制/回滚」与普通失败） |
+
+**迁移文件规则（`migrate lint`，`make migrate-test` 与 `up` 都会执行）**
+
+- 命名 `NNNNNN_<snake_name>.sql`，序号自 000001 起连续且唯一；第一行 `-- lingedge:class=reversible|expand|irreversible`；可选 `lingedge:summary=`、`lingedge:contract-after=`、`lingedge:reason=`；goose 指令只允许 `Up/Down/StatementBegin/StatementEnd/NO TRANSACTION`（禁 `ENVSUB`）。
+- `expand` 的 Up 不含 `DROP/RENAME/MODIFY/CHANGE/TRUNCATE`（紧邻同名 `CREATE` 的 `DROP TRIGGER/VIEW/PROCEDURE/FUNCTION/EVENT IF EXISTS` 是可重入重建的守卫，不算破坏；孤立的 DROP 才算）；`reversible` 必须有可执行的 Down；`irreversible` 的 Down 只能为空或 `SELECT 'irreversible'`，且非空时须有 `-- lingedge:reason=<原因>`。
+- 可重入（AC4）：`CREATE TABLE IF NOT EXISTS`、`DROP … IF EXISTS`、触发器/存储过程/视图前先 `DROP … IF EXISTS`、种子 `INSERT` 须为 `INSERT IGNORE`/`ON DUPLICATE KEY UPDATE`/`… WHERE NOT EXISTS`；MySQL 无原生守卫的 `ALTER TABLE ADD/DROP/RENAME`、`CREATE/DROP INDEX` 须是单语句文件（MySQL 8 单条 DDL 原子），或在语句前加 `-- lingedge:guard=<重跑安全的依据>`（如经 `information_schema` 判断的 `PREPARE` 守卫）。
+- 禁止：`/*! … */` 可执行注释（MySQL 会执行其内容而 lint 看不见）、同一行多条语句与字符串内以分号结尾的行（goose 按行尾分号切分）、账号/库/全局设置类语句（`CREATE/DROP/ALTER USER`、`SET PASSWORD`、`SET GLOBAL/PERSIST`、`USE`、`CREATE/DROP DATABASE`、`FLUSH` 等；Down 里允许 `REVOKE`）、Go 迁移文件与大写 `.SQL` 扩展名（goose 不会执行它们，而契约工具会把它们登记为已发布）。`expand` 另不得新增「`NOT NULL` 且无 `DEFAULT`」的列或 `DELETE` 数据（旧二进制的 INSERT 会失败）。`GRANT` 每条只能授权一个账号、不得带 `WITH GRANT OPTION` 等子句；`RENAME TABLE` 后新名字同样要逐表授权（权限不随表改名）。
+- 数据回填拆成「DDL」与「DML」两个文件（DML 文件在事务内执行，失败整体回滚）；含 `BEGIN…END` 的触发器/过程须用 `StatementBegin/End` 包裹。
+- 逐表授权见 §5.1；DDL 预检规则见 §8.2（`ddl-*` 规则，每条带实测 MySQL 错误号）；禁止 `SET foreign_key_checks`。
+
+**测试台**：`make migrate-test` = 内嵌迁移 lint + `internal/platform/migrate` 单元测试 + `tests/migrations`（真实 MySQL 8.0，独立临时 mysqld 实例；夹具在 `tests/fixtures/migrations`，含 45 个 lint 负向夹具、中途失败/进程被杀/DML 回滚等故障注入夹具）。缺 MySQL 时缺省失败（`MIGRATE_TEST_REQUIRE_MYSQL=0` 可降级为跳过并标「等待环境验证」）。
+
 ## 9. DDL 实测记录（MySQL 8.0.46）
 
 > 实测日期 2026-11-16；环境：Homebrew `mysql@8.0` 的 `mysqld 8.0.46`（arm64/macOS），**独立临时 datadir、独立端口 33399、`--log-bin` 开启、`log_bin_trust_function_creators=0`、默认 `sql_mode`**；测试完成后实例已关闭、临时数据目录已删除，未触碰本机其它 MySQL 实例或数据。可复现脚本在 [`verification/`](verification/)。
@@ -529,6 +558,7 @@ END;
 | [`verification/m1-fk-skeleton.sql`](verification/m1-fk-skeleton.sql) | 按 §8.1 的顺序在**空库**整体执行 13 个迁移的骨架：全部 M1 表（61 张）的主键/外键（含复合 FK、自引用、循环 FK 的 `ALTER ADD CONSTRAINT`）、VIRTUAL/STORED 生成列、CHECK、分区表 + `pmax`、不可变触发器；另含 P2/P5 样例 6 张（`alert_events`、`provider_credentials`↔`plugins`、`website_pages`↔`website_page_versions`、`usage_records` 触发器）验证后续阶段规则 | **0 错误，共 67 张表**（旧顺序在 000001 即 ERROR 1824） |
 | [`verification/ddl-rules.sql`](verification/ddl-rules.sql) + [`run_ddl_rules.py`](verification/run_ddl_rules.py) | 26 个断言用例（生成列×FK、CHECK×FK、前向 FK、复合 FK、分区/pmax/REORGANIZE、分区无 FK、触发器、TEXT 默认、小写 CHECK、软删除唯一复用、rollup upsert、SKIP LOCKED），逐例新建空库比对期望错误码 | **26/26 通过** |
 | 账号/权限（手工，§5.1） | `lingedge_app/maint/migrate` 三类账号、SET_USER_ID 与 `log_bin_trust_function_creators`、表级授权、GRANT OPTION 迁移内授权 | 通过（见 §9 表第 13–16 行）；**因脚本需要创建全局账号，不放入 CI 回归，由安装向导预检覆盖** |
+| `make migrate-test`（Story 1.6） | 上两行脚本的副本在 `tests/migrations` 常驻回归：ddl-rules 26 例在真实库逐例执行并与静态预检判定逐例比对；骨架空库整体执行 67 表；骨架按 13 个迁移文件经框架重放 61 表（含逐表授权、`job_locks` 租约、重放全部可重入语句库结构不变、校验和篡改被拒） | 通过（见 Story 1.6 开发记录）；账号/权限类用例因需全局账号，用独立临时实例在测试内创建并随实例删除 |
 | 最低版本 8.0.16 | 本机仅有 8.0.46，无法在 8.0.16 上执行 | **等待环境验证**（`make migrate-test` 在 CI/验收机用 8.0.16 与当前 8.0.x 各跑一遍，§8.2） |
 
 `m1-fk-skeleton.sql` 是**规则验证用骨架**，不是真实迁移：真实迁移以各表文档的完整列为准，并须在 CI 中通过同样的“空库全量 up”门禁；骨架中的列只保留与约束相关者。

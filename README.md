@@ -41,13 +41,15 @@ make openapi-check    # OpenAPI 3.1 校验 + 元数据/路径无冒号/R-T1/x-re
 make proto            # buf generate：生成 gRPC/Protobuf Go 代码到 dist/proto-gen/（暂不入库，见 scripts/proto-check-gen.sh）
 make proto-check      # buf lint + 对 contract-v1 的 buf breaking + 代码生成可再现（生成两次比对）且可编译（临时 module 真实编译）
 make migrations-check # migrations/CHECKSUMS：已发布迁移被改动/删除即失败
+make migrate-test      # 迁移框架测试台（Story 1.6）：lint + 真实 MySQL（独立临时实例）上的升/降级、校验和、dirty、DDL 预检
+make migrate MIGRATE_ARGS=help   # lingedge-server migrate plan|up|down|status|recover|lint
 make freeze-check     # CF-1 冻结前置复核（AC7/AC9）
 make contract-selftest # 契约检查程序自测（含负向用例）
 ```
 
 外部工具（golangci-lint、govulncheck、buf、oasdiff）经 `go run <pkg>@<固定版本>` 调用，无需预装、不进 `go.mod`；版本见 Makefile。`make security` 目前只覆盖上述四类门禁，威胁模型 §9 的其余门禁随对应 Story 接入，通过不代表整套安全门禁通过。
 
-Makefile 中尚未实现的目标（`migrate`、`migrate-test`、`frontend`、`e2e`、`edge-test`、`release`）执行时输出 `NOT_IMPLEMENTED(story X.Y)` 并以非零退出，不会假通过。
+Makefile 中尚未实现的目标（`frontend`、`e2e`、`edge-test`、`release`）执行时输出 `NOT_IMPLEMENTED(story X.Y)` 并以非零退出，不会假通过。
 
 ## 目录
 

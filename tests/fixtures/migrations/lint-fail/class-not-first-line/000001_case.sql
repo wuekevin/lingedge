@@ -1,0 +1,5 @@
+-- 说明
+-- lingedge:class=expand
+-- +goose Up
+CREATE TABLE IF NOT EXISTS t (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY) ENGINE=InnoDB;
+GRANT SELECT, INSERT, UPDATE, DELETE ON `t` TO lingedge_app;

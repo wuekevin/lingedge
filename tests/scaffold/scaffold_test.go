@@ -166,8 +166,13 @@ func TestCmdEntriesAreVersionOnly(t *testing.T) {
 			p, _ := strconv.Unquote(imp.Path.Value)
 			imports = append(imports, p)
 		}
-		if strings.Join(imports, ",") != "os,github.com/wuekevin/lingedge/pkg/version" {
-			t.Errorf("%s: main 仅允许依赖 os 与 pkg/version，实际 %v", c, imports)
+		want := "os,github.com/wuekevin/lingedge/pkg/version"
+		if c == "lingedge-server" {
+			// Story 1.6：`lingedge-server migrate` 子命令的入口（迁移框架与嵌入的迁移文件）；其余子命令随 1.13 装配。
+			want = "os,github.com/wuekevin/lingedge/internal/platform/migrate,github.com/wuekevin/lingedge/migrations,github.com/wuekevin/lingedge/pkg/version"
+		}
+		if strings.Join(imports, ",") != want {
+			t.Errorf("%s: main 的依赖应恰为 %s，实际 %v", c, want, imports)
 		}
 	}
 }
@@ -263,14 +268,15 @@ func TestNoDockerArtifacts(t *testing.T) {
 func TestMakefileTargets(t *testing.T) {
 	root := repoRoot(t)
 	notImplemented := map[string]string{
-		"migrate": "1.6", "migrate-test": "1.6",
 		"frontend": "1.36", "e2e": "1.37", "edge-test": "3.22",
 		"release": "1.34",
 	}
 	// security 自 Story 1.2 起为真实目标（运行静态门禁，不再是占位）；其余新增门禁目标同理。
 	implemented := []string{"build", "verify-build", "test", "race", "lint", "security", "gen-lint", "arch-check", "golangci", "shell-check", "gate-selftest", "vuln", "verify-gates",
 		// Story 1.3 起为真实目标（契约工具链）。
-		"proto", "proto-check", "openapi-check", "openapi-breaking", "migrations-check", "migrations-seal", "freeze-check", "contract-selftest", "contract-check", "contract-bin"}
+		"proto", "proto-check", "openapi-check", "openapi-breaking", "migrations-check", "migrations-seal", "freeze-check", "contract-selftest", "contract-check", "contract-bin",
+		// Story 1.6 起为真实目标（迁移框架与迁移测试台）。
+		"migrate", "migrate-test"}
 
 	for _, tgt := range implemented {
 		cmd := exec.Command("make", "-n", "--no-print-directory", tgt)
@@ -321,6 +327,9 @@ func TestMakefileWiresGates(t *testing.T) {
 		"freeze-check":      {"bin/contract freeze-check"},
 		"contract-selftest": {"scripts/contract", "go vet ./...", "go test -count=1 ./..."},
 		"contract-check":    {"bin/contract openapi-check", "scripts/proto-check-gen.sh", "bin/contract migrations-check", "bin/contract freeze-check", "go test -count=1 ./..."},
+		// Story 1.6：迁移测试台必须真实接入内嵌迁移 lint、迁移包单测与真实 MySQL 的 tests/migrations（任一项从配方消失即失败）。
+		"migrate-test": {"cmd/lingedge-server migrate lint", "./internal/platform/migrate/...", "LINGEDGE_REQUIRE_MYSQL=1", "./tests/migrations/..."},
+		"migrate":      {"cmd/lingedge-server", "bin/lingedge-server migrate"},
 	}
 	for target, parts := range want {
 		out := expand(target)

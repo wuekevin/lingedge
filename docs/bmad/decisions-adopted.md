@@ -62,7 +62,7 @@ source: docs/bmad/epics.md「待用户决策清单（UD）」
 
 | 编号 | 内容 | 影响 | 处理方 / 时点 |
 |---|---|---|---|
-| AA-7 | 数据库凭据交接未定义：向导（`lingedge` 用户进程）如何取得并持久化 `lingedge_migrate` 口令，交给 root 运行的 `lingedge-server migrate`；`lingedge_app`/`lingedge_maint` 口令落点 | 阻塞 **1.24** AC3/AC7 凭据部分、1.35 联调、1.43 升级；**不阻塞 1.1–1.23** | 架构代理补充 ADR-016/tools-design §13，须在 1.24 开工前完成 |
+| AA-7 | 数据库凭据交接未定义：向导（`lingedge` 用户进程）如何取得并持久化 `lingedge_migrate` 口令，交给 root 运行的 `lingedge-server migrate`；`lingedge_app`/`lingedge_maint` 口令落点 | 阻塞 **1.24** AC3/AC7 凭据部分、1.35 联调、1.43 升级；**不阻塞 1.1–1.23** | 架构代理补充 ADR-016/tools-design §13，须在 1.24 开工前完成。**Story 1.6 的过渡约定**：`lingedge-server migrate` 读环境变量 `LINGEDGE_MIGRATE_DB_USER`（缺省 `lingedge_migrate`）与 `LINGEDGE_MIGRATE_DB_PASSWORD` 或 `LINGEDGE_MIGRATE_DB_PASSWORD_FILE`，口令不经命令行；AA-7 定稿后只改 `internal/platform/migrate/cli.go` 的凭据来源 |
 | AA-8 | OpenAPI `TaskType`（唯一事实源）未含 `partition.maintain` 与内部周期作业 | 须在 1.3 打 `contract-v1` 前对齐（1.3 AC9）；不阻塞 1.1–1.2 | 1.3 内处理 |
 | AA-1 | 缺少 L4 代理 ADR | 阻塞 5.9 | P4 前（架构代理/用户） |
 | AA-2 | P3 契约缺口（`dns.v1`/`reporter.v1`、P3 OpenAPI/迁移） | 阻塞 4.2/CF-7 | P3 前 |

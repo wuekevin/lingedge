@@ -1,0 +1,7 @@
+-- lingedge:class=reversible
+-- +goose Up
+CREATE TABLE IF NOT EXISTS rv_b (id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY, name VARCHAR(32) NULL) ENGINE=InnoDB;
+GRANT SELECT, INSERT, UPDATE, DELETE ON `rv_b` TO lingedge_app;
+
+-- +goose Down
+DROP TABLE IF EXISTS rv_b;

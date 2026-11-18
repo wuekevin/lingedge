@@ -127,7 +127,7 @@ inputs:
 | `make test` | Go 单元测试 + 前端单元测试 |
 | `make race` | Go `-race` 测试 |
 | `make lint` | golangci-lint（含 depguard/依赖方向）、前端 lint（禁用 `v-html` 规则）、`sh -c` 拼接检查 |
-| `make migrate` | 本地执行 goose 迁移（`migrate plan/up/status`）；迁移测试 `make migrate-test`（升/降级路径与 `lingedge:class` 标注检查，**并含 DDL 预检门禁**，见 §5） |
+| `make migrate` | 构建并运行 `lingedge-server migrate`（`make migrate MIGRATE_ARGS="plan\|up\|down\|status\|recover\|lint …"`；口令经环境变量，不经命令行）；迁移测试 `make migrate-test`（内嵌迁移 lint、迁移包单测、`tests/migrations` 真实 MySQL：DDL 规则 26 例、M1 骨架重放、升/降级、校验和、dirty/崩溃/互斥/账号预检、lint 负向夹具；**含 DDL 预检门禁**，见 §5；缺 MySQL 缺省失败，`MIGRATE_TEST_REQUIRE_MYSQL=0` 降级为跳过）。**Story 1.6 起为真实目标** |
 | `make proto` | 生成 gRPC/Protobuf 代码；`make proto-check` 破坏性变更检测（**Story 1.3 已实现**：buf lint + `buf breaking` 对 `contract-v1` + 生成可再现且可编译；另有 `make openapi-check`、`make migrations-check`、`make freeze-check`、`make contract-check`） |
 | `make openapi-check` | 校验 `docs/api/openapi.yaml`、路由与契约一致性、破坏性变更检测（D-11）。**路径约束**：路径段内不得含 `:`——Gin v1.12.0 已实测 `POST /sites/:siteId/rules:validate` 被解析为静态 `rules` + 通配参数，`/sites/S1/rulesXXX` 也会命中该 handler（IMP-21），故契约使用 `/rule-validations`、`/certificate-parses`；CI 增“OpenAPI 路径模板无 `:`”检查 |
 | `make frontend` | 构建 admin/console/website；`console` 产物不含 admin 路由的检查 |
@@ -216,7 +216,7 @@ flowchart LR
 ## 9. 本地启动步骤草案（**待实现**，命令为约定而非已验证）
 
 1. 〔待实现〕准备数据库：用独立账号创建 `lingedge_dev` 库（本机 `mysql@8.0`；不使用 root 长期连接）。
-2. 〔待实现〕`make migrate`：执行 `lingedge-server migrate plan` 查看待执行迁移及其分类，再 `up`。
+2. `make migrate MIGRATE_ARGS=plan`：查看待执行迁移及其分类（JSON，含 `has_irreversible`），再 `MIGRATE_ARGS="up --host … --database …"`（Story 1.6 已实现）。
 3. `cp configs/server.example.yaml configs/server.local.yaml`（示例与加载器已随 Story 1.4 交付并有测试；示例不含任何口令；本地请把 `server.env` 改为 `dev`，避免与生产 Redis 键空间混用）。数据库/Redis 口令只能经环境变量 `LINGEDGE_DATABASE__PASSWORD` / `LINGEDGE_REDIS__PASSWORD` 或 `password_file`（权限不得允许其他用户访问）提供；〔待实现〕主密钥通过开发用 `KeyProvider`（file，权限 0400，**仅开发用，勿入库**）。
 4. 〔待实现〕`go run ./cmd/lingedge-server --roles=api,grpc,scheduler,worker`；首次启动进入 setup mode，终端打印一次性 setup token（对应 F-8），经向导创建管理员（无默认密码）。
 5. 〔待实现〕`pnpm -C frontend dev`（admin / website）。

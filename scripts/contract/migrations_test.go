@@ -14,8 +14,8 @@ func writeFile(t *testing.T, dir, name, body string) {
 	}
 }
 
-const mig1 = "-- lingedge:class expand\nCREATE TABLE a (id BIGINT);\n"
-const mig2 = "-- lingedge:class expand\nCREATE TABLE b (id BIGINT);\n"
+const mig1 = "-- lingedge:class=expand\nCREATE TABLE a (id BIGINT);\n"
+const mig2 = "-- lingedge:class=expand\nCREATE TABLE b (id BIGINT);\n"
 
 // sealedDir 建一个含两份迁移且都已登记的目录。
 func sealedDir(t *testing.T) string {
@@ -72,7 +72,7 @@ func TestMigrationsNewNeedsClassAnnotation(t *testing.T) {
 	if len(fs) != 1 || !strings.Contains(fs[0].Msg, "lingedge:class") {
 		t.Fatalf("新增迁移无标注必须失败: %v", fs)
 	}
-	writeFile(t, dir, "000003_c.sql", "-- lingedge:class expand\nCREATE TABLE c (id BIGINT);\n")
+	writeFile(t, dir, "000003_c.sql", "-- lingedge:class=expand\nCREATE TABLE c (id BIGINT);\n")
 	if fs, _ := checkMigrations(dir, nil); len(fs) != 0 {
 		t.Fatalf("带标注的新增迁移应通过: %v", fs)
 	}
@@ -86,7 +86,7 @@ func TestMigrationsNewNeedsClassAnnotation(t *testing.T) {
 func TestMigrationsSealAppendOnlyAndIdempotent(t *testing.T) {
 	dir := sealedDir(t)
 	before, _ := os.ReadFile(filepath.Join(dir, "CHECKSUMS"))
-	writeFile(t, dir, "000003_c.sql", "-- lingedge:class expand\nCREATE TABLE c (id BIGINT);\n")
+	writeFile(t, dir, "000003_c.sql", "-- lingedge:class=expand\nCREATE TABLE c (id BIGINT);\n")
 	added, err := sealMigrations(dir)
 	if err != nil || len(added) != 1 || added[0] != "000003_c.sql" {
 		t.Fatalf("应只登记新增的一份: %v %v", added, err)
@@ -164,14 +164,48 @@ func TestMigrationsSubdirAndExtensionCase(t *testing.T) {
 		t.Fatalf("子目录与大写扩展名的无标注迁移都应被检查: %v", fs)
 	}
 	// 子目录迁移登记后同样受哈希保护。
-	writeFile(t, dir, "sub/000003_c.sql", "-- lingedge:class expand\nCREATE TABLE c (id BIGINT);\n")
-	writeFile(t, dir, "000004_d.SQL", "-- lingedge:class expand\nCREATE TABLE d (id BIGINT);\n")
+	writeFile(t, dir, "sub/000003_c.sql", "-- lingedge:class=expand\nCREATE TABLE c (id BIGINT);\n")
+	writeFile(t, dir, "000004_d.SQL", "-- lingedge:class=expand\nCREATE TABLE d (id BIGINT);\n")
 	added, err := sealMigrations(dir)
 	if err != nil || len(added) != 2 {
 		t.Fatalf("seal: %v %v", added, err)
 	}
-	writeFile(t, dir, "sub/000003_c.sql", "-- lingedge:class expand\nCREATE TABLE c2 (id BIGINT);\n")
+	writeFile(t, dir, "sub/000003_c.sql", "-- lingedge:class=expand\nCREATE TABLE c2 (id BIGINT);\n")
 	if fs, _ := checkMigrations(dir, nil); len(fs) != 1 {
 		t.Fatalf("改动子目录里的已发布迁移必须失败: %v", fs)
+	}
+}
+
+// Story 1.6 收紧：标注必须在第一行且取值合法；embed.go 不是迁移。
+func TestMigrationsClassAnnotationMustBeValidAndFirstLine(t *testing.T) {
+	for name, body := range map[string]string{
+		"取值非法":        "-- lingedge:class=contract\nCREATE TABLE c (id BIGINT);\n",
+		"不在第一行":       "-- 说明\n-- lingedge:class=expand\nCREATE TABLE c (id BIGINT);\n",
+		"旧写法（无等号）":    "-- lingedge:class expand\nCREATE TABLE c (id BIGINT);\n",
+		"标注在 SQL 注释里": "SELECT 1; -- lingedge:class=expand\n",
+	} {
+		dir := sealedDir(t)
+		writeFile(t, dir, "000003_c.sql", body)
+		if fs, _ := checkMigrations(dir, nil); len(fs) != 1 || !strings.Contains(fs[0].Msg, "第一行") {
+			t.Errorf("%s：必须被拒绝: %v", name, fs)
+		}
+	}
+	for _, class := range []string{"reversible", "expand", "irreversible"} {
+		dir := sealedDir(t)
+		writeFile(t, dir, "000003_c.sql", "-- lingedge:class="+class+"\nCREATE TABLE c (id BIGINT);\n")
+		if fs, _ := checkMigrations(dir, nil); len(fs) != 0 {
+			t.Errorf("%s 应通过: %v", class, fs)
+		}
+	}
+}
+
+func TestMigrationsEmbedGoIsNotAMigration(t *testing.T) {
+	dir := sealedDir(t)
+	writeFile(t, dir, "embed.go", "package migrations\n")
+	if fs, _ := checkMigrations(dir, nil); len(fs) != 0 {
+		t.Fatalf("embed.go 不是迁移，不应要求标注: %v", fs)
+	}
+	if added, err := sealMigrations(dir); err != nil || len(added) != 0 {
+		t.Fatalf("embed.go 不应被登记为已发布迁移: %v %v", added, err)
 	}
 }

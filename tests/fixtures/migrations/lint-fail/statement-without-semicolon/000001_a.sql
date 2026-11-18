@@ -1,0 +1,3 @@
+-- lingedge:class=expand
+-- +goose Up
+CREATE TABLE IF NOT EXISTS t (id BIGINT UNSIGNED NOT NULL PRIMARY KEY) ENGINE=InnoDB

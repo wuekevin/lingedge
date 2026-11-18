@@ -110,14 +110,20 @@ func contains(list []string, s string) bool {
 const repositoryPathRegex = `^internal/(?:[^/]+/)*repository(?:/|$)`
 
 // sqlImportGlobsAllowed 是允许 import jmoiron/sqlx、database/sql、go-sql-driver/mysql 的位置（depguard 的 files 排除项，
-// ${base-path} 由生成器补上）：db 基础设施包与全部 repository 包；测试与 tests/、scripts/ 另行豁免。
-var sqlImportGlobsAllowed = []string{"internal/platform/db/**", "internal/**/repository/**"}
+// ${base-path} 由生成器补上）：db 基础设施包、迁移框架包（goose 需要 *sql.DB，Story 1.6）与全部 repository 包；测试与 tests/、scripts/ 另行豁免。
+var sqlImportGlobsAllowed = []string{"internal/platform/db/**", "internal/platform/migrate/**", "internal/**/repository/**"}
+
+// 迁移库 goose 只允许出现在迁移框架包（ADR-016：嵌入 lingedge-server 的迁移执行统一经 internal/platform/migrate，
+// 分类标注、校验和、dirty、互斥、版本门槛都在那里实现；其他包直接用 goose 会绕过这些保证）。
+const gooseImportPkg = "github.com/pressly/goose/v3"
+
+var gooseImportGlobsAllowed = []string{"internal/platform/migrate/**"}
 
 // sqlImportDenied 是上述位置之外禁止 import 的包（AC5：Repository 之外不得引用 *sqlx.DB/*sqlx.Tx）。
 var sqlImportDenied = []struct{ pkg, why string }{
-	{"github.com/jmoiron/sqlx", "只有 internal/platform/db 与 repository 包可以 import sqlx（*sqlx.DB/*sqlx.Tx 不得出现在 Repository 之外；ADR-009 §6、ADR-001 §9）"},
-	{"database/sql", "只有 internal/platform/db 与 repository 包可以 import database/sql；Service/Handler 经 Repository 与 db.WithTx 访问数据库，用 db.ErrNotFound/db.Result 代替 sql 类型"},
-	{"github.com/go-sql-driver/mysql", "只有 internal/platform/db 与 repository 包可以 import MySQL 驱动；需要错误号时用 db.MySQLErrorNumber/db.IsDuplicate"},
+	{"github.com/jmoiron/sqlx", "只有 internal/platform/db、internal/platform/migrate 与 repository 包可以 import sqlx（*sqlx.DB/*sqlx.Tx 不得出现在 Repository 之外；ADR-009 §6、ADR-001 §9）"},
+	{"database/sql", "只有 internal/platform/db、internal/platform/migrate 与 repository 包可以 import database/sql；Service/Handler 经 Repository 与 db.WithTx 访问数据库，用 db.ErrNotFound/db.Result 代替 sql 类型"},
+	{"github.com/go-sql-driver/mysql", "只有 internal/platform/db、internal/platform/migrate 与 repository 包可以 import MySQL 驱动；需要错误号时用 db.MySQLErrorNumber/db.IsDuplicate"},
 }
 
 // 受限池构造函数的调用白名单（AC6）：路径正则（相对仓库根）。请求路径持有 maint/migrate 池即违规。
