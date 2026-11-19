@@ -109,6 +109,7 @@ func skeletonMigrations(t testing.TB) fstest.MapFS {
 			body = body[nl+1:]
 		}
 		body = createRe.ReplaceAllString(body, "CREATE TABLE IF NOT EXISTS $1")
+		body = annotateCrossTenantIndexes(body)
 		body = trigRe.ReplaceAllString(body, "DROP TRIGGER IF EXISTS $1;\nCREATE TRIGGER $1")
 		body = alterRe.ReplaceAllString(body, "-- lingedge:guard=循环/前向外键的追加：真实迁移用 information_schema 判断的 PREPARE 守卫，或拆成单语句文件\nALTER TABLE ")
 
@@ -136,6 +137,24 @@ func skeletonMigrations(t testing.TB) fstest.MapFS {
 		}
 	}
 	return out
+}
+
+var (
+	createStmtRe = regexp.MustCompile(`(?s)CREATE TABLE IF NOT EXISTS \w+ \(.*?\) ENGINE=InnoDB`)
+	indexNameRe  = regexp.MustCompile(`(?:UNIQUE KEY|KEY)\s+(\w+)\s*\(`)
+)
+
+// annotateCrossTenantIndexes 为每个 CREATE TABLE 前加上其全部索引的跨租户索引豁免注释（Story 1.7 的 schema lint：租户表的索引须以
+// tenant_id 打头）。骨架是 1.8/1.9 真实迁移落库前的替身，只保留约束相关列，索引取舍不代表真实设计，所以这里整体豁免——
+// 豁免注释本身要写原因；真实迁移（1.8/1.9）逐个索引判定。
+func annotateCrossTenantIndexes(body string) string {
+	return createStmtRe.ReplaceAllStringFunc(body, func(stmt string) string {
+		var lead strings.Builder
+		for _, m := range indexNameRe.FindAllStringSubmatch(stmt, -1) {
+			fmt.Fprintf(&lead, "-- lingedge:cross-tenant-index=%s 骨架替身：索引取舍不代表真实设计（1.8/1.9 的真实迁移逐个判定）\n", m[1])
+		}
+		return lead.String() + stmt
+	})
 }
 
 func TestSkeletonConvertsToThirteenLintCleanMigrations(t *testing.T) {

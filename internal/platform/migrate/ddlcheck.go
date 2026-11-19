@@ -89,11 +89,12 @@ type tableModel struct {
 // Checker 按迁移顺序累积「已知表」模型，逐语句检查并报告新出现的违规。零值不可用，用 NewChecker 创建。
 type Checker struct {
 	tables map[string]*tableModel
+	schema *schemaState // schema lint（schemalint.go）的租户索引模型
 }
 
 // NewChecker 创建检查器；known 为迁移之外已存在的表（如 goose 版本表），仅用于前向外键判定。
 func NewChecker(known ...string) *Checker {
-	c := &Checker{tables: map[string]*tableModel{}}
+	c := &Checker{tables: map[string]*tableModel{}, schema: newSchemaState()}
 	for _, k := range known {
 		c.tables[strings.ToLower(k)] = &tableModel{name: strings.ToLower(k), cols: map[string]*colModel{}}
 	}

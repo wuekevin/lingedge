@@ -45,8 +45,8 @@ func lintFailCases(t testing.TB) map[string]fstest.MapFS {
 
 func TestLintNegativeFixturesTriggerExactlyTheirRules(t *testing.T) {
 	cases := lintFailCases(t)
-	if len(cases) < 44 {
-		t.Fatalf("lint 负向夹具应不少于 44 个，实际 %d", len(cases))
+	if len(cases) < 56 {
+		t.Fatalf("lint 负向夹具应不少于 56 个，实际 %d", len(cases))
 	}
 	covered := map[string]bool{}
 	for name, fsys := range cases {
@@ -82,7 +82,8 @@ func TestLintNegativeFixturesTriggerExactlyTheirRules(t *testing.T) {
 	}
 	for _, rule := range []string{"header", "name", "sequence", "goose-annotation", "syntax", "class-expand", "class-reversible", "class-irreversible",
 		"idempotency", "ddl-dml-split", "compound-statement", "grant-app", "grant-maint", "forbidden-statement", "executable-comment",
-		migrate.RuleGeneratedFK, migrate.RuleCheckFK, migrate.RuleForwardFK, migrate.RulePartitionFK, migrate.RulePartitionPmax, migrate.RuleFKChecks} {
+		migrate.RuleGeneratedFK, migrate.RuleCheckFK, migrate.RuleForwardFK, migrate.RulePartitionFK, migrate.RulePartitionPmax, migrate.RuleFKChecks,
+		migrate.RuleSchemaEnum, migrate.RuleSchemaLOBDefault, migrate.RuleSchemaTime, migrate.RuleSchemaFloat, migrate.RuleSchemaTenantColumn, migrate.RuleSchemaTenantIndex} {
 		if !covered[rule] {
 			t.Errorf("规则 %s 没有任何负向夹具覆盖", rule)
 		}

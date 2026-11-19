@@ -76,7 +76,7 @@ updated: 2026-11-16
 
 ### 2.6 索引原则
 
-- 租户范围表的所有索引以 `tenant_id` 打头（`(tenant_id, site_id, …)`），保证租户级列表与隔离测试走索引。
+- 租户范围表的所有索引以 `tenant_id` 打头（`(tenant_id, site_id, …)`），保证租户级列表与隔离测试走索引。该约定由 schema lint 强制（§8.3，Story 1.7；仅对 `tenant_id NOT NULL` 的租户表生效，T? 表与平台级表不适用）：**主键**与**仅含 `uid` 的唯一索引**（ULID 全局唯一，C1 资源按 uid 解析后再校验租户，§2.3）免判；其余确属跨租户查询的索引（如 `tenant_members` 的「按用户反查所属租户」、`site_domains.active_hostname` 的跨租户唯一）须在建表/加索引语句前写 `-- lingedge:cross-tenant-index=<索引名> <原因>` 显式登记（原因必填，评审可见）。外键自动建立的支撑索引（索引名 = 外键名）不在迁移文本里，不受限。
 - 列表分页（page/page_size）排序列放索引尾部；游标分页集合（审计、事件）使用 `(…, id)` 单调游标。
 - 高频写表只建查询必需的最少索引。
 - 全文/高基数检索不在 MySQL 承担（访问日志走文件分片，ADR-008）。
@@ -518,8 +518,29 @@ END;
 - 禁止：`/*! … */` 可执行注释（MySQL 会执行其内容而 lint 看不见）、同一行多条语句与字符串内以分号结尾的行（goose 按行尾分号切分）、账号/库/全局设置类语句（`CREATE/DROP/ALTER USER`、`SET PASSWORD`、`SET GLOBAL/PERSIST`、`USE`、`CREATE/DROP DATABASE`、`FLUSH` 等；Down 里允许 `REVOKE`）、Go 迁移文件与大写 `.SQL` 扩展名（goose 不会执行它们，而契约工具会把它们登记为已发布）。`expand` 另不得新增「`NOT NULL` 且无 `DEFAULT`」的列或 `DELETE` 数据（旧二进制的 INSERT 会失败）。`GRANT` 每条只能授权一个账号、不得带 `WITH GRANT OPTION` 等子句；`RENAME TABLE` 后新名字同样要逐表授权（权限不随表改名）。
 - 数据回填拆成「DDL」与「DML」两个文件（DML 文件在事务内执行，失败整体回滚）；含 `BEGIN…END` 的触发器/过程须用 `StatementBegin/End` 包裹。
 - 逐表授权见 §5.1；DDL 预检规则见 §8.2（`ddl-*` 规则，每条带实测 MySQL 错误号）；禁止 `SET foreign_key_checks`。
+- **schema lint（Story 1.7，`schema-*` 规则）**：无 `ENUM`/`SET`（用 `VARCHAR+CHECK`，`schema-enum`）；`TEXT/BLOB/JSON` 列不得带任何 `DEFAULT`（字面量与表达式均不允许，`schema-lob-default`）；时间列一律 `DATETIME(3)`，不得用 `TIMESTAMP`/`TIME`、`DATETIME` 必须带 `(3)`（`schema-time`）；无 `FLOAT/DOUBLE/REAL/DECIMAL/NUMERIC` 列（金额 `BIGINT`、比率整数，`schema-float`）；登记为租户范围的表（`tenant_members/tenant_quotas/site_groups/sites/site_domains/site_settings/origin_groups/origins/site_versions/site_rules/rule_versions/cache_policies/cache_tasks/certificates`）必须含 `tenant_id … NOT NULL`（`schema-tenant-column`），且其索引以 `tenant_id` 打头（`schema-tenant-index`，例外见 §2.6）。登记表清单在 `internal/platform/migrate/schemalint.go` 的 `tenantTables`，新增租户表时同步。
 
-**测试台**：`make migrate-test` = 内嵌迁移 lint + `internal/platform/migrate` 单元测试 + `tests/migrations`（真实 MySQL 8.0，独立临时 mysqld 实例；夹具在 `tests/fixtures/migrations`，含 45 个 lint 负向夹具、中途失败/进程被杀/DML 回滚等故障注入夹具）。缺 MySQL 时缺省失败（`MIGRATE_TEST_REQUIRE_MYSQL=0` 可降级为跳过并标「等待环境验证」）。
+**测试台**：`make migrate-test` = 内嵌迁移 lint + `internal/platform/migrate` 单元测试 + `tests/migrations`（真实 MySQL 8.0，独立临时 mysqld 实例；夹具在 `tests/fixtures/migrations`，含 56 个 lint 负向夹具、中途失败/进程被杀/DML 回滚等故障注入夹具；Story 1.7 起另有真实迁移 000001–000005 的专项用例 `tests/migrations/m1a_test.go`）。缺 MySQL 时缺省失败（`MIGRATE_TEST_REQUIRE_MYSQL=0` 可降级为跳过并标「等待环境验证」）。
+
+### 8.4 M1 迁移 A 落地记录（Story 1.7：000001–000005，21 张表）
+
+真实迁移文件在 `migrations/`（与 §8.1 同名同序，全部 `expand`，经 `make migrate-test` 与 `migrate lint` 校验）。与各表文档的对照与取舍：
+
+| 迁移 | 表 | 要点 |
+|---|---|---|
+| 000001 `identity_core` | users、tenants、user_recovery_codes、tenant_members、tenant_quotas、permissions、roles、role_permissions、user_roles、sessions、api_tokens、login_logs（12） | 先 users 后 tenants（`tenants.owner_user_id`→users SET NULL；`reseller_id` 先建为无 FK 列，P5 追加）；所有指向 `tenants(id)` 的外键 RESTRICT；`roles.uniq_key`、`user_roles.tenant_key` 为 VIRTUAL；`users.active_email`、`tenants.default_flag` 为 STORED（基列无外键）；`tenants.slug` 的 CHECK 用 `REGEXP_LIKE(…, 'c')`（**区分大小写**：`utf8mb4_0900_ai_ci` 下不带 `'c'` 的正则对大写也会通过）；`sessions` 含 `reauth_at`；`login_logs` 为 C2u 带 `uid`、无外键 |
+| 000002 `platform_core` | system_settings、system_installations、tasks、task_events、job_locks、idempotency_keys、event_outbox（7） | `tasks.type` 的 CHECK = OpenAPI `TaskType` 25 个取值（测试逐值比对）；`task_events` 为 C2u 带 `uid`；`job_locks` 列与迁移框架租约记录对齐；`idempotency_keys.response_status/response_body` 可空（请求完成后才写入） |
+| 000003 `audit_logs` | audit_logs（1） | 月 RANGE 分区 p202611…p202712 + `pmax`；BEFORE UPDATE/DELETE 触发器；`lingedge_app` 仅 `SELECT, INSERT`；迁移末尾 `GRANT SELECT, ALTER, DROP … TO lingedge_maint`；无外键 |
+| 000004 `seed_builtin` | （仅 DML） | 81 项权限字典（= OpenAPI 全部 `x-permissions` 80 项 + `tenant:impersonate`，含 P2–P5 阶段的权限串，仅字典）；6 个内置角色；默认租户 `is_default=1`；**不含口令、不创建用户**（管理员只由安装向导创建） |
+| 000005 `keys_credentials` | signing_keys（1） | 每个 purpose 至多一个 `active`（STORED 生成列 `active_key` 唯一）；`provider_credentials` 随 P2 |
+
+**种子口径（000004）**：权限 `scope`：仅被 `x-tenant-scope: platform` 路由使用 = `platform`（37 项，另加 `tenant:impersonate` 共 38 项）；仅被 `tenant` 路由使用 = `tenant`（10 项）；被 `either` 路由或两类路由共用 = `both`（33 项）。内置角色均 `tenant_id NULL`（平台定义的角色模板）：`platform_admin`（全部权限）、`platform_operator`（平台运维：全部只读（不含第三方凭据）+ 节点/集群/发布/缓存/证书/规则等写 + `tenant:impersonate`，不含用户/角色/设置/租户管理写权限）、`platform_auditor`（全部只读，不含第三方凭据）、`tenant_owner`（全部 scope ∈ {tenant, both} 权限）、`site_operator`（站点/域名/源站/规则/缓存/证书/发布/观测读写 + 自有 API Token，不含 `site:delete`）、`tenant_viewer`（scope ∈ {tenant, both} 的全部只读，不含第三方凭据 `credential:read`，与平台运维/审计员口径一致）。租户角色永不含 `platform` 权限。`tenant_quotas` 不预置行（无行 = 不限，M1 默认租户无限制）；`system_settings` 不预置（运行模式、`deploy.lineage` 等随 Story 1.22 与安装向导）。`menu_key` 留空（菜单键随 Admin 壳 Story 1.37）。
+
+**与文档的有意差异**：① `audit_logs`、`idx_*` 索引名统一为 `idx_<表>_<列…>`（§2.2 命名规则；原 platform-identity.md 里 `idx_audit_tenant` 等简写不再沿用）；② 租户索引约定落地时发现文档自身的两处张力并以显式豁免解决：`tenant_members` 需要「按用户反查所属租户」的 `idx_tenant_members_user(user_id)`（同时支撑外键），已登记豁免；后续 `site_domains.active_hostname` 等跨租户唯一索引同理（§2.6）；③ 迁移账号尚未登记 `lingedge_app`/`lingedge_maint` 时 GRANT 会失败（ERROR 1410）：两个账号须由安装向导（Story 1.24）在 `migrate up` 之前创建。
+
+**已知依赖**：`audit_logs` 初始分区只到 2027-12，之后的写入落入 `pmax`，由 Worker 的内部周期作业 `partition.maintain`（Story 1.15）按月 REORGANIZE 出新分区、保留期 `DROP PARTITION`；该作业在 2028-01 之前必须就位（`pmax` 非空的告警/`doctor` 检查随 1.15/1.42）。`tasks` 的 `(type, idempotency_key)` 唯一键不含租户：任务幂等键须由服务端构造且内含租户/站点范围（Story 1.14 约定），不得直接使用调用方提供的 `Idempotency-Key`（那一层由 `idempotency_keys.principal_key` 隔离主体）。
+
+**验证**：见 §9.1 末行与 Story 1.7 开发记录（真实 MySQL 8.0.46 空库 up、重放幂等、21 表授权最小权限负向、约束/外键/CHECK 负向、租户索引 EXPLAIN、DDL 陷阱变异覆盖）。
 
 ## 9. DDL 实测记录（MySQL 8.0.46）
 
@@ -559,6 +580,7 @@ END;
 | [`verification/ddl-rules.sql`](verification/ddl-rules.sql) + [`run_ddl_rules.py`](verification/run_ddl_rules.py) | 26 个断言用例（生成列×FK、CHECK×FK、前向 FK、复合 FK、分区/pmax/REORGANIZE、分区无 FK、触发器、TEXT 默认、小写 CHECK、软删除唯一复用、rollup upsert、SKIP LOCKED），逐例新建空库比对期望错误码 | **26/26 通过** |
 | 账号/权限（手工，§5.1） | `lingedge_app/maint/migrate` 三类账号、SET_USER_ID 与 `log_bin_trust_function_creators`、表级授权、GRANT OPTION 迁移内授权 | 通过（见 §9 表第 13–16 行）；**因脚本需要创建全局账号，不放入 CI 回归，由安装向导预检覆盖** |
 | `make migrate-test`（Story 1.6） | 上两行脚本的副本在 `tests/migrations` 常驻回归：ddl-rules 26 例在真实库逐例执行并与静态预检判定逐例比对；骨架空库整体执行 67 表；骨架按 13 个迁移文件经框架重放 61 表（含逐表授权、`job_locks` 租约、重放全部可重入语句库结构不变、校验和篡改被拒） | 通过（见 Story 1.6 开发记录）；账号/权限类用例因需全局账号，用独立临时实例在测试内创建并随实例删除 |
+| 真实迁移 000001–000005（Story 1.7） | `tests/migrations/m1a_test.go`：空库 up 恰 21 表、逐表授权（app 21 条、`audit_logs` 仅 `SELECT, INSERT`；maint 仅 `audit_logs`）与最小权限负向（app UPDATE/DELETE/TRUNCATE/DROP PARTITION/DDL 均 ERROR 1142；maint 仅能 REORGANIZE/DROP PARTITION，DROP 其它表 ERROR 1142；root 改审计被触发器 ERROR 1644 拒绝）、重放全部语句幂等、种子与 OpenAPI 一致、约束/外键/CHECK/唯一性负向、租户索引 EXPLAIN、DDL 陷阱变异（STORED 生成列×CASCADE、CHECK×SET NULL/ON UPDATE CASCADE、前向外键、分区表外键、缺 pmax）静态预检与真实 MySQL 错误号逐例一致 | 通过（MySQL 8.0.46 独立临时实例；见 Story 1.7 开发记录） |
 | 最低版本 8.0.16 | 本机仅有 8.0.46，无法在 8.0.16 上执行 | **等待环境验证**（`make migrate-test` 在 CI/验收机用 8.0.16 与当前 8.0.x 各跑一遍，§8.2） |
 
 `m1-fk-skeleton.sql` 是**规则验证用骨架**，不是真实迁移：真实迁移以各表文档的完整列为准，并须在 CI 中通过同样的“空库全量 up”门禁；骨架中的列只保留与约束相关者。

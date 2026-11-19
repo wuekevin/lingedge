@@ -29,6 +29,7 @@ import (
 
 	"github.com/wuekevin/lingedge/internal/platform/clock"
 	"github.com/wuekevin/lingedge/internal/platform/db"
+	"github.com/wuekevin/lingedge/internal/platform/uid"
 )
 
 const (
@@ -554,6 +555,7 @@ func (r *Runner) Up(ctx context.Context, opts UpOptions) (*UpResult, error) {
 	if err := r.verifyIntegrity(st, false); err != nil {
 		return nil, err
 	}
+	defer r.syncIrreversibleSetting(ctx) // 含无待执行迁移与失败返回：以运行记录对账（ADR-016 决策 4）
 	res := &UpResult{FromVersion: st.max, ToVersion: st.max, Applied: []AppliedMigration{}}
 	var pending []*Migration
 	for _, m := range r.set.Migrations {
@@ -608,6 +610,69 @@ func (r *Runner) Up(ctx context.Context, opts UpOptions) (*UpResult, error) {
 		r.logf("已应用 %s（%d ms）", m.File, d.Milliseconds())
 	}
 	return res, nil
+}
+
+// IrreversibleSettingKey 是 system_settings 中记录「最近一次已应用的不可逆迁移」的键（ADR-016 决策 4，辅助 doctor 判断
+// 「回滚 = 恢复备份」是否仍可简单切回旧二进制）。值为 JSON：{"version":N,"name":"…","applied_at":"…Z"}。
+const IrreversibleSettingKey = "schema.latest_class_irreversible_applied"
+
+// syncIrreversibleSetting 让 system_settings 的 IrreversibleSettingKey 与运行记录表对账：以运行记录里最近一次「已应用」的
+// irreversible 迁移为准，缺失或落后则写入。它在每次 up 结束（含无待执行迁移与失败返回）与 recover 补记 applied 之后调用，所以
+// 「迁移已提交但进程在写记录前被杀」「irreversible 迁移早于 system_settings 应用」「记录被误删」都会在下一次 up/recover 自愈，
+// 而不依赖某一次调用恰好成功。它是辅助信息，不是迁移成败的依据：表缺失或结构不符时静默跳过；探测或写入失败只记警告。
+func (r *Runner) syncIrreversibleSetting(ctx context.Context) {
+	_ = detached(ctx, func(c context.Context) error {
+		warn := func(err error) {
+			r.logf("警告：未能同步 %s（不影响迁移结果，下次 up/recover 会再次尝试）：%v", IrreversibleSettingKey, err)
+		}
+		var cols int
+		if err := r.sqlDB().QueryRowContext(c, "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'system_settings' "+
+			"AND COLUMN_NAME IN ('uid','setting_key','value_json','value_enc','group_name')").Scan(&cols); err != nil {
+			warn(err)
+			return nil
+		}
+		if cols != 5 {
+			return nil // 表尚未创建（000002 之前）或结构不符
+		}
+		var uniqueKey int
+		if err := r.sqlDB().QueryRowContext(c, "SELECT COUNT(*) FROM (SELECT INDEX_NAME FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'system_settings' "+
+			"AND NON_UNIQUE = 0 GROUP BY INDEX_NAME HAVING COUNT(*) = 1 AND MAX(COLUMN_NAME) = 'setting_key') k").Scan(&uniqueKey); err != nil {
+			warn(err)
+			return nil
+		}
+		if uniqueKey == 0 {
+			return nil // 没有 setting_key 的唯一键：ON DUPLICATE KEY 不会生效，写入会产生重复行
+		}
+		var ver int64
+		err := r.sqlDB().QueryRowContext(c, "SELECT version FROM "+RunsTable+" WHERE class = 'irreversible' AND direction = 'up' AND status = 'applied' ORDER BY version DESC LIMIT 1").Scan(&ver)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			warn(err)
+			return nil
+		}
+		var cur sql.NullInt64
+		err = r.sqlDB().QueryRowContext(c, "SELECT CAST(JSON_EXTRACT(value_json, '$.version') AS SIGNED) FROM system_settings WHERE setting_key = ?", IrreversibleSettingKey).Scan(&cur)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			warn(err)
+			return nil
+		}
+		if cur.Valid && cur.Int64 >= ver {
+			return nil
+		}
+		id, err := uid.NewGenerator(r.Clock).New()
+		if err != nil {
+			warn(err)
+			return nil
+		}
+		if _, err := r.sqlDB().ExecContext(c, "INSERT INTO system_settings (uid, setting_key, value_json, group_name) "+
+			"SELECT ?, ?, JSON_OBJECT('version', version, 'name', name, 'applied_at', DATE_FORMAT(finished_at, '%Y-%m-%dT%H:%i:%s.%fZ')), 'general' FROM "+RunsTable+" WHERE version = ? "+
+			"ON DUPLICATE KEY UPDATE value_json = VALUES(value_json), value_enc = NULL", id, IrreversibleSettingKey, ver); err != nil {
+			warn(err)
+		}
+		return nil
+	})
 }
 
 // DownOptions 控制 Down。
@@ -756,6 +821,9 @@ func (r *Runner) Recover(ctx context.Context, version int64) error {
 		}
 		_, err = r.sqlDB().ExecContext(ctx, "UPDATE "+RunsTable+" SET direction = 'up', status = 'applied', error = NULL, finished_at = NOW(3) WHERE version = ?", d.Version)
 		r.logf("%06d_%s 的 SQL 已完整执行（版本表已记录），仅补记 applied", d.Version, d.Name)
+		if err == nil {
+			r.syncIrreversibleSetting(ctx)
+		}
 	case !inGoose: // down 方向，回退的 SQL 已完整执行且版本表记录已被 goose 删除，只是运行记录没来得及清理
 		_, err = r.sqlDB().ExecContext(ctx, "DELETE FROM "+RunsTable+" WHERE version = ?", d.Version)
 		r.logf("%06d_%s 的回退已完整执行（版本表已无该记录），清除运行记录", d.Version, d.Name)

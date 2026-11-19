@@ -1,0 +1,9 @@
+-- lingedge:class=expand
+-- +goose Up
+CREATE TABLE IF NOT EXISTS t (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  tenant_id BIGINT UNSIGNED NOT NULL,
+  name VARCHAR(64) NOT NULL,
+  UNIQUE KEY uk_t_name (name)
+) ENGINE=InnoDB;
+GRANT SELECT, INSERT, UPDATE, DELETE ON `t` TO lingedge_app;

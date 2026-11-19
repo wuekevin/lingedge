@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 11-16-2026 23:18
-last_updated: 11-18-2026 12:00
+last_updated: 11-19-2026 12:00
 project: LingEdge（凌界云）
 project_key: NOKEY
 tracking_system: file-system
@@ -42,7 +42,7 @@ development_status:
   1-4-platform-基础库-配置-日志脱敏-统一错误-request-id: review   # 开发完成、本机门禁全绿、三路评审高/中问题已修复；待独立复验后转 done
   1-5-db-基础设施与租户-scope-构建器: review   # 开发完成、本机门禁全绿（含真实 MySQL 越权负向与三类账号权限测试）、三路评审高/中问题已修复；CI 接入 MySQL 属等待环境验证；待独立复验后转 done
   1-6-migration-框架-goose-嵌入-分类-lint-migrate-子命令: review   # 开发完成、本机门禁全绿（含真实 MySQL 的升降级/校验和/dirty/崩溃/互斥/预检与 M1 骨架 13 文件重放）、三路评审高/中问题已修复；最低版本 8.0.16 空库全量 up 与 CI 接入 MySQL 属等待环境验证；待独立复验后转 done
-  1-7-m1-迁移-a-身份-租户-平台核心-审计-种子-密钥-000001-000005: backlog
+  1-7-m1-迁移-a-身份-租户-平台核心-审计-种子-密钥-000001-000005: review   # 开发完成、本机门禁全绿（含真实 MySQL 空库 up/重放幂等/21 表最小权限负向/约束与租户索引/DDL 陷阱变异覆盖）、三路评审高/中问题已修复；8.0.16 最低版本空库全量 up 与 CI 接入 MySQL 属等待环境验证；待独立复验后转 done
   1-8-m1-迁移-b-节点集群-站点-证书-源站-规则-缓存-000006-000011: backlog
   1-9-m1-迁移-c-配置修订-发布队列-部署-观测-000012-000013-与契约冻结点-cf-2: backlog
   1-10-redis-边界封装与降级-adr-025: backlog
@@ -537,6 +537,14 @@ environment_verification:   # 『等待环境验证』登记（验证人/日期�
     condition: "8.0.16 最低版本空库全量迁移（修订日志 §4 ①）待 CI/验收机；本机 8.0.46 通过不得代替该项。"
     done_locally: "make migrate-test（内嵌迁移 lint + 迁移包单测 + tests/migrations 真实 MySQL 8.0.46 独立临时实例）全绿：DDL 规则 26/26、M1 骨架 67 表、骨架 13 文件经框架重放 61 表、升降级/expand 兼容/校验和/dirty/崩溃/互斥/账号预检/lint 负向夹具 45 个"
     pending: "① 在 8.0.16（最低）与当前 8.0.x 上各跑一遍 make migrate-test（含版本门槛在不受支持服务器上的真实拒绝：8.0.15/MariaDB 本机没有）；② .github/workflows/ci.yml 接入 MySQL 8.0 并以 LINGEDGE_REQUIRE_MYSQL=1 运行 make migrate-test（当前 CI 无 MySQL，真实库套件会跳过并标等待环境验证）"
+    verified_by: ""
+    verified_on: ""
+  1-7-m1-迁移-a-身份-租户-平台核心-审计-种子-密钥-000001-000005:
+    status: partial
+    required_env: "本机 MySQL 8.0（8.0.46；权限/binlog 类用例用独立临时 mysqld 实例，同 1.5/1.6）"
+    condition: "8.0.16 最低版本空库全量迁移（修订日志 §4 ①）待 CI/验收机；本机 8.0.46 通过不得代替该项。"
+    done_locally: "make migrate-test 全绿：000001–000005 在真实 MySQL 8.0.46 空库 up 恰 21 表、重放全部语句幂等、lingedge_app/lingedge_maint 最小权限负向（audit_logs 仅 SELECT/INSERT；maint 仅 REORGANIZE/DROP PARTITION）、约束/外键/CHECK/唯一性负向、租户索引 EXPLAIN、种子与 OpenAPI x-permissions/TaskType 一致、DDL 陷阱（生成列×FK、CHECK×FK、前向 FK、分区表 FK/pmax）对真实迁移变异的静态预检与真实 MySQL 错误号逐例一致、schema lint 负向夹具 56 个"
+    pending: "① 在 8.0.16（最低）与当前 8.0.x 上各跑一遍 make migrate-test；② .github/workflows/ci.yml 接入 MySQL 8.0 并以 LINGEDGE_REQUIRE_MYSQL=1 运行 make migrate-test（同 1.6）；③ 1.24 安装向导须在 migrate up 之前创建 lingedge_app/lingedge_maint（迁移内 GRANT 依赖账号已存在）"
     verified_by: ""
     verified_on: ""
   1-9-m1-迁移-c-配置修订-发布队列-部署-观测-000012-000013-与契约冻结点-cf-2:

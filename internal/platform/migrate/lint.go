@@ -22,8 +22,10 @@ import (
 //	grant-app / grant-maint    逐表授权（database/README §5.1、Story 1.5 发现）：每张新表须授权 lingedge_app，
 //	                           分区表须授权 lingedge_maint 表级 SELECT, ALTER, DROP
 //	ddl-*                      DDL 预检（ddlcheck.go，AC6）
+//	schema-*                   schema lint（schemalint.go，Story 1.7 AC2）：无 ENUM、TEXT/JSON/BLOB 无 DEFAULT、时间列 DATETIME(3)、
+//	                           无浮点金额、租户表含 tenant_id 且索引以其打头
 //
-// 本 lint 只校验迁移结构与 DDL 组合；列类型/命名/索引等「schema lint」随 Story 1.7（其 AC2）在同一框架追加。
+// 本 lint 校验迁移结构、DDL 组合与列类型/租户索引约定。
 
 const (
 	// AppUser / MaintUser 是迁移里授权的运行期账号名（database/README §5.1）。
@@ -313,6 +315,13 @@ func lintMigration(m *Migration, checker *Checker) []Finding {
 	for _, in := range up {
 		for _, v := range checker.Check(in.st.Text) {
 			add(in.st.Line, v.Rule, "%s", v.Message)
+		}
+	}
+
+	// ---- schema lint（Story 1.7 AC2）：列类型与租户索引约定 ----
+	for _, in := range up {
+		for _, f := range checker.schema.check(in) {
+			add(f.Line, f.Rule, "%s", f.Message)
 		}
 	}
 
