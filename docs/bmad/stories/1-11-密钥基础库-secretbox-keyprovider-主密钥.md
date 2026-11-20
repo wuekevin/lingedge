@@ -87,8 +87,8 @@ context:
 | 解析失败路径上已解码的 KEK 残留 | medium | patch：解析失败时清零已解码的密钥，读文件缓冲区 `defer Zero` |
 | G-5 初版用「password=」字面量触发 G-6 固定口令门禁 | low | patch：测试改用 `dsn=` 键（门禁正常工作，未豁免） |
 | 轮密钥无法清零 | accept | Go 标准库限制，`LimitCORE=0` 补偿，已文档化 |
-| `RecordStore` 无真实库实现；`CountByKEK/ListByKEK/Replace` 仅有内存实现的测试 | accept | 各 `*_enc` 表的仓储接线与 `retention/rekey` 任务属后续 Story；本 Story 提供原语与接口契约 |
-| 自由文本中不带敏感键名的裸 base64 主密钥无法被 redact 识别 | accept | 脱敏引擎按键名+已知格式工作（Story 1.4 设计）；`FileKeyProvider` 自身从不格式化输出密钥 |
+| `RecordStore` 无真实库实现；`CountByKEK/ListByKEK/Replace` 仅有内存实现的测试 | patch（遗留补齐，见下） | 已补 `internal/platform/secrets/repository` 与真实 MySQL 端到端测试；worker `secrets.rewrap` 任务接线仍属后续 Story |
+| 自由文本中不带敏感键名的裸 base64 主密钥无法被 redact 识别 | patch（保守识别，见下） | `pkg/redact/bare.go`：恰 43 字符 + 三类字符 + 熵≥4.5；残余风险见 docs/operations/secrets.md §7 |
 
 ### AC 对照
 
@@ -103,3 +103,13 @@ context:
 ### DoD 与遗留
 
 DoD（基线 §25）：除下述等待环境验证项外满足；前端/迁移/API 可调用不适用。**等待环境验证**：① 真实 systemd `LoadCredential` / `$CREDENTIALS_DIRECTORY` 下的端到端启动；② `root:root 0400` 原文件与以 root 身份运行时的属主接受路径（本机非 root，仅验证判定逻辑）；③ `LimitCORE=0` 在 Linux 单元中的生效（Story 1.32）。**后续接入提示**：各 `*_enc` 列的仓储用 `Box.Seal/Open`（AAD 用表名/列名/uid）；`enc_key_id` 写 `Box.CurrentKeyID()`；`RecordStore` 与 `kek_ids_required` 在 worker `secrets.rewrap` 任务与 Tools `backup` 接线；解密热路径默认不缓存明文。
+
+### 遗留项补齐（同日第二次会话）
+
+1. **真实 RecordStore**：`internal/platform/secrets/repository`（符合 `internal/**/repository` 路径约定；方法 `*AcrossTenants(ctx, scope, …)` 以满足 repo-scope 门禁——首版方法无 Scope 首参被该门禁拦下，据此重构）+ `internal/platform/secrets.NewRecordStore`（无 SQL 的适配层，绑定平台 Scope）。白名单四个目标，以 `migrations/` 实际 `*_enc` 列为准：`certificates.private_key_enc`、`signing_keys.private_key_enc`（有 `enc_key_id`）、`system_settings.value_enc`、`users.totp_secret_enc`（无 `enc_key_id` 列 → 以密文第 2 段 kek_id 判定；未改冻结迁移）。SQL 全为 `db.Q` 常量，无标识符拼接；keyset 游标；CAS 用 `BINARY` 比较（变异测试证明必要：去掉后大小写变体命中）；四表 app 均有 UPDATE，故仅用 app 池、不走 maint 约定（`repository.New` 拒绝 maint/migrate 池，仓储方法与 `NewRecordStore` 拒绝非平台 Scope）。`provider_credentials` 随 P2，未提前声明；`TestTargetsMatchMigrations` 防遗漏。
+2. **真实库端到端测试** `tests/integration/secrets`（独立临时 mysqld + 全部 13 个内嵌迁移 + 真实 `lingedge_app` + 真实 `FileKeyProvider`，无 Mock；仅用 root 连接造数/旁路篡改/核对）：轮换端到端（52 条/4 表、批 5）含拒绝/放行/仅 k2 可解全部、nonce/ct 不变；CAS 并发冲突；CAS 大小写敏感；AAD 搬迁（Failures 记录且 k1 仍被计数拒绝移除）；中断（第 10 次写回前取消）后续跑；NULL 与软删除；kek_id 非通配符；账号授权核对。
+3. **`CheckKEKRemovable` 接真实引用计数**（上述测试内）；备份 `kek_ids_required` 数据源属 Story 1.41，**未伪造**，接口保持，文档标注（secrets.md §3.2）。
+4. **sprint-status**：1.11 `waiting_env_verification: true`，补 `environment_verification.1-11-…`（systemd `$CREDENTIALS_DIRECTORY`、root 属主文件、`LimitCORE=0`、`kek_ids_required` 数据源 4 项待验）。
+5. **裸 base64 主密钥脱敏**：评估后做保守版（风险可控）：恰 43 字符的最大连续 base64 串 + 大写/小写/数字齐全 + 熵≥4.5；正例 1000+ 随机样本、反例（ULID/UUID/hex 散列含大写/SHA-1/路径/URL/主机名/驼峰/kebab/PEM 行/JWT 头载荷）原样；G-5 加入裸密钥注入。不做十六进制（与指纹不可分）；32 字节散列的 base64 与 JWT HS256 签名段会被过遮。残余风险写入 secrets.md §7。
+
+**变更文件**：`internal/platform/secrets/{recordstore.go,repository/{doc,store}.go}`、`tests/integration/secrets/*`、`pkg/redact/{bare,redact}.go`、`pkg/redact/bare_test.go`、`tests/security/logscan_test.go`、`docs/operations/secrets.md`、`docs/bmad/sprint-status.yaml`、本文件。

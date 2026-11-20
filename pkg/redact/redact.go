@@ -4,6 +4,7 @@
 //   - 键名：键名含 password|secret|token|private_key|authorization|cookie 等词（不区分大小写、驼峰/连字符/点分均归一）时，整个值被替换；
 //   - 值格式：与键名无关，自由文本里出现 API Token（le_<前缀>_…）、节点注册令牌（lenr1.…）、PEM 私钥块、
 //     DSN/URL 内嵌口令、Bearer 凭据、`password=…`/JSON 片段、Cookie 头时，只替换敏感部分、保留上下文；
+//   - 裸密钥：不带键名的 32/64 字节随机密钥的 base64 文本（43/86 字符、三类字符齐全、高熵），见 bare.go 的收窄条件与已知取舍；
 //   - 结构与载体：嵌套 map/slice、错误链（Error 包装保留 Unwrap，errors.Is/As 仍可用）、panic 值。
 //
 // 设计取向：宁可多遮（键名按子串匹配），也不漏；对良性内容（ULID、主机名、普通句子）保持原样，由测试断言不误伤。
@@ -125,6 +126,7 @@ func String(s string) string {
 	s = reBearer.ReplaceAllString(s, "${1}"+Mask)
 	s = reAPIToken.ReplaceAllString(s, Mask)
 	s = reEnrollToken.ReplaceAllString(s, Mask)
+	s = maskBareKeys(s)
 	return s
 }
 

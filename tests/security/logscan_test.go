@@ -4,6 +4,7 @@ package security_test
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -76,6 +77,10 @@ func TestLogScanInjectedSecrets(t *testing.T) {
 	l, buf := newLogger(t)
 
 	l.Info("导入证书 "+c.pem+" 使用令牌 "+c.apiToken, zap.String("note", "enroll "+c.enrollToken))
+	// 自由文本里不带键名的裸 base64 主密钥（随机生成；见 pkg/redact/bare.go 的收窄条件与已知取舍）。
+	bare := randomBareKey(t)
+	l.Info("loaded master key "+bare+" ok", zap.String("detail", "k1:"+bare))
+	c.masterKeyB64 = bare
 	l.Info("header", zap.String("hdr", "Authorization: Bearer "+c.bearer))
 	l.Warn("字段键名敏感", zap.String("private_key", c.pem), zap.String("master_key", c.masterKeyB64), zap.String("api_token", c.apiToken), zap.ByteString("credential", []byte(c.plaintext)))
 	l.Warn("字段键名不敏感，靠值格式", zap.String("detail", c.pem), zap.String("x", c.apiToken+" "+c.enrollToken))
@@ -92,6 +97,9 @@ func TestLogScanInjectedSecrets(t *testing.T) {
 	}()
 	out := buf.String()
 	scan(t, "注入", out, c)
+	if strings.Contains(out, bare) {
+		t.Fatal("裸 base64 主密钥泄露到日志")
+	}
 	if !strings.Contains(out, "***") {
 		t.Fatal("输出里没有任何脱敏标记，测试可能没有真正产生日志")
 	}
@@ -160,4 +168,25 @@ func TestLogScanDetectsLeaks(t *testing.T) {
 		}
 	}
 	t.Fatal("裸 logger 的输出应含 canary（扫描无效）")
+}
+
+// randomBareKey 生成随机 32 字节密钥的 base64url 文本；要求三类字符齐全（极少数随机值不满足，属规则已声明的盲区，重抽）。
+func randomBareKey(t *testing.T) string {
+	t.Helper()
+	for {
+		b := make([]byte, 32)
+		if _, err := rand.Read(b); err != nil {
+			t.Fatal(err)
+		}
+		k := base64.RawURLEncoding.EncodeToString(b)
+		var up, lo, di bool
+		for _, r := range k {
+			up = up || r >= 'A' && r <= 'Z'
+			lo = lo || r >= 'a' && r <= 'z'
+			di = di || r >= '0' && r <= '9'
+		}
+		if up && lo && di {
+			return k
+		}
+	}
 }

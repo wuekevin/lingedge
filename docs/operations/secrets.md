@@ -34,7 +34,22 @@ k2:<base64url 无填充，32 字节随机值>
 2. 运行 `secrets.rewrap`（`Box.RewrapAll(from, to)`）：只重包装 DEK，`nonce` 与 `ct+tag` 原样保留；可重入；单条失败记入报告而不中止；并发被改写的记录计入 `Skipped`，下一轮再处理。
 3. 移除旧 KEK 前必须通过 `CheckKEKRemovable`：非当前 KEK；`CountByKEK==0`（库内无 `enc_key_id` 引用）；不在保留备份清单的 `kek_ids_required` 内，除非显式 `--drop-backup-compat`。任一不满足即拒绝。
 
-`RecordStore`（按 `enc_key_id` 扫描各 `*_enc` 列、CAS 写回、计数）由持有这些列的仓储层实现；后续 Story 接线 `retention`/`rekey` 任务与 `lingedge … backup list`。本 Story 用内存实现验证原语语义，**未**做真实库表的接线（见 Story 1.11 开发记录）。
+### 3.1 RecordStore 真实实现（`internal/platform/secrets/repository`）
+
+`secretbox.RecordStore` 的真实 MySQL 实现：`repository.New(appPool)` 得到仓储（方法 `*AcrossTenants(ctx, scope, …)`，含 SQL），再经 `secrets.NewRecordStore(repo, tenantscope.PlatformForJob(actor))` 绑定平台 Scope 适配为接口（`internal/platform/secrets`，不含 SQL；这样满足 repo-scope 门禁：Repository 方法首参必须是 Scope）。
+
+- **扫描范围（受控白名单，以 `migrations/` 实际存在的 `*_enc` 列为准）**：`certificates.private_key_enc`、`signing_keys.private_key_enc`（二者有 `enc_key_id` 列）；`system_settings.value_enc`、`users.totp_secret_enc`（迁移里**没有** `enc_key_id` 列，不改已冻结迁移，改以密文第 2 段 `kek_id` 判定）。`provider_credentials.credential_enc` 随 P2 建表，届时在 `targets` 追加；`tests/integration/secrets` 的 `TestTargetsMatchMigrations` 会在迁移新增 `*_enc` 列而未登记时失败。
+- **SQL 安全**：每个目标的 list/replace/count 都是编译期常量（`db.Q`），不拼接任何标识符；外部只传值（kek_id、uid、密文），全部 `?` 绑定。判定「以某 KEK 包装」用 `BINARY LEFT(col, n) = 'v1:<kek>:'`（前缀作参数，`kek_id` 中的 `_` 不会成为 LIKE 通配符）；有 `enc_key_id` 的表同时核对该列（OR，只会更保守）。
+- **游标与顺序**：按（表,列,uid）升序、`uid > ?` keyset 分批；uid 为规范 ULID（大写），库默认排序规则下与字节序一致。
+- **CAS 写回**：`UPDATE … SET <col>=?, enc_key_id=? WHERE uid=? AND BINARY <col>=?`（旧密文逐字节相等才写；`BINARY` 是必须的，库默认 `utf8mb4_0900_ai_ci` 不区分大小写，而 base64url 区分）。返回受影响行数==1；0 行表示并发改动/删除，计入 `Skipped`，下一轮再处理。
+- **引用计数**：`CountByKEK` 统计四个目标全部行（含软删除行：行与备份中仍在）。`CheckKEKRemovable` 已接到它（`tests/integration/secrets.TestRotationEndToEnd`）。
+- **账号与权限边界**：四张目标表在各自迁移里都已 `GRANT SELECT, INSERT, UPDATE, DELETE … TO lingedge_app`，因此重包装只用 **app 池**（`repository.New` 拒绝 maint/migrate 池；`lingedge_maint` 对这些表无任何授权，测试核对）。无需走 maint 约定，也未改动冻结迁移（contract-v1 / migrations-m1）。
+- **租户范围**：`certificates` 是租户表而重包装是跨租户批处理，仓储每个方法与 `NewRecordStore` 都要求平台范围 Scope（`PlatformForJob`；租户范围/零值被拒绝，不能用平台表豁免）。`PlatformForJob` 调用点受 `[tenantscope-mint]` 白名单约束，须登记于 Story 1.14/1.15 的作业清单。
+- **真实环境验证**：`tests/integration/secrets`（独立临时 mysqld、全部 13 个内嵌迁移、真实 `lingedge_app` 账号、真实 `FileKeyProvider`）：端到端轮换（52 条/4 表，小批量游标）、移除 KEK 的拒绝/放行、仅含新 KEK 的主密钥解全部、nonce/ct 段不变、CAS 并发冲突（真实并发写入者）、CAS 大小写敏感（变异验证）、AAD 搬迁、中断后续跑、NULL/软删除、kek_id 非通配符。
+
+### 3.2 备份 `kek_ids_required`（依赖后续 Story，未伪造）
+
+`RemovalCheck.BackupRequired` 保持为接口输入：保留备份清单（`BACKUP.json` 的 `kek_ids_required`，tools-design §17）由 **Story 1.41（backup / restore / uninstall）** 生成，`lingedge … backup list` 读取后传入。当前仓库没有真实的备份清单表/文件，因此**本 Story 不提供也不模拟其数据源**；在 1.41 落地前，`CheckKEKRemovable` 的备份维度只由调用方显式传入的清单决定（测试中以显式输入验证拒绝与 `--drop-backup-compat` 放行语义）。**运维上在 1.41 完成前，移除 KEK 前须人工确认没有仍需该 KEK 的保留备份。**
 
 ## 4. 进程内保护
 
@@ -48,6 +63,18 @@ k2:<base64url 无填充，32 字节随机值>
 
 ## 6. 等待环境验证
 
+登记于 `docs/bmad/sprint-status.yaml` 的 `environment_verification.1-11-…`（`waiting_env_verification: true`），需 Linux/systemd 验收机（ENV-LNX）逐项验证：
+
 - 真实 systemd 下的 `$CREDENTIALS_DIRECTORY`（凭据文件的实际属主/权限由 systemd 设定）与 `root:root 0400` 原文件经 `LoadCredential` 的端到端启动；本机（macOS、无 systemd、非 root）仅验证了权限、属主判定逻辑（以允许 uid 集合注入）与路径解析。
 - 以 root 身份运行时 `root:root 0400` 的接受路径（本机以非 root 运行，只能用「属主=运行用户」覆盖同一判定逻辑）。
 - `LimitCORE=0` 在 Linux 单元中的实际生效（属 Story 1.32 渲染与验收）。
+
+## 7. 日志脱敏与裸 base64 主密钥（残余风险）
+
+`pkg/redact` 原先只按键名与已知格式识别，自由文本里「不带键名」的裸 base64 主密钥识别不到。现增加保守识别（`pkg/redact/bare.go`）：仅当一段最大连续 base64 串**恰为 43 字符**（32 字节密钥；std 变体可带 1 个 `=`）、同时含大写/小写/数字、且香农熵 ≥ 4.5 bit/字符时遮蔽。反例测试断言 ULID、UUID、十六进制 SHA-1/SHA-256（含大写）、路径、URL、主机名、驼峰标识、kebab 文本、PEM 行、JWT 头与载荷等保持原样；正例测试用随机密钥（1000+ 样本，4 种 base64 变体、9 种上下文）断言必遮、且幂等。G-5 日志扫描已加入裸密钥注入用例。
+
+**残余风险（接受并记录）**：
+1. 十六进制形态的主密钥（64 个十六进制字符）与证书/文件指纹的十六进制 SHA-256 不可区分，**不做识别**；
+2. 32 字节散列的 base64 形态（SHA-256 的 base64、JWT 的 HS256 签名段）与密钥不可区分，会被**一并遮蔽**（过遮，不泄漏；当前代码库没有日志输出此类值）；
+3. 其他长度（16/24/64 字节密钥）、被换行/空格折断或再编码（如二次 base64）的密钥不识别；约 0.1% 的随机 32 字节密钥缺某一类字符而不满足条件；
+4. 因此纪律仍是：主密钥永不进入任何日志调用——`FileKeyProvider` 自身从不格式化输出密钥，裸串识别只是兜底。
