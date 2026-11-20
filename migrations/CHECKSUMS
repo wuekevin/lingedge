@@ -1,4 +1,17 @@
 # 已发布迁移的 SHA-256 清单（Story 1.3 AC4）。格式：<sha256>  <文件名>，每行一个，只追加、不改写。
 # 清单内的迁移视为已发布：任何改动或删除都会使 make migrations-check 失败；修正须新增后续迁移。
 # 新增迁移须含 `lingedge:class` 标注（细则与分类 lint 随 Story 1.6）；评审通过后用 make migrations-seal 追加登记。
-# 当前尚无已发布迁移：000001–000013 由 Story 1.7–1.9 创建，CF-2 冻结时登记。
+# CF-2（Story 1.9）已登记 000001–000013 共 13 个迁移（标签 migrations-m1）；此后只允许追加新的 expand 迁移。
+25dc3b7d80b2b540b7648303a4d4f40891bf4d3e8d91cdc585cb4cbf1dd3db7d  000001_identity_core.sql
+35fcb5978eb72e0a3df8f156070f8c0c6b51e83be797f0aadf8b449c8bd5622f  000002_platform_core.sql
+7363ce0addba62908f521e80850a262d4fc9d9ea445a718b006fa6bdcc861ee2  000003_audit_logs.sql
+af967c94dc0cddf1db48eb8bae1db584d889a8810eaaeb1df12c432005cc6b30  000004_seed_builtin.sql
+2c0ebece082c83a7b6d6b1b459ecd2d944a7bf7c1b73ef3e3b11cead2c2eb436  000005_keys_credentials.sql
+6b183ef9e4e1c14b4f0c9f92ceca545f444c755c2a3cfaf0fd00207958e1f88d  000006_nodes_clusters.sql
+e42819d2bba51a6d6a284e9f3948c7a46744c61b9beec9ddd2e51210d05bb232  000007_sites_core.sql
+d57c5a2a28d01b9a81bb7aa7548e6cf82a72fdbe5ae887c88bec4c77882aec71  000008_certificates.sql
+183c64f3c50b716614f3eb5ca7d702e3263be8ab32c22ffe53b053ed495993d3  000009_site_config.sql
+0303351ab5e0ea25464373089a9006b62fcf3799dd2ab5c678a45aaf6b2da036  000010_rules.sql
+19d048ada89fa9a5f2ccfed5a6bb6782f32d0cff5154d6f3b1591463fe62fd4a  000011_cache.sql
+3049b20c4d8b8c05c8e0fe3cf5d7277584f3cd63f7cad61c0cba9d7a516540ea  000012_config_revisions.sql
+b28e2375fcd0b4e596066e802ae1e1e8b4e93fe7c54c0d7490acb6f3daa164cb  000013_observability.sql

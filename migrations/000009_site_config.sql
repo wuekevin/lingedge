@@ -3,6 +3,9 @@
 -- 依据 database/README §2.2、§2.4、§8.1，tenant-site.md §2.3–§2.5、§3，node-deploy.md §4.4。
 -- 站点子表一律声明复合外键 (tenant_id, site_id) → sites(tenant_id, id)（子行租户与父行不一致在库层不可能）；origins 另有
 -- (site_id, origin_group_id) → origin_groups(site_id, id)，跨站点/跨租户绑定源站组在库层不可能（MIN-13）。
+-- 【CF-2 前决策，见 contract-changes/CC-1】跨租户引用的库层强制：site_domains.certificate_id、site_settings.default_certificate_id 改为复合外键
+-- (tenant_id, certificate_id) → certificates(tenant_id, id) ON DELETE RESTRICT（原 SET NULL 与 NOT NULL 的 tenant_id 成员冲突，ERROR 1830）；
+-- origin_health 的 origin_id 同理 (tenant_id, origin_id) → origins(tenant_id, id)。
 -- site_domains.active_hostname 为 STORED 生成列：基列 hostname/deleted_at 无外键；origin_groups.default_flag 的基列 site_id 的外键为 RESTRICT，
 -- 满足 README §2.2 生成列规则（STORED 的基列外键不得 CASCADE/SET NULL）。
 -- node_tasks 为逐节点任务队列（C2u，租约/attempt/回执，BLK-06）：kind 与 proto NodeTask.payload 的 oneof 一一对应（封闭枚举，无 exec 类）。
@@ -12,7 +15,6 @@
 -- ---- site_domains：站点访问主机名（C1 + T + SD；FR-48）----
 -- verification_status 默认 pending（MIN-11）：自用模式由 Service 创建时显式置 exempt（verification_method='admin_exempt'）。
 -- lingedge:cross-tenant-index=uk_site_domains_active_host 活动主机名全局唯一、跨租户冲突检测（他租户占用即冲突，FR-48）；软删除后释放
--- lingedge:cross-tenant-index=idx_site_domains_cert 证书删除/替换时按证书反查绑定域名（同时支撑外键 fk_site_domains_certificates）
 CREATE TABLE IF NOT EXISTS site_domains (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   uid CHAR(26) NOT NULL,
@@ -36,14 +38,14 @@ CREATE TABLE IF NOT EXISTS site_domains (
   UNIQUE KEY uk_site_domains_uid (uid),
   UNIQUE KEY uk_site_domains_active_host (active_hostname),
   KEY idx_site_domains_site (tenant_id, site_id),
-  KEY idx_site_domains_cert (certificate_id),
+  KEY idx_site_domains_cert (tenant_id, certificate_id),
   CONSTRAINT ck_site_domains_hostname CHECK (REGEXP_LIKE(hostname, '^(\\*\\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z0-9-]{2,63}$', 'c')),
   CONSTRAINT ck_site_domains_lower CHECK (BINARY hostname = BINARY LOWER(hostname)),
   CONSTRAINT ck_site_domains_verification CHECK (verification_status IN ('exempt', 'pending', 'verified', 'failed')),
   CONSTRAINT ck_site_domains_cname CHECK (cname_status IN ('unknown', 'ok', 'mismatch')),
   CONSTRAINT fk_site_domains_tenants FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE RESTRICT,
   CONSTRAINT fk_site_domains_sites FOREIGN KEY (tenant_id, site_id) REFERENCES sites (tenant_id, id) ON DELETE RESTRICT,
-  CONSTRAINT fk_site_domains_certificates FOREIGN KEY (certificate_id) REFERENCES certificates (id) ON DELETE SET NULL
+  CONSTRAINT fk_site_domains_certificates FOREIGN KEY (tenant_id, certificate_id) REFERENCES certificates (tenant_id, id) ON DELETE RESTRICT
 ) ENGINE=InnoDB;
 GRANT SELECT, INSERT, UPDATE, DELETE ON site_domains TO lingedge_app;
 
@@ -77,12 +79,13 @@ CREATE TABLE IF NOT EXISTS site_settings (
   UNIQUE KEY uk_site_settings_uid (uid),
   UNIQUE KEY uk_site_settings_site (site_id),
   KEY idx_site_settings_tenant (tenant_id, site_id),
+  KEY idx_site_settings_cert (tenant_id, default_certificate_id),
   CONSTRAINT ck_site_settings_realip_header CHECK (real_ip_custom_enabled = 0 OR (real_ip_custom_header IS NOT NULL AND REGEXP_LIKE(real_ip_custom_header, '^[A-Za-z][A-Za-z0-9-]{0,63}$', 'c'))),
   CONSTRAINT ck_site_settings_xff_policy CHECK (xff_policy IN ('overwrite', 'append_trusted')),
   CONSTRAINT ck_site_settings_tls_min CHECK (tls_min_version IN ('TLSv1.2', 'TLSv1.3')),
   CONSTRAINT fk_site_settings_tenants FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE RESTRICT,
   CONSTRAINT fk_site_settings_sites FOREIGN KEY (tenant_id, site_id) REFERENCES sites (tenant_id, id) ON DELETE RESTRICT,
-  CONSTRAINT fk_site_settings_certificates FOREIGN KEY (default_certificate_id) REFERENCES certificates (id) ON DELETE SET NULL
+  CONSTRAINT fk_site_settings_certificates FOREIGN KEY (tenant_id, default_certificate_id) REFERENCES certificates (tenant_id, id) ON DELETE RESTRICT
 ) ENGINE=InnoDB;
 GRANT SELECT, INSERT, UPDATE, DELETE ON site_settings TO lingedge_app;
 
@@ -140,6 +143,7 @@ CREATE TABLE IF NOT EXISTS origins (
   timeouts_json JSON NULL,
   PRIMARY KEY (id),
   UNIQUE KEY uk_origins_uid (uid),
+  UNIQUE KEY uk_origins_tenant_id (tenant_id, id),
   KEY idx_origins_group (site_id, origin_group_id),
   KEY idx_origins_tenant (tenant_id, site_id),
   CONSTRAINT ck_origins_port CHECK (port BETWEEN 1 AND 65535),
@@ -153,7 +157,7 @@ CREATE TABLE IF NOT EXISTS origins (
 GRANT SELECT, INSERT, UPDATE, DELETE ON origins TO lingedge_app;
 
 -- ---- origin_health：源站在各节点视角下的当前健康状态（C2 + T；平台专用，租户只见聚合视图 OriginHealthView）----
--- lingedge:cross-tenant-index=uk_origin_health 按 (源站, 节点) upsert 当前状态（origin_id 已隐含租户）
+-- lingedge:cross-tenant-index=uk_origin_health 按 (源站, 节点) upsert 当前状态（origin_id 已隐含租户，复合外键 (tenant_id, origin_id) 保证一致）
 CREATE TABLE IF NOT EXISTS origin_health (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
@@ -173,7 +177,7 @@ CREATE TABLE IF NOT EXISTS origin_health (
   KEY idx_origin_health_tenant (tenant_id, origin_id),
   CONSTRAINT ck_origin_health_status CHECK (status IN ('up', 'down', 'unknown')),
   CONSTRAINT fk_origin_health_tenants FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE RESTRICT,
-  CONSTRAINT fk_origin_health_origins FOREIGN KEY (origin_id) REFERENCES origins (id) ON DELETE CASCADE,
+  CONSTRAINT fk_origin_health_origins FOREIGN KEY (tenant_id, origin_id) REFERENCES origins (tenant_id, id) ON DELETE CASCADE,
   CONSTRAINT fk_origin_health_nodes FOREIGN KEY (node_id) REFERENCES nodes (id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 GRANT SELECT, INSERT, UPDATE, DELETE ON origin_health TO lingedge_app;

@@ -288,7 +288,7 @@ CREATE TABLE certificates (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY, uid CHAR(26) NOT NULL, tenant_id BIGINT UNSIGNED NOT NULL, site_id BIGINT UNSIGNED NULL,
   deleted_at DATETIME(3) NULL, source VARCHAR(16) NOT NULL, status VARCHAR(16) NOT NULL DEFAULT 'active', auto_renew TINYINT(1) NOT NULL DEFAULT 0,
   not_before DATETIME(3) NOT NULL, not_after DATETIME(3) NOT NULL, cert_version INT UNSIGNED NOT NULL DEFAULT 1, acme_account_id BIGINT UNSIGNED NULL,
-  UNIQUE KEY uk_certificates_uid (uid), KEY idx_certificates_tenant (tenant_id, site_id),
+  UNIQUE KEY uk_certificates_uid (uid), UNIQUE KEY uk_certificates_tenant_id (tenant_id, id), KEY idx_certificates_tenant (tenant_id, site_id),
   CONSTRAINT ck_cert_dates CHECK (not_before < not_after), CONSTRAINT ck_cert_renew CHECK (auto_renew=0 OR source='acme'),
   CONSTRAINT fk_cert_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT,
   CONSTRAINT fk_cert_site FOREIGN KEY (tenant_id, site_id) REFERENCES sites(tenant_id, id) ON DELETE RESTRICT
@@ -299,7 +299,7 @@ CREATE TABLE certificate_deployments (
   certificate_id BIGINT UNSIGNED NOT NULL, cert_version INT UNSIGNED NOT NULL, node_id BIGINT UNSIGNED NOT NULL, cluster_id BIGINT UNSIGNED NOT NULL,
   UNIQUE KEY uk_cert_deploy (certificate_id, cert_version, node_id),
   CONSTRAINT fk_cd_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT,
-  CONSTRAINT fk_cd_cert FOREIGN KEY (certificate_id) REFERENCES certificates(id) ON DELETE RESTRICT,
+  CONSTRAINT fk_cd_cert FOREIGN KEY (tenant_id, certificate_id) REFERENCES certificates(tenant_id, id) ON DELETE RESTRICT,
   CONSTRAINT fk_cd_node FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE RESTRICT,
   CONSTRAINT fk_cd_cluster FOREIGN KEY (cluster_id) REFERENCES clusters(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB;
@@ -316,7 +316,7 @@ CREATE TABLE site_domains (
   CONSTRAINT ck_sd_verif CHECK (verification_status IN ('exempt','pending','verified','failed')),
   CONSTRAINT fk_sd_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT,
   CONSTRAINT fk_sd_site FOREIGN KEY (tenant_id, site_id) REFERENCES sites(tenant_id, id) ON DELETE RESTRICT,
-  CONSTRAINT fk_sd_cert FOREIGN KEY (certificate_id) REFERENCES certificates(id) ON DELETE SET NULL
+  CONSTRAINT fk_sd_cert FOREIGN KEY (tenant_id, certificate_id) REFERENCES certificates(tenant_id, id) ON DELETE RESTRICT
 ) ENGINE=InnoDB;
 
 CREATE TABLE site_settings (
@@ -326,7 +326,7 @@ CREATE TABLE site_settings (
   CONSTRAINT ck_ss_realip CHECK (real_ip_custom_enabled=0 OR (real_ip_custom_header IS NOT NULL AND REGEXP_LIKE(real_ip_custom_header,'^[A-Za-z][A-Za-z0-9-]{0,63}$'))),
   CONSTRAINT fk_sset_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT,
   CONSTRAINT fk_sset_site FOREIGN KEY (tenant_id, site_id) REFERENCES sites(tenant_id, id) ON DELETE RESTRICT,
-  CONSTRAINT fk_sset_cert FOREIGN KEY (default_certificate_id) REFERENCES certificates(id) ON DELETE SET NULL
+  CONSTRAINT fk_sset_cert FOREIGN KEY (tenant_id, default_certificate_id) REFERENCES certificates(tenant_id, id) ON DELETE RESTRICT
 ) ENGINE=InnoDB;
 
 CREATE TABLE origin_groups (
@@ -342,7 +342,7 @@ CREATE TABLE origin_groups (
 CREATE TABLE origins (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY, uid CHAR(26) NOT NULL, tenant_id BIGINT UNSIGNED NOT NULL, site_id BIGINT UNSIGNED NOT NULL,
   origin_group_id BIGINT UNSIGNED NOT NULL, port SMALLINT UNSIGNED NOT NULL, weight SMALLINT UNSIGNED NOT NULL DEFAULT 100,
-  UNIQUE KEY uk_origins_uid (uid),
+  UNIQUE KEY uk_origins_uid (uid), UNIQUE KEY uk_origins_tenant_id (tenant_id, id),
   CONSTRAINT ck_origins_port CHECK (port BETWEEN 1 AND 65535), CONSTRAINT ck_origins_weight CHECK (weight <= 1000),
   CONSTRAINT fk_o_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT,
   CONSTRAINT fk_o_site FOREIGN KEY (tenant_id, site_id) REFERENCES sites(tenant_id, id) ON DELETE RESTRICT,
@@ -353,7 +353,7 @@ CREATE TABLE origin_health (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY, tenant_id BIGINT UNSIGNED NOT NULL, origin_id BIGINT UNSIGNED NOT NULL, node_id BIGINT UNSIGNED NOT NULL,
   status VARCHAR(8) NOT NULL DEFAULT 'unknown', UNIQUE KEY uk_origin_health (origin_id, node_id),
   CONSTRAINT fk_oh_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT,
-  CONSTRAINT fk_oh_origin FOREIGN KEY (origin_id) REFERENCES origins(id) ON DELETE CASCADE,
+  CONSTRAINT fk_oh_origin FOREIGN KEY (tenant_id, origin_id) REFERENCES origins(tenant_id, id) ON DELETE CASCADE,
   CONSTRAINT fk_oh_node FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
@@ -391,7 +391,7 @@ CREATE TABLE site_rules (
   rule_type VARCHAR(32) NOT NULL, phase VARCHAR(32) NOT NULL, name VARCHAR(128) NOT NULL, deleted_at DATETIME(3) NULL, priority INT NOT NULL DEFAULT 1000,
   template_id BIGINT UNSIGNED NULL, current_version_id BIGINT UNSIGNED NULL, published_version_id BIGINT UNSIGNED NULL,
   active_name VARCHAR(128) AS (IF(deleted_at IS NULL, name, NULL)) STORED,
-  UNIQUE KEY uk_site_rules_uid (uid), UNIQUE KEY uk_site_rules_name (site_id, active_name), KEY idx_site_rules_site_phase (tenant_id, site_id, phase, priority),
+  UNIQUE KEY uk_site_rules_uid (uid), UNIQUE KEY uk_site_rules_tenant_site_id (tenant_id, site_id, id), UNIQUE KEY uk_site_rules_name (site_id, active_name), KEY idx_site_rules_site_phase (tenant_id, site_id, phase, priority),
   CONSTRAINT ck_site_rules_prio CHECK (priority BETWEEN -100000 AND 100000),
   CONSTRAINT ck_site_rules_type_phase CHECK (
     (rule_type='redirect' AND phase='redirect') OR (rule_type IN ('url_rewrite','request_header') AND phase='rewrite') OR
@@ -410,7 +410,7 @@ CREATE TABLE rule_versions (
   UNIQUE KEY uk_rule_versions_uid (uid), UNIQUE KEY uk_rule_versions (rule_id, version_no),
   CONSTRAINT fk_rv_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT,
   CONSTRAINT fk_rv_site FOREIGN KEY (tenant_id, site_id) REFERENCES sites(tenant_id, id) ON DELETE RESTRICT,
-  CONSTRAINT fk_rv_rule FOREIGN KEY (rule_id) REFERENCES site_rules(id) ON DELETE RESTRICT,
+  CONSTRAINT fk_rv_rule FOREIGN KEY (tenant_id, site_id, rule_id) REFERENCES site_rules(tenant_id, site_id, id) ON DELETE RESTRICT,
   CONSTRAINT fk_rv_rollback FOREIGN KEY (rollback_of_version_id) REFERENCES rule_versions(id) ON DELETE SET NULL,
   CONSTRAINT fk_rv_user FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
@@ -439,7 +439,7 @@ CREATE TABLE cache_policies (
 CREATE TABLE cache_tasks (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY, uid CHAR(26) NOT NULL, tenant_id BIGINT UNSIGNED NOT NULL, site_id BIGINT UNSIGNED NOT NULL,
   task_id BIGINT UNSIGNED NULL, kind VARCHAR(24) NOT NULL, status VARCHAR(16) NOT NULL DEFAULT 'pending', requested_by BIGINT UNSIGNED NULL,
-  UNIQUE KEY uk_cache_tasks_uid (uid), KEY idx_cache_tasks_site (tenant_id, site_id),
+  UNIQUE KEY uk_cache_tasks_uid (uid), UNIQUE KEY uk_cache_tasks_tenant_id (tenant_id, id), KEY idx_cache_tasks_site (tenant_id, site_id),
   CONSTRAINT fk_ct_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT,
   CONSTRAINT fk_ct_site FOREIGN KEY (tenant_id, site_id) REFERENCES sites(tenant_id, id) ON DELETE RESTRICT,
   CONSTRAINT fk_ct_task FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE SET NULL,
@@ -451,7 +451,7 @@ CREATE TABLE cache_task_nodes (
   node_id BIGINT UNSIGNED NOT NULL, node_task_id BIGINT UNSIGNED NULL, status VARCHAR(16) NOT NULL DEFAULT 'pending',
   UNIQUE KEY uk_cache_task_nodes (cache_task_id, node_id), KEY idx_ctn_node_status (node_id, status),
   CONSTRAINT fk_ctn_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT,
-  CONSTRAINT fk_ctn_task FOREIGN KEY (cache_task_id) REFERENCES cache_tasks(id) ON DELETE CASCADE,
+  CONSTRAINT fk_ctn_task FOREIGN KEY (tenant_id, cache_task_id) REFERENCES cache_tasks(tenant_id, id) ON DELETE CASCADE,
   CONSTRAINT fk_ctn_node FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE RESTRICT,
   CONSTRAINT fk_ctn_nodetask FOREIGN KEY (node_task_id) REFERENCES node_tasks(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
@@ -472,13 +472,13 @@ CREATE TABLE config_revisions (
   manifest_sha256 CHAR(64) NOT NULL, rollback_of_revision_id BIGINT UNSIGNED NULL, trigger_site_id BIGINT UNSIGNED NULL,
   created_by_user_id BIGINT UNSIGNED NULL, created_by_task_id BIGINT UNSIGNED NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  UNIQUE KEY uk_config_revisions_uid (uid), UNIQUE KEY uk_config_revisions_seq (cluster_id, lineage, seq),
+  UNIQUE KEY uk_config_revisions_uid (uid), UNIQUE KEY uk_config_revisions_cluster_id (cluster_id, id), UNIQUE KEY uk_config_revisions_seq (cluster_id, lineage, seq),
   UNIQUE KEY uk_config_revisions_manifest (cluster_id, manifest_sha256),
   CONSTRAINT ck_cr_kind CHECK (kind IN ('publish','rollback','system')), CONSTRAINT ck_cr_seq CHECK (seq >= 1),
   CONSTRAINT ck_cr_rollback CHECK ((kind='rollback') = (rollback_of_revision_id IS NOT NULL)),
   CONSTRAINT ck_cr_parent CHECK (parent_seq IS NULL OR parent_seq < seq),
   CONSTRAINT fk_cr_cluster FOREIGN KEY (cluster_id) REFERENCES clusters(id) ON DELETE RESTRICT,
-  CONSTRAINT fk_cr_rollback FOREIGN KEY (rollback_of_revision_id) REFERENCES config_revisions(id) ON DELETE RESTRICT,
+  CONSTRAINT fk_cr_rollback FOREIGN KEY (cluster_id, rollback_of_revision_id) REFERENCES config_revisions(cluster_id, id) ON DELETE RESTRICT,
   CONSTRAINT fk_cr_site FOREIGN KEY (trigger_site_id) REFERENCES sites(id) ON DELETE SET NULL,
   CONSTRAINT fk_cr_user FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
   CONSTRAINT fk_cr_task FOREIGN KEY (created_by_task_id) REFERENCES tasks(id) ON DELETE SET NULL
@@ -507,7 +507,7 @@ CREATE TABLE site_versions (
 CREATE TABLE publish_queue (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY, uid CHAR(26) NOT NULL, tenant_id BIGINT UNSIGNED NULL, cluster_id BIGINT UNSIGNED NOT NULL,
   site_id BIGINT UNSIGNED NULL, kind VARCHAR(20) NOT NULL, status VARCHAR(16) NOT NULL DEFAULT 'queued',
-  queued_key BIGINT UNSIGNED AS (IF(status='queued', site_id, NULL)) STORED,
+  queued_key BIGINT UNSIGNED AS (IF(status='queued', COALESCE(site_id,0), NULL)) STORED,
   deployment_id BIGINT UNSIGNED NULL,            -- FK 在本迁移末尾追加（publish_queue ↔ deployments 循环）
   site_version_id BIGINT UNSIGNED NULL, task_id BIGINT UNSIGNED NULL, requested_by BIGINT UNSIGNED NULL,
   UNIQUE KEY uk_publish_queue_uid (uid), UNIQUE KEY uk_pq_queued (cluster_id, queued_key), KEY idx_pq_cluster_status (cluster_id, status, id),
@@ -527,7 +527,7 @@ CREATE TABLE deployments (
   created_by_user_id BIGINT UNSIGNED NULL, kind VARCHAR(16) NOT NULL DEFAULT 'publish', strategy VARCHAR(16) NOT NULL DEFAULT 'all', status VARCHAR(16) NOT NULL DEFAULT 'pending',
   UNIQUE KEY uk_deployments_uid (uid), KEY idx_deployments_cluster (cluster_id), KEY idx_deployments_status (status),
   CONSTRAINT fk_dep_cluster FOREIGN KEY (cluster_id) REFERENCES clusters(id) ON DELETE RESTRICT,
-  CONSTRAINT fk_dep_rev FOREIGN KEY (revision_id) REFERENCES config_revisions(id) ON DELETE RESTRICT,
+  CONSTRAINT fk_dep_rev FOREIGN KEY (cluster_id, revision_id) REFERENCES config_revisions(cluster_id, id) ON DELETE RESTRICT,
   CONSTRAINT fk_dep_queue FOREIGN KEY (queue_id) REFERENCES publish_queue(id) ON DELETE SET NULL,
   CONSTRAINT fk_dep_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT,
   CONSTRAINT fk_dep_site FOREIGN KEY (trigger_site_id) REFERENCES sites(id) ON DELETE SET NULL,
@@ -557,13 +557,13 @@ CREATE TABLE node_cluster_state (
   CONSTRAINT ck_ncs_state CHECK (state IN ('idle','applying','failed','rolled_back')),
   CONSTRAINT fk_ncs_node FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE,
   CONSTRAINT fk_ncs_cluster FOREIGN KEY (cluster_id) REFERENCES clusters(id) ON DELETE CASCADE,
-  CONSTRAINT fk_ncs_desired FOREIGN KEY (desired_revision_id) REFERENCES config_revisions(id) ON DELETE RESTRICT,
-  CONSTRAINT fk_ncs_applied FOREIGN KEY (applied_revision_id) REFERENCES config_revisions(id) ON DELETE RESTRICT
+  CONSTRAINT fk_ncs_desired FOREIGN KEY (cluster_id, desired_revision_id) REFERENCES config_revisions(cluster_id, id) ON DELETE RESTRICT,
+  CONSTRAINT fk_ncs_applied FOREIGN KEY (cluster_id, applied_revision_id) REFERENCES config_revisions(cluster_id, id) ON DELETE RESTRICT
 ) ENGINE=InnoDB;
 
 -- 循环/前向外键在本迁移末尾追加（README §2.4）
 ALTER TABLE publish_queue ADD CONSTRAINT fk_pq_deployment FOREIGN KEY (deployment_id) REFERENCES deployments(id) ON DELETE SET NULL;
-ALTER TABLE clusters ADD CONSTRAINT fk_clusters_confirmed FOREIGN KEY (confirmed_revision_id) REFERENCES config_revisions(id) ON DELETE RESTRICT;
+ALTER TABLE clusters ADD CONSTRAINT fk_clusters_confirmed FOREIGN KEY (id, confirmed_revision_id) REFERENCES config_revisions(cluster_id, id) ON DELETE RESTRICT;
 ALTER TABLE sites ADD CONSTRAINT fk_sites_last_deployment FOREIGN KEY (last_deployment_id) REFERENCES deployments(id) ON DELETE SET NULL;
 
 -- ==== 000013 observability（高频，无外键）

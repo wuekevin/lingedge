@@ -41,7 +41,7 @@ updated: 2026-11-16（依据架构评审修订，见 docs/bmad/architecture-revi
 | published_version_id | BIGINT UNSIGNED | Y | — | 已发布版本，FK → rule_versions(id) SET NULL（同上，ALTER 追加）。仅在**部署成功后**前移（ADR-002 D-PUB） |
 | active_name | VARCHAR(128) | Y | — | 生成列 `IF(deleted_at IS NULL, name, NULL)` |
 
-- 唯一：`uk_site_rules_name(site_id, active_name)`。
+- 唯一：`uk_site_rules_name(site_id, active_name)`、`uk_site_rules_tenant_site_id(tenant_id, site_id, id)`（`rule_versions` 复合外键目标，CC-1）。
 - 索引：`idx_site_rules_site_phase(tenant_id, site_id, phase, priority)`、`idx_site_rules_tenant(tenant_id, site_id, enabled)`。
 - CHECK：`rule_type`、`phase` 取值；`ck_site_rules_type_phase`（映射见上）；`priority BETWEEN -100000 AND 100000`。（`template_id/current_version_id/published_version_id` 为 `SET NULL` FK 列，**不得被任何 CHECK 引用**，README §2.2）
 - 业务：保存规则 → Service 校验（FR-68，含 regex RE2 子集、Header 名、重定向目标）→ 写 `rule_versions` 新版本（`version_no+1`）→ `sites.config_version+1`；发布时 `published_version_id` 前移；回滚 = 把旧版本内容保存为新版本（`rollback_of_version_id`）并发布。
@@ -54,7 +54,7 @@ updated: 2026-11-16（依据架构评审修订，见 docs/bmad/architecture-revi
 
 | 列 | 类型 | 空 | 默认 | 说明 |
 |---|---|---|---|---|
-| rule_id | BIGINT UNSIGNED | N | — | FK → site_rules(id) RESTRICT |
+| rule_id | BIGINT UNSIGNED | N | — | 三列复合 FK `(tenant_id, site_id, rule_id)` → site_rules(tenant_id, site_id, id) RESTRICT（CC-1；`site_rules` 含 `UNIQUE(tenant_id, site_id, id)`） |
 | site_id | BIGINT UNSIGNED | N | — | 冗余；FK→sites(tenant_id,id) |
 | version_no | INT UNSIGNED | N | — | 规则内单调递增 |
 | rule_type | VARCHAR(32) | N | — | 快照 |
@@ -162,7 +162,7 @@ updated: 2026-11-16（依据架构评审修订，见 docs/bmad/architecture-revi
 
 | 列 | 类型 | 空 | 默认 | 说明 |
 |---|---|---|---|---|
-| cache_task_id | BIGINT UNSIGNED | N | — | FK → cache_tasks(id) CASCADE |
+| cache_task_id | BIGINT UNSIGNED | N | — | 复合 FK `(tenant_id, cache_task_id)` → cache_tasks(tenant_id, id) CASCADE（CC-1；`cache_tasks` 含 `UNIQUE(tenant_id, id)`） |
 | node_id | BIGINT UNSIGNED | N | — | FK → nodes(id) RESTRICT |
 | node_task_id | BIGINT UNSIGNED | Y | — | FK → node_tasks(id) SET NULL（下发后回填；proto `NodeTask.task_uid` = `node_tasks.uid`） |
 | status | VARCHAR(16) | N | 'pending' | `pending/sent/success/failed/skipped_offline/expired`（**事实源**；与 `node_tasks.status`、proto `TaskStatus` 的映射见 ADR-007 §6：RUNNING→`sent`，SKIPPED→`skipped_offline`，EXPIRED→`expired`） |
@@ -204,6 +204,7 @@ updated: 2026-11-16（依据架构评审修订，见 docs/bmad/architecture-revi
 | last_renew_at | DATETIME(3) | Y | — | |
 | last_renew_error | VARCHAR(512) | Y | — | |
 
+- 唯一：`uk_certificates_tenant_id(tenant_id, id)`（CC-1：证书引用的复合外键目标）。
 - 索引：`idx_certificates_tenant(tenant_id, site_id)`、`idx_certificates_expiry(status, not_after)`（到期扫描）、`idx_certificates_fp(tenant_id, fingerprint_sha256)`。
 - CHECK：source/status/key_algorithm 取值；`not_before < not_after`；`auto_renew=0 OR source='acme'`。
 - 业务：上传时校验私钥与证书匹配、链有效；证书 API 响应不含 `private_key_enc`；日志脱敏。回滚（站点/集群）前 Service 校验修订引用的证书**未被删除**（已过期给警告，已删除则阻止，UX 回滚前校验）。
@@ -253,7 +254,7 @@ updated: 2026-11-16（依据架构评审修订，见 docs/bmad/architecture-revi
 
 | 列 | 类型 | 空 | 默认 | 说明 |
 |---|---|---|---|---|
-| certificate_id | BIGINT UNSIGNED | N | — | FK → certificates(id) RESTRICT |
+| certificate_id | BIGINT UNSIGNED | N | — | 复合 FK `(tenant_id, certificate_id)` → certificates(tenant_id, id) RESTRICT（CC-1） |
 | cert_version | INT UNSIGNED | N | — | |
 | node_id | BIGINT UNSIGNED | N | — | FK → nodes(id) RESTRICT |
 | cluster_id | BIGINT UNSIGNED | N | — | FK → clusters(id) RESTRICT |

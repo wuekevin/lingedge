@@ -767,17 +767,16 @@ func TestM1BConstraintsOnRealDatabase(t *testing.T) {
 		c.ok("INSERT INTO site_settings (uid, tenant_id, site_id, proxy_json) VALUES (?, ?, ?, JSON_OBJECT())", uid26(), t1, s1)
 		c.ok("INSERT INTO cache_tasks (uid, tenant_id, site_id, kind, request_id) VALUES (?, ?, ?, 'purge_url', ?)", uid26(), t1, s1, uid26())
 	})
-	run("site_domains：证书删除 SET NULL；site_settings 1:1 与 CHECK", func(c *cx) {
+	run("site_domains：证书引用为复合外键 RESTRICT（CF-2 前决策，见 CC-1）；site_settings 1:1 与 CHECK", func(c *cx) {
 		t1 := c.tenant()
 		s1 := site(c, t1)
 		ce := cert(c, t1, nil)
 		d := domain(c, t1, s1, host())
 		c.ok("UPDATE site_domains SET certificate_id = ? WHERE id = ?", ce, d)
 		c.bad(errNoRefRow, "UPDATE site_domains SET certificate_id = 999999999 WHERE id = ?", d)
+		c.bad(errRowIsRef, "DELETE FROM certificates WHERE id = ?", ce) // 被域名绑定的证书不可物理删除（须先解绑；证书本身软删除）
+		c.ok("UPDATE site_domains SET certificate_id = NULL WHERE id = ?", d)
 		c.ok("DELETE FROM certificates WHERE id = ?", ce)
-		if !c.isNull("SELECT certificate_id FROM site_domains WHERE id = ?", d) {
-			t.Error("证书删除后 site_domains.certificate_id 应置 NULL")
-		}
 		ins := "INSERT INTO site_settings (uid, tenant_id, site_id, proxy_json) VALUES (?, ?, ?, JSON_OBJECT())"
 		st := c.ok(ins, uid26(), t1, s1)
 		c.bad(errDup, ins, uid26(), t1, s1)                                                                                             // 站点 1:1

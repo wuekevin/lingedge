@@ -145,7 +145,7 @@ updated: 2026-11-16（依据架构评审修订，见 docs/bmad/architecture-revi
 | created_by_task_id | BIGINT UNSIGNED | Y | — | FK → tasks(id) SET NULL |
 | request_id | CHAR(26) | N | — | |
 
-- 唯一：`uk_config_revisions_seq(cluster_id, lineage, seq)`、`uk_config_revisions_manifest(cluster_id, manifest_sha256)`（同内容避免重复发布；回滚时 `kind='rollback'` 因 `parent_seq`/`seq` 进入 manifest，哈希不同）。
+- 唯一：`uk_config_revisions_cluster_id(cluster_id, id)`（CC-1 加固：复合外键目标，使 `rollback_of_revision_id`、`deployments.revision_id`、`node_cluster_state.desired/applied_revision_id`、`clusters.confirmed_revision_id` 以 `(cluster_id, …) → config_revisions(cluster_id, id)` 在库层禁止跨集群引用修订）、`uk_config_revisions_seq(cluster_id, lineage, seq)`、`uk_config_revisions_manifest(cluster_id, manifest_sha256)`（同内容避免重复发布；回滚时 `kind='rollback'` 因 `parent_seq`/`seq` 进入 manifest，哈希不同）。
 - 索引：`idx_config_revisions_cluster_time(cluster_id, created_at)`、`idx_config_revisions_site(trigger_site_id, created_at)`。
 - CHECK：kind 取值；`seq >= 1`；`kind='rollback' = (rollback_of_revision_id IS NOT NULL)`（以 `(kind='rollback') = (rollback_of_revision_id IS NOT NULL)` 表达）；`parent_seq IS NULL OR parent_seq < seq`。（`rollback_of_revision_id` 为 RESTRICT FK，被 CHECK 引用安全，README §2.2/§9）
 - 不可变：UPDATE 全部拒绝；DELETE 仅清理（README §5、§7）。保留：每集群最近 50 个及一切被引用者 `[ASSUMPTION]`。
@@ -276,7 +276,7 @@ updated: 2026-11-16（依据架构评审修订，见 docs/bmad/architecture-revi
 | error_code | VARCHAR(96) | Y | — | 构建/校验失败原因码（如 `config.validation_failed`） |
 | started_at / finished_at | DATETIME(3) | Y | — | |
 
-- 唯一：`uk_pq_queued(cluster_id, queued_key)`（同站点同集群至多一个排队项，新发布**合并覆盖**旧排队项并标旧项 `superseded`）。索引：`idx_pq_cluster_status(cluster_id, status, id)`、`idx_pq_site(tenant_id, site_id, created_at)`。CHECK：status/kind 取值；`(kind='cluster_rollback') = (site_id IS NULL)`（`site_id` 为 RESTRICT 复合 FK 成员，可被 CHECK 引用）。
+- 唯一：`uk_pq_queued(cluster_id, queued_key)`（同站点同集群至多一个排队项，新发布**合并覆盖**旧排队项并标旧项 `superseded`；`queued_key` 实现为 `IF(status='queued', COALESCE(site_id,0), NULL)`，故 `cluster_rollback` 每集群至多一个排队项）。索引：`idx_pq_cluster_status(cluster_id, status, id)`、`idx_pq_site(tenant_id, site_id, created_at)`。CHECK：status/kind 取值；`(kind='cluster_rollback') = (site_id IS NULL)`（`site_id` 为 RESTRICT 复合 FK 成员，可被 CHECK 引用）。
 - 阻塞告警：活动部署 `paused` 过久或队列等待超阈值（运营配置项，默认值待基线测试）→ 告警事件，不静默堆积。M1 不跨站点合并（隔离优先；P2 评估“合并窗口 + 失败二分”）。
 
 ### 3.5 `site_versions`　**补充 · M1**

@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 11-16-2026 23:18
-last_updated: 11-20-2026 12:00
+last_updated: 11-20-2026 23:00
 project: LingEdge（凌界云）
 project_key: NOKEY
 tracking_system: file-system
@@ -44,7 +44,7 @@ development_status:
   1-6-migration-框架-goose-嵌入-分类-lint-migrate-子命令: review   # 开发完成、本机门禁全绿（含真实 MySQL 的升降级/校验和/dirty/崩溃/互斥/预检与 M1 骨架 13 文件重放）、三路评审高/中问题已修复；最低版本 8.0.16 空库全量 up 与 CI 接入 MySQL 属等待环境验证；待独立复验后转 done
   1-7-m1-迁移-a-身份-租户-平台核心-审计-种子-密钥-000001-000005: review   # 开发完成、本机门禁全绿（含真实 MySQL 空库 up/重放幂等/21 表最小权限负向/约束与租户索引/DDL 陷阱变异覆盖）、三路评审高/中问题已修复；8.0.16 最低版本空库全量 up 与 CI 接入 MySQL 属等待环境验证；待独立复验后转 done
   1-8-m1-迁移-b-节点集群-站点-证书-源站-规则-缓存-000006-000011: review   # 开发完成、本机门禁全绿（真实 MySQL 空库 up 49 表/重放幂等/逐表授权与 maint 分区权限负向/复合外键与约束负向/循环外键/rule_versions 不可变/EXPLAIN/DDL 陷阱变异覆盖）；8.0.16 最低版本空库全量 up 与 CI 接入 MySQL 属等待环境验证；待独立复验后转 done
-  1-9-m1-迁移-c-配置修订-发布队列-部署-观测-000012-000013-与契约冻结点-cf-2: backlog
+  1-9-m1-迁移-c-配置修订-发布队列-部署-观测-000012-000013-与契约冻结点-cf-2: review   # 开发完成、本机门禁全绿（真实 MySQL 空库 up 61 表/重放幂等/逐表授权/触发器与复合外键负向/DDL 陷阱变异）；跨租户外键以复合外键处置并有 CC-1；CF-2 封存（CHECKSUMS 13 条，标签 migrations-m1 本地）；8.0.16 最低版本空库全量 up 与 CI 接入 MySQL 属等待环境验证；待独立复验后转 done
   1-10-redis-边界封装与降级-adr-025: backlog
   1-11-密钥基础库-secretbox-keyprovider-主密钥: backlog
   1-12-http-服务骨架-路由元数据-统一响应-幂等-健康检查: backlog

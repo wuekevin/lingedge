@@ -5,6 +5,8 @@
 -- 先建两表（后两列为无 FK 普通列），再 ALTER TABLE site_rules ADD CONSTRAINT（README §2.4）。MySQL 的 ADD CONSTRAINT 无原生守卫，
 -- 这里用 information_schema 判断 + PREPARE 的重跑安全守卫（迁移可重入，README §8.3）。
 -- site_rules.active_name 为 STORED 生成列：基列 name/deleted_at 无外键。template_id/current_version_id/published_version_id 为 SET NULL 外键，不被任何 CHECK 引用（ERROR 3823）。
+-- 【CF-2 前决策，见 contract-changes/CC-1】rule_versions.(tenant_id, site_id, rule_id) → site_rules(tenant_id, site_id, id) 三列复合外键：版本行的租户/站点必与其规则一致。
+-- site_rules.template_id（模板可为平台内置，tenant_id NULL）与 current/published_version_id（SET NULL）无法用复合外键，由 Service/Repository 校验（见开发记录）。
 -- rule_versions 不可变：BEFORE UPDATE 一律拒绝；BEFORE DELETE 仅清理任务（@lingedge_purge=1）可删（README §5）。触发器创建需迁移账号具 SET_USER_ID 或 log_bin_trust_function_creators=1。
 -- +goose Up
 
@@ -61,6 +63,7 @@ CREATE TABLE IF NOT EXISTS site_rules (
   published_version_id BIGINT UNSIGNED NULL,
   PRIMARY KEY (id),
   UNIQUE KEY uk_site_rules_uid (uid),
+  UNIQUE KEY uk_site_rules_tenant_site_id (tenant_id, site_id, id),
   UNIQUE KEY uk_site_rules_name (site_id, active_name),
   KEY idx_site_rules_site_phase (tenant_id, site_id, phase, priority),
   KEY idx_site_rules_tenant (tenant_id, site_id, enabled),
@@ -110,7 +113,7 @@ CREATE TABLE IF NOT EXISTS rule_versions (
   KEY idx_rule_versions_tenant (tenant_id, site_id, rule_id),
   CONSTRAINT fk_rule_versions_tenants FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE RESTRICT,
   CONSTRAINT fk_rule_versions_sites FOREIGN KEY (tenant_id, site_id) REFERENCES sites (tenant_id, id) ON DELETE RESTRICT,
-  CONSTRAINT fk_rule_versions_site_rules FOREIGN KEY (rule_id) REFERENCES site_rules (id) ON DELETE RESTRICT,
+  CONSTRAINT fk_rule_versions_site_rules FOREIGN KEY (tenant_id, site_id, rule_id) REFERENCES site_rules (tenant_id, site_id, id) ON DELETE RESTRICT,
   CONSTRAINT fk_rule_versions_rollback FOREIGN KEY (rollback_of_version_id) REFERENCES rule_versions (id) ON DELETE SET NULL,
   CONSTRAINT fk_rule_versions_users FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE SET NULL
 ) ENGINE=InnoDB;

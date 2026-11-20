@@ -3,6 +3,7 @@
 -- 依据 database/README §2.2、§8.1，rules-cache-cert.md §3.1、§3.4。原属 Story 1.9 的范围，因 000009 的 site_domains.certificate_id、
 -- site_settings.default_certificate_id 外键依赖而前移到 1.8（epics Story 1.8 AC1）。
 -- private_key_enc 为 5 段信封密文 v1:<kek_id>:<wrapped_dek>:<nonce>:<ct>（ADR-011），API 永不回显；MEDIUMTEXT 无 DEFAULT（README §2.2）。
+-- 【CF-2 前决策，见 contract-changes/CC-1】certificates 增 UNIQUE(tenant_id,id) 作为跨租户外键目标；certificate_deployments 的证书引用改为复合外键 (tenant_id, certificate_id)。
 -- certificates.acme_account_id 先建为无 FK 普通列：acme_accounts 随 P2 创建时追加外键。
 -- 均为租户范围表（T）；certificates 软删除（SD）。证书→站点用复合外键 (tenant_id, site_id) → sites(tenant_id, id)。
 -- 到期扫描/按节点维度的索引属平台侧跨租户查询，按 README §2.6 显式登记豁免。
@@ -41,6 +42,7 @@ CREATE TABLE IF NOT EXISTS certificates (
   last_renew_error VARCHAR(512) NULL,
   PRIMARY KEY (id),
   UNIQUE KEY uk_certificates_uid (uid),
+  UNIQUE KEY uk_certificates_tenant_id (tenant_id, id),
   KEY idx_certificates_tenant (tenant_id, site_id),
   KEY idx_certificates_expiry (status, not_after),
   KEY idx_certificates_fp (tenant_id, fingerprint_sha256),
@@ -77,7 +79,7 @@ CREATE TABLE IF NOT EXISTS certificate_deployments (
   KEY idx_cert_deploy_tenant (tenant_id, certificate_id),
   CONSTRAINT ck_certificate_deployments_status CHECK (status IN ('pending', 'distributed', 'applied', 'failed', 'removed')),
   CONSTRAINT fk_certificate_deployments_tenants FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE RESTRICT,
-  CONSTRAINT fk_certificate_deployments_certificates FOREIGN KEY (certificate_id) REFERENCES certificates (id) ON DELETE RESTRICT,
+  CONSTRAINT fk_certificate_deployments_certificates FOREIGN KEY (tenant_id, certificate_id) REFERENCES certificates (tenant_id, id) ON DELETE RESTRICT,
   CONSTRAINT fk_certificate_deployments_nodes FOREIGN KEY (node_id) REFERENCES nodes (id) ON DELETE RESTRICT,
   CONSTRAINT fk_certificate_deployments_clusters FOREIGN KEY (cluster_id) REFERENCES clusters (id) ON DELETE RESTRICT
 ) ENGINE=InnoDB;

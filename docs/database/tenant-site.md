@@ -104,7 +104,7 @@ updated: 2026-11-16（依据架构评审修订，见 docs/bmad/architecture-revi
 | active_hostname | VARCHAR(253) | Y | — | 生成列 `IF(deleted_at IS NULL, hostname, NULL)` STORED |
 | is_wildcard | TINYINT(1) | N | 0 | 生成/应用赋值：`hostname LIKE '*.%'` |
 | is_primary | TINYINT(1) | N | 0 | |
-| certificate_id | BIGINT UNSIGNED | Y | — | 显式绑定证书；FK → certificates(id) SET NULL |
+| certificate_id | BIGINT UNSIGNED | Y | — | 显式绑定证书；复合 FK `(tenant_id, certificate_id)` → certificates(tenant_id, id) **RESTRICT**（CC-1：库层强制同租户；复合 FK 不能 SET NULL，证书本身软删除，物理清理前须先解绑） |
 | verification_status | VARCHAR(16) | N | 'pending' | `exempt/pending/verified/failed`（F-1）。**默认 `pending`**（原默认 `exempt` 在漏写校验分支时会把未验证域名当作豁免，MIN-11）；自用模式由 Service 在创建时**显式**置 `exempt`（`verification_method='admin_exempt'`），商业模式（P5）必须走 `verified` |
 | verification_method | VARCHAR(16) | Y | — | `txt/cname/file/admin_exempt` |
 | verification_token | VARCHAR(64) | Y | — | |
@@ -113,7 +113,7 @@ updated: 2026-11-16（依据架构评审修订，见 docs/bmad/architecture-revi
 | cname_status | VARCHAR(16) | N | 'unknown' | `unknown/ok/mismatch`（解析是否指向 LingEdge，仅展示） |
 
 - 唯一：`uk_site_domains_active_host(active_hostname)` —— **全局**活动主机名唯一，跨租户（域名被他租户占用即冲突，FR-48）。
-- 索引：`idx_site_domains_site(tenant_id, site_id)`、`idx_site_domains_cert(certificate_id)`。
+- 索引：`idx_site_domains_site(tenant_id, site_id)`、`idx_site_domains_cert(tenant_id, certificate_id)`（CC-1：以 tenant_id 打头，同时支撑复合外键）。
 - CHECK：`REGEXP_LIKE(hostname, '^(\\*\\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z0-9-]{2,63}$')`；`BINARY hostname = BINARY LOWER(hostname)`（应用层小写化的库层兜底，README §2.2，已实测）；verification_status/cname_status 取值。
 - 业务（Service）：通配符与具体主机名的重叠判定规则待 PRD 明确（见 architecture 反馈 F-1）；非 `exempt` 才允许在商业模式下发布。
 - 保留：软删除；活动唯一释放。
@@ -136,14 +136,14 @@ updated: 2026-11-16（依据架构评审修订，见 docs/bmad/architecture-revi
 | tls_min_version | VARCHAR(8) | N | 'TLSv1.2' | `TLSv1.2/TLSv1.3` |
 | http2_enabled | TINYINT(1) | N | 1 | |
 | hsts_json | JSON | Y | — | `{enabled,max_age,include_subdomains}`（数值整数） |
-| default_certificate_id | BIGINT UNSIGNED | Y | — | FK → certificates(id) SET NULL |
+| default_certificate_id | BIGINT UNSIGNED | Y | — | 复合 FK `(tenant_id, default_certificate_id)` → certificates(tenant_id, id) **RESTRICT**（CC-1，同上） |
 | origin_tls_verify | TINYINT(1) | N | 1 | 回源默认校验源站 TLS（NFR-17）；关闭告警 |
 | listen_ports_json | JSON | Y | — | 自定义端口（FR-51） |
 | proxy_json | JSON | N | — | 超时、缓冲、WebSocket/SSE 等受 Schema 约束的代理参数 |
 | waf_json | JSON | Y | — | P4：模式与绑定摘要（细节在 `site_waf_bindings`） |
 | extra_json | JSON | Y | — | 预留 |
 
-- 唯一：`uk_site_settings_site(site_id)`。索引：`idx_site_settings_tenant(tenant_id)`。
+- 唯一：`uk_site_settings_site(site_id)`。索引：`idx_site_settings_tenant(tenant_id)`、`idx_site_settings_cert(tenant_id, default_certificate_id)`（CC-1）。
 - CHECK：
   - `ck_site_settings_realip_header`：`real_ip_custom_enabled=0 OR (real_ip_custom_header IS NOT NULL AND REGEXP_LIKE(real_ip_custom_header,'^[A-Za-z][A-Za-z0-9-]{0,63}$'))`（保留名清单在 Service/ADR-006 校验，数据库只做语法兜底）。
   - `xff_policy IN ('overwrite','append_trusted')`；`tls_min_version IN ('TLSv1.2','TLSv1.3')`。
@@ -211,7 +211,7 @@ updated: 2026-11-16（依据架构评审修订，见 docs/bmad/architecture-revi
 
 | 列 | 类型 | 空 | 默认 | 说明 |
 |---|---|---|---|---|
-| origin_id | BIGINT UNSIGNED | N | — | FK → origins(id) CASCADE |
+| origin_id | BIGINT UNSIGNED | N | — | 复合 FK `(tenant_id, origin_id)` → origins(tenant_id, id) CASCADE（CC-1；`origins` 含 `UNIQUE(tenant_id, id)`） |
 | node_id | BIGINT UNSIGNED | N | — | FK → nodes(id) CASCADE |
 | status | VARCHAR(8) | N | 'unknown' | `up/down/unknown` |
 | consecutive_failures | INT UNSIGNED | N | 0 | |

@@ -4,6 +4,7 @@
 -- cache_tasks 无 cluster_id：扇出范围恒为站点绑定的全部集群，epoch 是站点级单值（IMP-04）。
 -- cache_policies.risk_ack_by 的外键为 RESTRICT：它被 ck_cache_policies_dangerous 引用，ON DELETE SET NULL 会使该 CHECK 建表即 ERROR 3823（README §2.2、§9）。
 -- cache_policies.default_flag 为 STORED 生成列，基列 site_id 的外键为 RESTRICT（README §2.2 生成列规则）。
+-- 【CF-2 前决策，见 contract-changes/CC-1】cache_task_nodes.(tenant_id, cache_task_id) → cache_tasks(tenant_id, id) 复合外键（CASCADE），回执行租户必与任务一致。
 -- cache_task_nodes.node_task_id → node_tasks（000009）：业务回执与逐节点投递队列的关联；proto NodeTask.task_uid = node_tasks.uid。
 -- +goose Up
 
@@ -88,6 +89,7 @@ CREATE TABLE IF NOT EXISTS cache_tasks (
   finished_at DATETIME(3) NULL,
   PRIMARY KEY (id),
   UNIQUE KEY uk_cache_tasks_uid (uid),
+  UNIQUE KEY uk_cache_tasks_tenant_id (tenant_id, id),
   KEY idx_cache_tasks_site (tenant_id, site_id, created_at),
   KEY idx_cache_tasks_status (status, created_at),
   CONSTRAINT ck_cache_tasks_kind CHECK (kind IN ('purge_url', 'purge_site', 'prefetch', 'purge_prefix', 'purge_wildcard')),
@@ -123,7 +125,7 @@ CREATE TABLE IF NOT EXISTS cache_task_nodes (
   KEY idx_ctn_tenant (tenant_id, cache_task_id),
   CONSTRAINT ck_cache_task_nodes_status CHECK (status IN ('pending', 'sent', 'success', 'failed', 'skipped_offline', 'expired')),
   CONSTRAINT fk_cache_task_nodes_tenants FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE RESTRICT,
-  CONSTRAINT fk_cache_task_nodes_cache_tasks FOREIGN KEY (cache_task_id) REFERENCES cache_tasks (id) ON DELETE CASCADE,
+  CONSTRAINT fk_cache_task_nodes_cache_tasks FOREIGN KEY (tenant_id, cache_task_id) REFERENCES cache_tasks (tenant_id, id) ON DELETE CASCADE,
   CONSTRAINT fk_cache_task_nodes_nodes FOREIGN KEY (node_id) REFERENCES nodes (id) ON DELETE RESTRICT,
   CONSTRAINT fk_cache_task_nodes_node_tasks FOREIGN KEY (node_task_id) REFERENCES node_tasks (id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
