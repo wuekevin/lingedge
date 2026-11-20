@@ -23,6 +23,10 @@ const (
 	DefaultThrottleAccountMax = 10
 	DefaultThrottleIPMax      = 30
 	DefaultRunMode            = "self_hosted"
+	// DefaultReauthWindow 是 L4 再认证窗口：UD-29 采纳值 300 秒（可配置）。
+	DefaultReauthWindow = 300 * time.Second
+	// DefaultMFAWindow 是「近期 MFA」窗口：基线与 UD 均未规定 [ASSUMPTION]，工程假设 15 分钟；可配置，改默认值只是配置改动。
+	DefaultMFAWindow = 15 * time.Minute
 
 	settingsCacheTTL = 15 * time.Second
 )
@@ -35,6 +39,9 @@ const (
 	KeyThrottleAccountMax = "login.throttle_account_max"
 	KeyThrottleIPMax      = "login.throttle_ip_max"
 	KeyRunMode            = "system.run_mode"
+	KeyReauthWindow       = "auth.reauth_window_s"
+	KeyMFAWindow          = "auth.mfa_window_s"
+	KeyTOTPRequiredAdmin  = "login.totp_required_for_admin"
 )
 
 type settingsCache struct {
@@ -55,7 +62,7 @@ func defaultSettings() domain.Settings {
 	return domain.Settings{
 		SessionIdleTTL: DefaultSessionIdleTTL, SessionAbsoluteTTL: DefaultSessionAbsoluteTTL,
 		ThrottleWindow: DefaultThrottleWindow, ThrottleAccountMax: DefaultThrottleAccountMax, ThrottleIPMax: DefaultThrottleIPMax,
-		RunMode: DefaultRunMode,
+		RunMode: DefaultRunMode, ReauthWindow: DefaultReauthWindow, MFAWindow: DefaultMFAWindow,
 	}
 }
 
@@ -91,6 +98,16 @@ func (c *settingsCache) get(ctx context.Context) domain.Settings {
 		var s string
 		if json.Unmarshal(v, &s) == nil && (s == "self_hosted" || s == "commercial") {
 			next.RunMode = s
+		}
+	}
+	next.ReauthWindow = secs(c.log, raw, KeyReauthWindow, next.ReauthWindow, 10*time.Second, 24*time.Hour)
+	next.MFAWindow = secs(c.log, raw, KeyMFAWindow, next.MFAWindow, 30*time.Second, 24*time.Hour)
+	if v, ok := raw[KeyTOTPRequiredAdmin]; ok {
+		var b bool
+		if json.Unmarshal(v, &b) == nil {
+			next.TOTPRequiredForAdmin = b
+		} else {
+			c.log.Warn("系统设置取值无效，使用默认值", zap.String("key", KeyTOTPRequiredAdmin))
 		}
 	}
 	if next.SessionIdleTTL > next.SessionAbsoluteTTL { // 滑动过期不得长于绝对过期

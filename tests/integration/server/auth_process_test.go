@@ -121,6 +121,22 @@ func TestServerProcessAuthLogin(t *testing.T) {
 	if code, _, _ := do("GET", "/tasks", nil, "", ""); code != 401 {
 		t.Fatalf("未认证应 401: %d", code)
 	}
+	// Story 1.17：真实进程里 TOTP 密钥经真实主密钥信封加密落库（setup 即写入「待确认」密文，明文只在响应里出现一次）。
+	if code, body, _ := do("POST", "/auth/totp/setup", nil, tok, csrf); code != 200 || !strings.Contains(string(body), "otpauth://totp/") {
+		t.Fatalf("setup: %d %s", code, body)
+	} else {
+		var out struct {
+			Secret string `json:"secret_masked"`
+		}
+		_ = json.Unmarshal(body, &out)
+		enc := e.rootString(t, "SELECT totp_secret_enc FROM §.users WHERE email = ?", email)
+		if out.Secret == "" || len(strings.Split(enc, ":")) != 5 || !strings.HasPrefix(enc, "v1:") || strings.Contains(enc, out.Secret) {
+			t.Fatalf("totp_secret_enc 应是 5 段信封密文且不含明文种子: %q", enc)
+		}
+		if strings.Contains(p.out.String(), out.Secret) {
+			t.Fatal("进程日志不得含 TOTP 种子")
+		}
+	}
 	// Redis 被杀：登录与会话校验仍然工作（ADR-025）。
 	e.redis.Kill()
 	if tok2, _, code := login(); code != 200 || tok2 == "" {

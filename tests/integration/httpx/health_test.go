@@ -79,8 +79,8 @@ func TestReadyWithRealMySQLAndRedisDegradation(t *testing.T) {
 		t.Fatalf("全部健康: %d %+v", code, rep)
 	}
 	m := rep.Checks["migrations"]
-	if m.Status != "ok" || m.Applied == nil || m.Latest == nil || *m.Applied != 15 || *m.Latest != 15 || *m.Pending != 0 {
-		t.Fatalf("迁移应为 15/15（含 000015）: %+v", m)
+	if m.Status != "ok" || m.Applied == nil || m.Latest == nil || *m.Applied != 17 || *m.Latest != 17 || *m.Pending != 0 {
+		t.Fatalf("迁移应为 17/17（含 000017）: %+v", m)
 	}
 
 	// 杀掉 Redis：就绪仍 200，但整体 degraded。
@@ -111,20 +111,20 @@ func TestReadyMigrationsAndDatabaseFailures(t *testing.T) {
 	}
 
 	// 有一个迁移尚未应用（旁路删掉最新版本的记录）。
-	e.root(t, "DELETE FROM §.schema_migrations WHERE version_id = 15")
-	e.root(t, "DELETE FROM §.schema_migrations_runs WHERE version = 15")
+	e.root(t, "DELETE FROM §.schema_migrations WHERE version_id = 17")
+	e.root(t, "DELETE FROM §.schema_migrations_runs WHERE version = 17")
 	code, rep = ready()
 	if code != 503 || rep.Status != "unavailable" || rep.Checks["migrations"].Status != "mismatch" || *rep.Checks["migrations"].Pending != 1 || rep.Checks["database"].Status != "up" {
 		t.Fatalf("迁移未应用应 503 + mismatch: %d %+v", code, rep)
 	}
 	// 恢复该记录 → dirty（running 状态的运行记录且无迁移锁在持有）。
-	e.root(t, "INSERT INTO §.schema_migrations (version_id, is_applied) VALUES (15, 1)")
-	e.root(t, "INSERT INTO §.schema_migrations_runs (version, name, class, checksum, direction, status, started_at) VALUES (15, 'sessions_uid', 'expand', REPEAT('0', 64), 'up', 'failed', NOW(3))")
+	e.root(t, "INSERT INTO §.schema_migrations (version_id, is_applied) VALUES (17, 1)")
+	e.root(t, "INSERT INTO §.schema_migrations_runs (version, name, class, checksum, direction, status, started_at) VALUES (17, 'users_totp_last_step', 'expand', REPEAT('0', 64), 'up', 'failed', NOW(3))")
 	code, rep = ready()
 	if code != 503 || rep.Checks["migrations"].Status != "invalid" {
 		t.Fatalf("dirty/校验和异常应 503 + invalid: %d %+v", code, rep)
 	}
-	e.root(t, "DELETE FROM §.schema_migrations_runs WHERE version = 15")
+	e.root(t, "DELETE FROM §.schema_migrations_runs WHERE version = 17")
 
 	// 数据库不可用（关闭 app 连接池）→ 503，迁移状态未知；不泄漏错误原文。
 	_ = e.app.Close()

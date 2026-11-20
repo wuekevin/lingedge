@@ -106,6 +106,11 @@ type Deps struct {
 	IDs    *uid.Generator
 	Logger *zap.Logger
 	Config *config.Config
+	// Secrets 是信封加密（pkg/secretbox，主密钥已加载）；业务模块用它加解密密文列（如 users.totp_secret_enc，Story 1.17）。
+	Secrets *secretbox.Box
+	// OnShutdown 登记停机钩子：在监听排空、角色停止之后、MySQL/Redis 关闭之前，按登记的相反顺序执行（模块用它收尾异步写入，如认证模块的 Flush，Story 1.16 遗留）。
+	// 钩子在 ctx 的停机预算内运行；返回的错误并入停机错误。仅在装配阶段（BuildHooks/Register）调用。
+	OnShutdown func(name string, fn func(ctx context.Context) error)
 }
 
 // Info 是就绪后的实际状态。
@@ -231,7 +236,12 @@ func Run(ctx context.Context, o Options) error {
 		return fail(err)
 	}
 	enq.InTx = func(ctx context.Context) bool { _, in := db.TxFromContext(ctx, app); return in }
-	deps := Deps{Tasks: taskStore, Enqueuer: enq, DB: app, Redis: rc, Clock: o.Clock, IDs: ids, Logger: o.Logger, Config: cfg}
+	box, err := secretbox.New(keys)
+	if err != nil {
+		return fail(err)
+	}
+	deps := Deps{Tasks: taskStore, Enqueuer: enq, DB: app, Redis: rc, Clock: o.Clock, IDs: ids, Logger: o.Logger, Config: cfg, Secrets: box,
+		OnShutdown: func(name string, fn func(context.Context) error) { closers = append(closers, closer{name, fn}) }}
 
 	metrics := httpx.NewMetrics()
 	metrics.RegisterGauge("lingedge_db_open_connections", "app 连接池当前打开的连接数", func() float64 { return float64(app.Stats().OpenConnections) })

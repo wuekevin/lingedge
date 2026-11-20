@@ -31,13 +31,24 @@ var (
 		Permissions: httpx.NoPermissions(), TenantScope: httpx.ScopeEither, Phase: "M1"}
 	MetaRevokeSession = httpx.RouteMeta{OperationID: "revokeSession", Method: "DELETE", Path: "/auth/sessions/{sessionId}", Auth: httpx.AuthRequired,
 		Permissions: httpx.NoPermissions(), TenantScope: httpx.ScopeEither, Audit: true, Phase: "M1"}
+	MetaVerifyTotp = httpx.RouteMeta{OperationID: "verifyTotp", Method: "POST", Path: "/auth/totp/verify", Auth: httpx.AuthPublic,
+		Permissions: httpx.NoPermissions(), TenantScope: httpx.ScopePublic, Audit: true, Phase: "M1"}
+	MetaSetupTotp = httpx.RouteMeta{OperationID: "setupTotp", Method: "POST", Path: "/auth/totp/setup", Auth: httpx.AuthRequired,
+		Permissions: httpx.NoPermissions(), TenantScope: httpx.ScopeEither, Audit: true, Phase: "M1"}
+	MetaEnableTotp = httpx.RouteMeta{OperationID: "enableTotp", Method: "POST", Path: "/auth/totp/enable", Auth: httpx.AuthRequired,
+		Permissions: httpx.NoPermissions(), TenantScope: httpx.ScopeEither, Audit: true, Phase: "M1"}
+	MetaDisableTotp = httpx.RouteMeta{OperationID: "disableTotp", Method: "POST", Path: "/auth/totp/disable", Auth: httpx.AuthRequired,
+		Permissions: httpx.NoPermissions(), TenantScope: httpx.ScopeEither, Audit: true, Phase: "M1"}
+	MetaReauth = httpx.RouteMeta{OperationID: "reauth", Method: "POST", Path: "/auth/reauth", Auth: httpx.AuthRequired,
+		Permissions: httpx.NoPermissions(), TenantScope: httpx.ScopeEither, Audit: true, Phase: "M1"}
 	MetaLoginLogs = httpx.RouteMeta{OperationID: "listMyLoginLogs", Method: "GET", Path: "/auth/login-logs", Auth: httpx.AuthRequired,
 		Permissions: httpx.NoPermissions(), TenantScope: httpx.ScopeEither, Phase: "M1"}
 )
 
 // Metas 是本 Story 注册的全部路由元数据。
 func Metas() []httpx.RouteMeta {
-	return []httpx.RouteMeta{MetaLogin, MetaLogout, MetaMe, MetaCSRF, MetaChangePassword, MetaListSessions, MetaRevokeSession, MetaLoginLogs}
+	return []httpx.RouteMeta{MetaLogin, MetaLogout, MetaMe, MetaCSRF, MetaChangePassword, MetaListSessions, MetaRevokeSession, MetaLoginLogs,
+		MetaVerifyTotp, MetaSetupTotp, MetaEnableTotp, MetaDisableTotp, MetaReauth}
 }
 
 // Handlers 是 /auth/* 的处理函数集合。svc 在 ManifestOnly（路由清单导出）模式下可为 nil（处理函数不会被调用）。
@@ -57,6 +68,11 @@ func (h *Handlers) Register(r *httpx.Router) error {
 		r.Register(MetaListSessions, h.listSessions),
 		r.Register(MetaRevokeSession, h.revokeSession),
 		r.Register(MetaLoginLogs, h.loginLogs),
+		r.Register(MetaVerifyTotp, h.verifyTotp),
+		r.Register(MetaSetupTotp, h.setupTotp),
+		r.Register(MetaEnableTotp, h.enableTotp),
+		r.Register(MetaDisableTotp, h.disableTotp),
+		r.Register(MetaReauth, h.reauth),
 	)
 }
 
@@ -135,9 +151,10 @@ type loginRequest struct {
 
 // LoginResponse 是 OpenAPI LoginResponse。
 type LoginResponse struct {
-	Status    string      `json:"status"`
-	CSRFToken string      `json:"csrf_token,omitempty"`
-	User      UserSummary `json:"user"`
+	Status    string       `json:"status"`
+	MFAToken  string       `json:"mfa_token,omitempty"`
+	CSRFToken string       `json:"csrf_token,omitempty"`
+	User      *UserSummary `json:"user,omitempty"`
 }
 
 func (h *Handlers) login(c *gin.Context) {
@@ -158,8 +175,18 @@ func (h *Handlers) login(c *gin.Context) {
 		httpx.Fail(c, err) // 失败的登录不改变既有会话与 Cookie
 		return
 	}
+	respondLogin(c, realm, res)
+}
+
+// respondLogin 渲染登录成功/第二步要求：status=totp_required 时不建立会话、不下发 Cookie，只返回一次性 mfa_token。
+func respondLogin(c *gin.Context, realm domain.Realm, res *service.LoginResult) {
+	if res.Status == service.StatusTOTPRequired {
+		httpx.OK(c, LoginResponse{Status: res.Status, MFAToken: res.MFAToken})
+		return
+	}
 	setSessionCookie(c, realm, res.Token, res.CookieTTL)
-	httpx.OK(c, LoginResponse{Status: res.Status, CSRFToken: res.CSRF, User: userSummary(res.User)})
+	u := userSummary(res.User)
+	httpx.OK(c, LoginResponse{Status: res.Status, CSRFToken: res.CSRF, User: &u})
 }
 
 // ---- logout ----
@@ -360,4 +387,142 @@ func (h *Handlers) loginLogs(c *gin.Context) {
 		out.NextCursor = &next
 	}
 	httpx.OK(c, out)
+}
+
+// ---- TOTP / 再认证（Story 1.17）----
+
+// sessionPrincipal 取出必须是 Cookie 会话的主体：Bearer API Token 不能做 TOTP 管理与再认证（403）。
+func sessionPrincipal(c *gin.Context) (*domain.Principal, bool) {
+	p, ok := principal(c)
+	if !ok {
+		return nil, false
+	}
+	if p.Bearer || p.Session.ID == 0 {
+		httpx.Fail(c, apierr.New(apierr.AuthForbidden, "a cookie session is required", apierr.Detail{Field: "session", Reason: "API tokens cannot perform this operation"}))
+		return nil, false
+	}
+	return p, true
+}
+
+type totpVerifyRequest struct {
+	MFAToken string `json:"mfa_token"`
+	Code     string `json:"code"`
+}
+
+func (h *Handlers) verifyTotp(c *gin.Context) {
+	var req totpVerifyRequest
+	if err := httpx.BindJSON(c, &req); err != nil {
+		httpx.Fail(c, err)
+		return
+	}
+	in := service.VerifyInput{MFAToken: req.MFAToken, Code: req.Code, Req: reqInfo(c)}
+	// 会话固定防护：携带的旧会话 Cookie（任一 realm）在登录成功后作废；realm 由挑战决定，这里两个 Cookie 都带上由服务层按挑战 realm 选用。
+	for _, realm := range []domain.Realm{domain.RealmAdmin, domain.RealmConsole} {
+		if ck, err := c.Request.Cookie(realm.CookieName()); err == nil && ck.Value != "" {
+			in.ExistingTokens = append(in.ExistingTokens, service.ExistingToken{Realm: realm, Token: ck.Value})
+		}
+	}
+	res, err := h.svc.VerifyLogin(c.Request.Context(), in)
+	if err != nil {
+		httpx.Fail(c, err)
+		return
+	}
+	respondLogin(c, res.Realm, res)
+}
+
+// TotpSetupResponse 是 OpenAPI TotpSetupResponse。
+type TotpSetupResponse struct {
+	OTPAuthURI   string `json:"otpauth_uri"`
+	SecretMasked string `json:"secret_masked"`
+}
+
+func (h *Handlers) setupTotp(c *gin.Context) {
+	p, ok := sessionPrincipal(c)
+	if !ok {
+		return
+	}
+	res, err := h.svc.SetupTOTP(c.Request.Context(), p)
+	if err != nil {
+		httpx.Fail(c, err)
+		return
+	}
+	httpx.OK(c, TotpSetupResponse{OTPAuthURI: res.OTPAuthURI, SecretMasked: res.Secret})
+}
+
+type totpEnableRequest struct {
+	Code string `json:"code"`
+}
+
+// TotpEnableResponse 是 OpenAPI TotpEnableResponse。
+type TotpEnableResponse struct {
+	RecoveryCodes []string `json:"recovery_codes"`
+}
+
+func (h *Handlers) enableTotp(c *gin.Context) {
+	p, ok := sessionPrincipal(c)
+	if !ok {
+		return
+	}
+	var req totpEnableRequest
+	if err := httpx.BindJSON(c, &req); err != nil {
+		httpx.Fail(c, err)
+		return
+	}
+	codes, err := h.svc.EnableTOTP(c.Request.Context(), p, req.Code, reqInfo(c))
+	if err != nil {
+		httpx.Fail(c, err)
+		return
+	}
+	httpx.OK(c, TotpEnableResponse{RecoveryCodes: codes})
+}
+
+type totpDisableRequest struct {
+	Password string `json:"password"`
+	Code     string `json:"code"`
+}
+
+func (h *Handlers) disableTotp(c *gin.Context) {
+	p, ok := sessionPrincipal(c)
+	if !ok {
+		return
+	}
+	var req totpDisableRequest
+	if err := httpx.BindJSON(c, &req); err != nil {
+		httpx.Fail(c, err)
+		return
+	}
+	if err := h.svc.DisableTOTP(c.Request.Context(), p, req.Password, req.Code, reqInfo(c)); err != nil {
+		httpx.Fail(c, err)
+		return
+	}
+	httpx.NoContent(c)
+}
+
+type reauthRequest struct {
+	Password string `json:"password"`
+	TOTPCode string `json:"totp_code"`
+}
+
+// ReauthResponse 是 OpenAPI ReauthResponse。
+type ReauthResponse struct {
+	ReauthAt  string `json:"reauth_at"`
+	ExpiresAt string `json:"expires_at"`
+}
+
+func (h *Handlers) reauth(c *gin.Context) {
+	p, ok := sessionPrincipal(c)
+	if !ok {
+		return
+	}
+	var req reauthRequest
+	if err := httpx.BindJSON(c, &req); err != nil {
+		httpx.Fail(c, err)
+		return
+	}
+	res, err := h.svc.Reauth(c.Request.Context(), p, req.Password, req.TOTPCode, reqInfo(c))
+	if err != nil {
+		httpx.Fail(c, err)
+		return
+	}
+	httpx.OK(c, ReauthResponse{ReauthAt: ts(res.ReauthAt), ExpiresAt: ts(res.ExpiresAt)})
 }

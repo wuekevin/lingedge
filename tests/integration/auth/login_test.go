@@ -226,7 +226,7 @@ func TestSessionFixation(t *testing.T) {
 	}
 }
 
-// 账号状态与成员关系：停用账号、无租户成员关系的租户用户、启用了 TOTP（第二步属 1.17）的账号，都不能仅凭口令建立会话。
+// 账号状态与成员关系：停用账号、无租户成员关系的租户用户都不能建立会话（启用 TOTP 的账号见 totp_test.go：口令正确也只得到 mfa_token，不建立会话）。
 func TestLoginIneligibleAccounts(t *testing.T) {
 	s := newStack(t)
 	cases := []struct {
@@ -237,7 +237,6 @@ func TestLoginIneligibleAccounts(t *testing.T) {
 		{"停用账号", s.seedUser("platform", withStatus("disabled")), "auth.invalid_credentials"},
 		{"待激活账号", s.seedUser("tenant", withStatus("pending")), "auth.invalid_credentials"},
 		{"租户用户无成员关系", s.seedUser("tenant", withNoMembership()), "auth.invalid_credentials"},
-		{"启用 TOTP（1.17 前 fail-closed）", s.seedUser("platform", withTOTP()), "auth.totp_required"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

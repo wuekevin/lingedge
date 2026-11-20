@@ -111,3 +111,26 @@ func (c *fakeClock) Now() time.Time {
 	return c.t
 }
 func (c *fakeClock) Advance(d time.Duration) { c.mu.Lock(); c.t = c.t.Add(d); c.mu.Unlock() }
+
+type colRef struct{ table, col string }
+
+// columns 返回当前库内全部「可能承载文本」的列（char/varchar/text 族、json、enum/set、binary/blob 族）：全库明文扫描用。
+func (e *env) columns(t testing.TB) []colRef {
+	t.Helper()
+	rows, err := e.adm.QueryContext(ctxT(t), `SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ?
+		AND DATA_TYPE IN ('char','varchar','tinytext','text','mediumtext','longtext','json','enum','set','binary','varbinary','tinyblob','blob','mediumblob','longblob')
+		ORDER BY TABLE_NAME, ORDINAL_POSITION`, e.dbName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []colRef
+	for rows.Next() {
+		var c colRef
+		if err := rows.Scan(&c.table, &c.col); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, c)
+	}
+	return out
+}

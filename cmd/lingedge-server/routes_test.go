@@ -29,8 +29,8 @@ func TestRoutesSubcommandExportsManifest(t *testing.T) {
 			t.Errorf("清单缺少任务中心路由 %s", id)
 		}
 	}
-	if len(m) != 12 {
-		t.Errorf("当前应恰有 12 条路由（任务中心 4 + 认证 8），实际 %d", len(m))
+	if len(m) != 17 {
+		t.Errorf("当前应恰有 17 条路由（任务中心 4 + 认证 13），实际 %d", len(m))
 	}
 	for _, e := range m {
 		if e["operation_id"] == "" {

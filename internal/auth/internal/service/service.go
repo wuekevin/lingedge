@@ -30,6 +30,7 @@ import (
 	"github.com/wuekevin/lingedge/internal/platform/clock"
 	"github.com/wuekevin/lingedge/internal/platform/redisx"
 	"github.com/wuekevin/lingedge/internal/platform/uid"
+	"github.com/wuekevin/lingedge/pkg/secretbox"
 )
 
 // 登录响应状态。
@@ -53,9 +54,11 @@ type Options struct {
 	WithTx func(ctx context.Context, fn func(ctx context.Context) error) error
 	Redis  *redisx.Client
 	Hasher *Hasher
-	Clock  clock.Clock
-	IDs    *uid.Generator
-	Log    *zap.Logger
+	// Box 是信封加密（pkg/secretbox）：TOTP 密钥经它加密存储（Story 1.17）。
+	Box   *secretbox.Box
+	Clock clock.Clock
+	IDs   *uid.Generator
+	Log   *zap.Logger
 }
 
 // Service 是认证服务。
@@ -66,6 +69,7 @@ type Service struct {
 	limiter  *redisx.Limiter
 	ks       redisx.Keyspace
 	hasher   *Hasher
+	box      *secretbox.Box
 	clk      clock.Clock
 	ids      *uid.Generator
 	log      *zap.Logger
@@ -79,7 +83,7 @@ type Service struct {
 // New 创建 Service；会计算一次哑哈希（启动时的一次性开销）。
 func New(ctx context.Context, o Options) (*Service, error) {
 	switch {
-	case o.Repo == nil, o.WithTx == nil, o.Redis == nil, o.Hasher == nil, o.IDs == nil:
+	case o.Repo == nil, o.WithTx == nil, o.Redis == nil, o.Hasher == nil, o.IDs == nil, o.Box == nil:
 		return nil, errors.New("auth/service: 缺少必需依赖")
 	}
 	if o.Clock == nil {
@@ -93,7 +97,7 @@ func New(ctx context.Context, o Options) (*Service, error) {
 		return nil, fmt.Errorf("auth/service: 计算哑哈希: %w", err)
 	}
 	return &Service{
-		repo: o.Repo, withTx: o.WithTx, redis: o.Redis, limiter: redisx.NewLimiter(o.Redis, nil), ks: o.Redis.Keyspace(), hasher: o.Hasher,
+		repo: o.Repo, withTx: o.WithTx, redis: o.Redis, limiter: redisx.NewLimiter(o.Redis, nil), ks: o.Redis.Keyspace(), hasher: o.Hasher, box: o.Box,
 		clk: o.Clock, ids: o.IDs, log: o.Log.Named("auth"), settings: newSettingsCache(o.Repo, o.Clock, o.Log), dummy: dummy,
 		bgSem: make(chan struct{}, 64),
 	}, nil
@@ -339,9 +343,11 @@ type LoginInput struct {
 // LoginResult 是登录成功的结果。
 type LoginResult struct {
 	Status    string
+	Realm     domain.Realm
 	User      domain.User
 	Tenant    *domain.Tenant
 	Token     string // Cookie 值（明文，仅此一次）
+	MFAToken  string // 仅 Status=totp_required：一次性 mfa_token（明文，仅此一次）
 	CSRF      string
 	ExpiresAt time.Time
 	Absolute  time.Time
@@ -457,11 +463,6 @@ func (s *Service) failLogin(ctx context.Context, ts throttleState, in LoginInput
 }
 
 func (s *Service) finishLogin(ctx context.Context, in LoginInput, ts throttleState, u *domain.User, tenant *domain.Tenant, needsRehash bool) (*LoginResult, error) {
-	if u.TOTPEnabled {
-		// 第二步（/auth/totp/verify、mfa_token）属 Story 1.17。在它交付前，启用了 TOTP 的账号不得仅凭口令建立会话（fail-closed）。
-		s.writeLog(ctx, in.Realm, u.Email, domain.EventLoginFailed, "totp_required_unavailable", &u.ID, nil, in.Req)
-		return nil, apierr.New(apierr.AuthTotpRequired, "second factor required")
-	}
 	rehash := ""
 	if needsRehash {
 		h, err := s.hasher.Hash(ctx, in.Password)
@@ -471,6 +472,39 @@ func (s *Service) finishLogin(ctx context.Context, in LoginInput, ts throttleSta
 			rehash = h
 		}
 	}
+	if u.TOTPEnabled {
+		// 第二步（POST /auth/totp/verify）：口令正确但尚未建立会话，发放 5 分钟一次性的 mfa_token（Story 1.17）。
+		// 不清零失败计数、不写 login_success：登录尚未完成，验证码的猜测仍受同一套节流约束。
+		if rehash != "" {
+			if err := s.repo.UpdatePasswordHash(ctx, u.ID, rehash); err != nil {
+				s.log.Warn("口令哈希升级写入失败（本次登录不受影响）", zap.Error(err))
+			}
+		}
+		tok, err := s.issueMFAChallenge(ctx, in.Realm, u, in.Req)
+		if err != nil {
+			return nil, apierr.Internal(err)
+		}
+		return &LoginResult{Status: StatusTOTPRequired, Realm: in.Realm, MFAToken: tok}, nil
+	}
+	return s.issueSession(ctx, sessionParams{Realm: in.Realm, User: u, Tenant: tenant, TS: ts, Req: in.Req, ExistingToken: in.ExistingToken, Rehash: rehash})
+}
+
+// sessionParams 是 issueSession 的输入：登录一步完成（无 TOTP）或第二步通过之后都经它建立会话。
+type sessionParams struct {
+	Realm         domain.Realm
+	User          *domain.User
+	Tenant        *domain.Tenant
+	TS            throttleState
+	Req           RequestInfo
+	ExistingToken string
+	Rehash        string
+	// MFAVerifiedAt 非空表示本会话建立时已通过第二因子；LogReason 写入 login_success 的 reason（如 totp / recovery_code）。
+	MFAVerifiedAt *time.Time
+	LogReason     string
+}
+
+func (s *Service) issueSession(ctx context.Context, sp sessionParams) (*LoginResult, error) {
+	u, tenant, ts, in := sp.User, sp.Tenant, sp.TS, sp.Req
 	token, tokenHash, err := NewSessionToken()
 	if err != nil {
 		return nil, apierr.Internal(err)
@@ -485,16 +519,16 @@ func (s *Service) finishLogin(ctx context.Context, in LoginInput, ts throttleSta
 	st := ts.st
 	abs := now.Add(st.SessionAbsoluteTTL)
 	exp := minTime(now.Add(st.SessionIdleTTL), abs)
-	ns := domain.NewSession{UID: sid, TokenHash: tokenHash, CSRFHash: csrfHash, UserID: u.ID, Realm: in.Realm, IP: in.Req.ipBytes(),
-		UserAgent: trunc(in.Req.UserAgent, 512), Now: now, ExpiresAt: exp, AbsoluteExpiresAt: abs}
+	ns := domain.NewSession{UID: sid, TokenHash: tokenHash, CSRFHash: csrfHash, UserID: u.ID, Realm: sp.Realm, IP: in.ipBytes(),
+		UserAgent: trunc(in.UserAgent, 512), Now: now, ExpiresAt: exp, AbsoluteExpiresAt: abs, MFAVerifiedAt: sp.MFAVerifiedAt}
 	var tenantID *uint64
 	if tenant != nil {
 		ns.TenantID = &tenant.ID
 		tenantID = &tenant.ID
 	}
 	err = s.withTx(ctx, func(ctx context.Context) error {
-		if in.ExistingToken != "" { // 会话固定防护：登录成功后旧会话作废，只认新建的会话
-			if h, _, herr := HashSessionToken(in.ExistingToken); herr == nil {
+		if sp.ExistingToken != "" { // 会话固定防护：登录成功后旧会话作废，只认新建的会话
+			if h, _, herr := HashSessionToken(sp.ExistingToken); herr == nil {
 				if old, ferr := s.repo.FindSessionByTokenHash(ctx, h); ferr == nil {
 					if _, rerr := s.repo.RevokeSession(ctx, old.ID, domain.RevokeRelogin, now); rerr != nil {
 						return rerr
@@ -505,10 +539,10 @@ func (s *Service) finishLogin(ctx context.Context, in LoginInput, ts throttleSta
 		if err := s.repo.CreateSession(ctx, ns); err != nil {
 			return err
 		}
-		if err := s.repo.RecordLoginSuccess(ctx, u.ID, ns.IP, now, rehash); err != nil {
+		if err := s.repo.RecordLoginSuccess(ctx, u.ID, ns.IP, now, sp.Rehash); err != nil {
 			return err
 		}
-		return s.insertLog(ctx, in.Realm, u.Email, domain.EventLoginSuccess, "", &u.ID, tenantID, in.Req)
+		return s.insertLog(ctx, sp.Realm, u.Email, domain.EventLoginSuccess, sp.LogReason, &u.ID, tenantID, in)
 	})
 	if err != nil {
 		return nil, apierr.Internal(err)
@@ -516,7 +550,7 @@ func (s *Service) finishLogin(ctx context.Context, in LoginInput, ts throttleSta
 	if err := s.limiter.Reset(ctx, ts.acct); err != nil {
 		s.log.Warn("清零登录失败计数失败", zap.Error(err))
 	}
-	res := &LoginResult{Status: StatusOK, User: *u, Tenant: tenant, Token: token, CSRF: csrf, ExpiresAt: exp, Absolute: abs, CookieTTL: st.SessionAbsoluteTTL}
+	res := &LoginResult{Status: StatusOK, Realm: sp.Realm, User: *u, Tenant: tenant, Token: token, CSRF: csrf, ExpiresAt: exp, Absolute: abs, CookieTTL: st.SessionAbsoluteTTL}
 	if u.MustChange {
 		res.Status = StatusMustChange
 	}

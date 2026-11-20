@@ -8,7 +8,7 @@ import (
 )
 
 // Options 是 New 的参数。字段含义见 handler.Options：Pool（必须是 app 池）、Redis、Clock、IDs、Log、Argon2（config.Auth.Argon2，由基准测定）、
-// ExtraOrigins（额外允许的 Origin，通常为空）、Bearer（API Token 认证，Story 1.19 注入）、MaxConcurrentHashes、ManifestOnly（仅导出路由清单）。
+// Box（信封加密，TOTP 密钥）、ExtraOrigins（额外允许的 Origin，通常为空）、Bearer（API Token 认证，Story 1.19 注入）、MaxConcurrentHashes、ManifestOnly（仅导出路由清单）。
 type Options = handler.Options
 
 // Module 是认证模块（Story 1.16）的对外契约：真实的会话认证钩子 + /auth/* 路由 + 自助 operation 判定。
@@ -22,6 +22,9 @@ type Module interface {
 	// SelfService 报告 operationID 是否是「自助」operation：只作用于调用者自己的身份/会话/登录日志，x-permissions 为空且不要求再认证。
 	// 装配层（httpx.WithSelfService）据此给它们最小授权语义；其他路由仍走授权/Scope/审计钩子。
 	SelfService(operationID string) bool
+	// ReauthChecker 返回 L4 再认证检查组件：对声明 x-reauth: true 的 operation，会话的 reauth_at 须在 auth.reauth_window_s 内，
+	// 否则 403 auth.reauth_required；Bearer API Token 请求永远不能满足。装配层用 httpx.WithReauth 接入授权链，1.18 的授权钩子可复用。
+	ReauthChecker() httpx.ReauthChecker
 	// Flush 等待已派发的后台写入（DB 兜底失败计数）完成；停机前与测试断言前调用。
 	Flush()
 }

@@ -56,3 +56,9 @@
 - §6（MIN-01）：登录节流统一 `429 rate_limit.exceeded`，移除 423/`auth.account_locked`；按 identifier 计数，避免账号枚举。原因：ADR 与 OpenAPI/README 对锁定态码不一致，且锁定态只出现在存在的账号上。
 - §10（IMP-12、M18）：定义 `tenant:impersonate` 与 acting-as 授权模型、`permissions.scope=both` 语义、`either` 路由的授权矩阵。
 - §12（IMP-12）：新增再认证 `POST /auth/reauth`、`sessions.reauth_at`、窗口 `auth.reauth_window_s`、错误码 `auth.reauth_required`、`x-reauth` 路由元数据与 L4 清单。原因：UX 要求 L4 重新验证身份，但契约中无 API/错误码/窗口，权限串字典也缺代租户权限。
+
+## 修订记录 2026-11-21（Story 1.17，实现细化，非推翻）
+
+- §5（TOTP）：落地细节——① 密钥：`pquerna/otp` v1.5.0（SHA-1/6 位/30 秒，20 字节密钥），Base32 经 `pkg/secretbox` 信封加密存 `users.totp_secret_enc`，AAD=`users|totp_secret_enc|<uid>`；② 防重放：`users.totp_last_step`（000017）原子 compare-and-set，step 严格递增，多实例一致、不依赖 Redis；允许 ±1 个 time-step 漂移；③ 两步登录：`login` 口令正确且已启用 TOTP 时返回 `200 {status: totp_required, mfa_token}`（取代 1.16 的临时 `401 auth.totp_required` fail-closed），`mfa_token` 存 `login_mfa_challenges`（000016，只存哈希，5 分钟、一次性、至多 5 次验证码尝试），失败计入登录节流并写 `login_logs.totp_failed`；④ 恢复码：10 个、各 80 位 CSPRNG，库存 SHA-256（高熵随机数无需慢哈希；确定性哈希使「用掉一个码」可原子完成），单次有效；⑤ 「近期 MFA」窗口：`auth.mfa_window_s`（默认 900 秒 `[ASSUMPTION]`，基线与 UD 均未规定），仅对已启用 TOTP 的账号生效（未启用者无第二因子可验证，由「强制管理员启用 TOTP」策略引导其启用），不满足时 `403 auth.reauth_required`（`details.field=mfa_verified_at`），经 `POST /auth/reauth`（口令 + 验证码）刷新；Bearer API Token 无会话，永远不能满足。
+- §12（再认证）：落地细节——`POST /auth/reauth` 仅限 Cookie 会话；失败计入登录节流；成功写 `sessions.reauth_at`（已启用 TOTP 时同时写 `mfa_verified_at`）；`x-reauth: true` 的检查是可复用组件 `httpx.ReauthChecker`，经 `httpx.WithReauth` 在授权链中统一执行（位于授权钩子之前；1.18 交付真实授权钩子后可改为「先权限后再认证」）；窗口边界 `now - reauth_at ≤ auth.reauth_window_s`（默认 300 秒，UD-29）。契约中声明 `x-reauth` 的 operation 实为 11 个（`scripts/contract/data/x-reauth.txt` 已注明以契约为准，修订日志与 epics 中「10 个」为旧口径）。
+- 审计：`audit_logs` 的统一接入属 Story 1.21；在此之前，启用/停用 TOTP 与再认证成功只留结构化日志，失败写 `login_logs`（`totp_failed`/`login_failed`/`locked`）。

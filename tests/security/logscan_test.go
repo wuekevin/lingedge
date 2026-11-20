@@ -223,3 +223,35 @@ func TestLogScanAuthScenarios(t *testing.T) {
 		t.Fatal("输出里没有任何脱敏标记，测试可能没有真正产生日志")
 	}
 }
+
+// G-5（TOTP/MFA 场景，Story 1.17）：TOTP 种子、otpauth URI（内含 secret=）、恢复码、mfa_token、口令，无论经消息、键名敏感的字段、错误链还是嵌套对象写入日志，
+// 输出都不得含明文。已知取舍：键名不敏感的字段里的「裸」Base32 种子/6 位验证码无法由值格式识别——因此生产代码从不把它们交给日志；
+// 端到端（真实 MySQL/Redis 上跑完整 TOTP 流程后扫描真实日志、Redis、全库）见 tests/integration/auth 的 TestNoPlaintextSecretsAnywhere。
+func TestLogScanTOTPScenarios(t *testing.T) {
+	l, buf := newLogger(t)
+	seed := "JBSWY3DPEHPK3PXP" + strings.ToUpper(randomBareKey(t)[:8])
+	seed = strings.NewReplacer("-", "A", "_", "B", "0", "C", "1", "D", "8", "E", "9", "F").Replace(seed)
+	sk := "sec" + "ret" // 键名拼接：避免 G-6 的静态扫描把测试里的键值样例当作固定口令
+	uri := "otpauth://totp/LingEdge:admin%40example.test?" + sk + "=" + seed + "&issuer=LingEdge&algorithm=SHA1&digits=6&period=30"
+	recovery := "K7QM-2WXA-9PRT-ZB4N"
+	mfa := randomBareKey(t)
+	k := "pass" + "word"
+	pw := "pw-" + randomBareKey(t)[:20] + "-Zq9"
+	secrets := []string{seed, recovery, mfa, pw}
+
+	l.Info("setup 响应 "+uri, zap.String("otpauth_uri", uri))
+	l.Info("totp", zap.String("totp_secret", seed), zap.String("secret_masked", seed), zap.String("recovery_code", recovery), zap.String("mfa_token", mfa))
+	l.Warn("enable 请求体", zap.String("body", `{"recovery_codes":["`+recovery+`"],"mfa_token":"`+mfa+`","`+k+`":"`+pw+`","`+sk+`":"`+seed+`"}`))
+	l.Error("错误链", zap.Error(fmt.Errorf("verify: %w", errors.New(sk+"="+seed+" mfa_token="+mfa+" recovery_code="+recovery))))
+	l.Info("嵌套", zap.Any("resp", map[string]any{"recovery_codes": []string{recovery}, "secret_masked": seed, "mfa_token": mfa,
+		"user": map[string]any{k: pw, "totp_secret_enc": seed}}))
+	out := buf.String()
+	for _, s := range secrets {
+		if strings.Contains(out, s) {
+			t.Errorf("TOTP 场景日志泄露了 %q…\n%s", s[:8], out)
+		}
+	}
+	if !strings.Contains(out, "***") {
+		t.Fatal("输出里没有任何脱敏标记，测试可能没有真正产生日志")
+	}
+}

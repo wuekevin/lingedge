@@ -49,6 +49,7 @@ const (
 	EventLoginFailed  = "login_failed"
 	EventLogout       = "logout"
 	EventLocked       = "locked"
+	EventTOTPFailed   = "totp_failed"
 )
 
 // 会话吊销原因（sessions.revoke_reason）。
@@ -101,6 +102,8 @@ type NewSession struct {
 	Now               time.Time
 	ExpiresAt         time.Time
 	AbsoluteExpiresAt time.Time
+	// MFAVerifiedAt 非空表示建立会话时已通过第二因子（TOTP/恢复码）。
+	MFAVerifiedAt *time.Time
 }
 
 // SessionView 是会话校验时一次查出的会话 + 用户 + 租户视图。
@@ -211,4 +214,28 @@ type Settings struct {
 	ThrottleAccountMax int // 窗口内同一 identifier 的最大失败次数（超过即锁定）
 	ThrottleIPMax      int // 窗口内同一来源 IP 的最大失败次数
 	RunMode            string
+	// ReauthWindow 是 L4 再认证窗口（auth.reauth_window_s，默认 300 秒，UD-29）。
+	ReauthWindow time.Duration
+	// MFAWindow 是「近期 MFA」窗口（auth.mfa_window_s；基线与 UD 未规定默认值，工程假设 15 分钟）。
+	MFAWindow time.Duration
+	// TOTPRequiredForAdmin 是「强制管理员启用 TOTP」（login.totp_required_for_admin）。
+	TOTPRequiredForAdmin bool
+}
+
+// MFAChallenge 是 login_mfa_challenges 行（登录第一步通过后发放的一次性 mfa_token 挑战）。
+type MFAChallenge struct {
+	ID         uint64     `db:"id"`
+	UserID     uint64     `db:"user_id"`
+	Realm      string     `db:"realm"`
+	ExpiresAt  time.Time  `db:"expires_at"`
+	Attempts   uint32     `db:"attempts"`
+	ConsumedAt *time.Time `db:"consumed_at"`
+}
+
+// TOTPState 是用户的 TOTP 状态（含密钥密文；仅在 TOTP 流程内读取）。
+type TOTPState struct {
+	UID       string  `db:"uid"`
+	Enabled   bool    `db:"enabled"`
+	SecretEnc *string `db:"secret_enc"`
+	LastStep  *uint64 `db:"last_step"`
 }

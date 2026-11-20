@@ -32,3 +32,4 @@ plans
 pricing_rules
 resellers
 idempotency_keys
+login_mfa_challenges

@@ -94,7 +94,7 @@ func TestLogsContainNoSecrets(t *testing.T) {
 	}
 }
 
-// 路由清单：认证模块经 httpx.Router.Register 注册的 8 条路由，元数据与 openapi.yaml 的 x-* 完全一致；全部是真实 handler（不是 501 占位）。
+// 路由清单：认证模块经 httpx.Router.Register 注册的 13 条路由（1.16 的 8 条 + 1.17 的 TOTP/再认证 5 条），元数据与 openapi.yaml 的 x-* 完全一致；全部是真实 handler（不是 501 占位）。
 func TestRouteMetadataMatchesOpenAPI(t *testing.T) {
 	s := newStack(t)
 	var routes []httpx.RouteMeta
@@ -103,8 +103,8 @@ func TestRouteMetadataMatchesOpenAPI(t *testing.T) {
 			routes = append(routes, m)
 		}
 	}
-	if len(routes) != 8 {
-		t.Fatalf("应注册 8 条 /auth 路由，实际 %d", len(routes))
+	if len(routes) != 13 {
+		t.Fatalf("应注册 13 条 /auth 路由，实际 %d", len(routes))
 	}
 	if probs := s.spec.CheckRoutes(routes); len(probs) > 0 {
 		t.Errorf("路由元数据与 openapi.yaml 不一致:\n%s", strings.Join(probs, "\n"))

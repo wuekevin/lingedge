@@ -14,6 +14,7 @@ import (
 	"github.com/wuekevin/lingedge/internal/platform/httpx"
 	"github.com/wuekevin/lingedge/internal/platform/redisx"
 	"github.com/wuekevin/lingedge/internal/platform/uid"
+	"github.com/wuekevin/lingedge/pkg/secretbox"
 )
 
 // Options 是 NewModule 的参数（根包 auth.Options 是它的别名）。
@@ -30,6 +31,8 @@ type Options struct {
 	ExtraOrigins []string
 	// Bearer 是 API Token 认证（Story 1.19 注入）；nil 时携带 Bearer 的请求一律 401。
 	Bearer httpx.Authenticator
+	// Box 是信封加密（TOTP 密钥经它加密存储；Story 1.17）；非 ManifestOnly 时必填。
+	Box *secretbox.Box
 	// MaxConcurrentHashes 限制并发的 argon2id 计算数（每次占用 m KiB 内存）；<=0 取 max(2, CPU 数)。
 	MaxConcurrentHashes int
 	// ManifestOnly 仅用于导出路由清单（lingedge-server routes）：不需要数据库与 Redis，处理函数不可被调用。
@@ -56,7 +59,7 @@ func NewModule(ctx context.Context, o Options) (*Module, error) {
 	if err != nil {
 		return nil, err
 	}
-	svc, err := service.New(ctx, service.Options{Repo: repo, WithTx: o.Pool.WithTx, Redis: o.Redis, Hasher: h, Clock: o.Clock, IDs: o.IDs, Log: o.Log})
+	svc, err := service.New(ctx, service.Options{Repo: repo, WithTx: o.Pool.WithTx, Redis: o.Redis, Hasher: h, Box: o.Box, Clock: o.Clock, IDs: o.IDs, Log: o.Log})
 	if err != nil {
 		return nil, err
 	}
@@ -89,6 +92,15 @@ func (m *Module) SelfService(operationID string) bool {
 		}
 	}
 	return false
+}
+
+// ReauthChecker 返回 L4 再认证检查组件（httpx.ReauthChecker）：声明 x-reauth: true 的 operation 在窗口外 403 auth.reauth_required。
+// 装配层经 httpx.WithReauth 把它接入授权链；Story 1.18 的真实授权钩子可直接复用同一个组件。ManifestOnly 时为 nil。
+func (m *Module) ReauthChecker() httpx.ReauthChecker {
+	if m.authn == nil {
+		return nil
+	}
+	return reauthChecker{svc: m.svc}
 }
 
 // Flush 等待认证模块已派发的后台写入（DB 兜底失败计数）完成；停机前与测试断言前调用。

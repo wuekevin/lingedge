@@ -102,7 +102,7 @@ var (
 
 	// 自由文本里的 key=value / "key":"value" / key: value 的「键」部分：键名含敏感词，其后（同一行内）跟 : 或 =。
 	// 值部分由 maskKeyValues 手工扫描（支持带转义的引号串、嵌套的 {…}/[…]、Bearer 等前缀词），正则无法表达嵌套。
-	reKeyHead = regexp.MustCompile(`(?i)\b[\w.\-]*(?:password|passwd|passphrase|secret|token|private[_-]?key|authorization|cookie|credential|api[_-]?key|dsn)[\w.\-]*(?:\\?["'])?[ \t]*[:=][ \t]*`)
+	reKeyHead = regexp.MustCompile(`(?i)\b[\w.\-]*(?:password|passwd|passphrase|secret|token|private[_-]?key|authorization|cookie|credential|api[_-]?key|dsn|recovery[_-]?codes?)[\w.\-]*(?:\\?["'])?[ \t]*[:=][ \t]*`)
 	// 值前缀词（Authorization: Bearer xxx 这类「方案 + 凭据」）。
 	reSchemeWord = regexp.MustCompile(`(?i)^(?:bearer|basic|digest|token)[ \t]+`)
 )

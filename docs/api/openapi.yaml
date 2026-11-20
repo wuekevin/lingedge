@@ -127,6 +127,7 @@ paths:
       - auth
       operationId: verifyTotp
       summary: 登录第二步：TOTP/恢复码验证
+      description: 凭 POST /auth/login 返回的一次性 mfa_token（5 分钟、同一挑战至多 5 次验证码尝试）与 6 位 TOTP 或一次性恢复码建立会话。验证码错误、同一 time-step 内重放、恢复码已用均返回 401 auth.totp_invalid 并计入登录节流（超限 429）；mfa_token 无效/过期/已用/尝试超限返回 401 auth.unauthenticated（须重新登录第一步）。成功时同 login（Set-Cookie、csrf_token），会话记录 mfa_verified_at。
       parameters:
       - $ref: '#/components/parameters/XRequestID'
       requestBody:
@@ -147,6 +148,8 @@ paths:
                 $ref: '#/components/schemas/LoginResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -335,6 +338,7 @@ paths:
       - auth
       operationId: setupTotp
       summary: 开始启用 TOTP（生成密钥）
+      description: 生成新的 TOTP 密钥并以「待确认」状态经信封加密存储（需 POST /auth/totp/enable 确认后才生效）；密钥与 otpauth URI 仅在本响应出现一次。已启用时 409 resource.conflict。仅 Cookie 会话可用。
       parameters:
       - $ref: '#/components/parameters/XRequestID'
       - $ref: '#/components/parameters/XTenantID'
@@ -355,6 +359,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -369,6 +375,7 @@ paths:
       - auth
       operationId: enableTotp
       summary: 确认并启用 TOTP
+      description: 用首次验证码确认并启用；一次性发放 10 个恢复码（明文仅此一次，库内只存哈希，单次有效）。验证码错误 401 auth.totp_invalid 并计入节流；已启用或未先 setup 时 409 resource.conflict。
       parameters:
       - $ref: '#/components/parameters/XRequestID'
       - $ref: '#/components/parameters/XTenantID'
@@ -395,6 +402,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -409,7 +418,7 @@ paths:
       - auth
       operationId: disableTotp
       summary: 停用 TOTP
-      description: 若系统设置要求管理员必须启用 TOTP（login.totp_required_for_admin），平台用户不可停用。
+      description: 需口令 + 当前验证码（TOTP 或恢复码）。若系统设置要求管理员必须启用 TOTP（login.totp_required_for_admin），平台用户不可停用（403 auth.forbidden）；未启用时 409 resource.conflict。
       parameters:
       - $ref: '#/components/parameters/XRequestID'
       - $ref: '#/components/parameters/XTenantID'
@@ -432,6 +441,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':

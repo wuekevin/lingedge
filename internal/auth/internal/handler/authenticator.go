@@ -36,6 +36,13 @@ func NewAuthenticator(svc *service.Service, extraOrigins []string, bearer httpx.
 // mustChangeAllowed 是 must_change_password 状态下仍允许调用的 operation（其余一律拒绝，直到改密）。
 var mustChangeAllowed = map[string]bool{"getMe": true, "getCsrfToken": true, "logout": true, "changePassword": true}
 
+// enrollmentAllowed 是「强制管理员启用 TOTP」生效且账号尚未启用时仍允许调用的 operation：只能走启用流程（以及读取自身、登出、改密）。
+var enrollmentAllowed = map[string]bool{"getMe": true, "getCsrfToken": true, "logout": true, "setupTotp": true, "enableTotp": true, "changePassword": true}
+
+// recentMFAOperations 是要求「近期 MFA」的敏感 operation（ADR-018 §5：改密码、创建 API Token…）。createApiToken 属 Story 1.19，
+// 路由注册后即由本钩子统一生效（Bearer 请求没有会话，无法满足近期 MFA）。
+var recentMFAOperations = map[string]bool{"changePassword": true, "createApiToken": true}
+
 // realmsFor 决定一条路由接受哪些 realm 的会话（按优先顺序）。
 // platform 路由只认 admin；tenant 路由认 console，也认 admin（平台管理员经 X-Tenant-ID 代租户，授权由 1.18/1.20 判定）；either 两者皆可。
 // 因此 console 会话访问 platform 路由、或把一个 realm 的令牌放进另一个 realm 的 Cookie，都得到 401（realm 隔离，ADR-018 §1）。
@@ -56,7 +63,15 @@ func (a *Authenticator) Authenticate(r *http.Request, meta httpx.RouteMeta) (ten
 			if a.bearer == nil {
 				return nil, apierr.New(apierr.AuthUnauthenticated, "authentication required")
 			}
-			return a.bearer.Authenticate(r, meta) // Bearer 不使用 Cookie，不需要 CSRF（NFR-9）
+			p, err := a.bearer.Authenticate(r, meta) // Bearer 不使用 Cookie，不需要 CSRF（NFR-9）
+			if err != nil {
+				return nil, err
+			}
+			// Bearer 没有会话，无法满足「近期 MFA」（fail-closed）；再认证同理，由 httpx.WithReauth 的检查组件拒绝。
+			if recentMFAOperations[meta.OperationID] {
+				return nil, apierr.New(apierr.AuthReauthRequired, "recent MFA required", apierr.Detail{Field: "mfa_verified_at", Reason: "API tokens cannot satisfy recent MFA; use a cookie session"})
+			}
+			return p, nil
 		}
 	}
 	var lastErr error
@@ -75,6 +90,14 @@ func (a *Authenticator) Authenticate(r *http.Request, meta httpx.RouteMeta) (ten
 		}
 		if p.User.MustChange && !mustChangeAllowed[meta.OperationID] {
 			return nil, apierr.New(apierr.AuthForbidden, "password change required", apierr.Detail{Field: "must_change_password", Reason: "change the password before using other operations"})
+		}
+		if !enrollmentAllowed[meta.OperationID] && a.svc.EnrollmentRequired(r.Context(), p) {
+			return nil, apierr.New(apierr.AuthForbidden, "totp enrollment required", apierr.Detail{Field: "totp_required_for_admin", Reason: "enable TOTP (setup, then enable) before using other operations"})
+		}
+		if recentMFAOperations[meta.OperationID] {
+			if err := a.svc.CheckRecentMFA(r.Context(), p); err != nil {
+				return nil, err
+			}
 		}
 		return p, nil
 	}

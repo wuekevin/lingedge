@@ -10,6 +10,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -28,6 +30,7 @@ import (
 	"github.com/wuekevin/lingedge/internal/platform/logx"
 	"github.com/wuekevin/lingedge/internal/platform/redisx"
 	"github.com/wuekevin/lingedge/internal/platform/uid"
+	"github.com/wuekevin/lingedge/pkg/secretbox"
 	"github.com/wuekevin/lingedge/tests/mysqltest"
 	"github.com/wuekevin/lingedge/tests/redistest"
 )
@@ -56,6 +59,8 @@ type stack struct {
 	router *httpx.Router
 	logs   *syncBuf
 	spec   *contracttest.Spec
+	box    *secretbox.Box
+	opt    stackOpts
 }
 
 type stackOpts struct {
@@ -65,6 +70,10 @@ type stackOpts struct {
 	fakeClock bool
 	// settings 是启动前写入 system_settings 的键值（JSON 字面量）。
 	settings map[string]string
+	// reauthRoutes 为 true 时，按 openapi 的 x-reauth 元数据注册「声明了 x-reauth: true 的 operation」的占位路由（这些 operation 的真实实现属后续 Story）。
+	reauthRoutes bool
+	// bearer 是 Bearer API Token 的认证器（Story 1.19 才有真实实现；这里是测试内的替身，只用于验证「Bearer 请求不能满足再认证/近期 MFA」）。
+	bearer httpx.Authenticator
 }
 
 func newStack(t *testing.T, o ...stackOpts) *stack {
@@ -73,7 +82,7 @@ func newStack(t *testing.T, o ...stackOpts) *stack {
 	if len(o) > 0 {
 		opt = o[0]
 	}
-	s := &stack{t: t, e: newEnv(t), logs: &syncBuf{}, spec: contracttest.LoadRepo(t)}
+	s := &stack{t: t, e: newEnv(t), logs: &syncBuf{}, spec: contracttest.LoadRepo(t), box: newBox(t), opt: opt}
 	for k, v := range opt.settings {
 		group := "login"
 		if strings.HasPrefix(k, "auth.") {
@@ -103,7 +112,7 @@ func newStack(t *testing.T, o ...stackOpts) *stack {
 	}
 	s.mod = s.newModule(lg, clk)
 	s.router, err = httpx.NewRouter(httpx.Options{Logger: lg, IDs: uid.NewGenerator(clock.System()),
-		Hooks: httpx.WithSelfService(httpx.Hooks{Authenticator: s.mod.Authenticator()}, s.mod.SelfService)})
+		Hooks: assemble(s.mod)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,6 +124,16 @@ func newStack(t *testing.T, o ...stackOpts) *stack {
 		m := httpx.RouteMeta{OperationID: id, Method: "POST", Path: path, Auth: httpx.AuthRequired, Permissions: []string{"probe:run"}, TenantScope: scope, Phase: "M1"}
 		if err := s.router.Register(m, func(c *gin.Context) { httpx.OK(c, map[string]bool{"reached": true}) }); err != nil {
 			t.Fatal(err)
+		}
+	}
+	if opt.reauthRoutes {
+		for _, m := range s.spec.Expected() {
+			if m.Reauth {
+				m.Idempotent = false // 占位路由不接幂等存储；元数据其余部分取自 openapi
+				if err := s.router.Register(m, func(c *gin.Context) { httpx.OK(c, map[string]bool{"reached": true}) }); err != nil {
+					t.Fatal(err)
+				}
+			}
 		}
 	}
 	probe("probePlatform", "/probe/platform", httpx.ScopePlatform)
@@ -130,7 +149,7 @@ func newStack(t *testing.T, o ...stackOpts) *stack {
 
 func (s *stack) newModule(lg *zap.Logger, clk clock.Clock) auth.Module {
 	s.t.Helper()
-	m, err := auth.New(context.Background(), auth.Options{Pool: s.e.app, Redis: s.rc, Clock: clk, IDs: uid.NewGenerator(clock.System()), Log: lg, Argon2: testArgon})
+	m, err := auth.New(context.Background(), auth.Options{Pool: s.e.app, Redis: s.rc, Clock: clk, IDs: uid.NewGenerator(clock.System()), Log: lg, Argon2: testArgon, Box: s.box, Bearer: s.opt.bearer})
 	if err != nil {
 		s.t.Fatal(err)
 	}
@@ -254,7 +273,6 @@ type userOpt func(*userSpec)
 type userSpec struct {
 	status     string
 	mustChange bool
-	totp       bool
 	noMember   bool
 	hash       string
 }
@@ -263,7 +281,6 @@ func withStatus(s string) userOpt { return func(u *userSpec) { u.status = s } }
 func withMustChange() userOpt     { return func(u *userSpec) { u.mustChange = true } }
 func withNoMembership() userOpt   { return func(u *userSpec) { u.noMember = true } }
 func withHash(h string) userOpt   { return func(u *userSpec) { u.hash = h } }
-func withTOTP() userOpt           { return func(u *userSpec) { u.totp = true } }
 
 var ids = uid.NewGenerator(clock.System())
 
@@ -280,12 +297,8 @@ func (s *stack) seedUser(typ string, opts ...userOpt) user {
 	if hash == "" {
 		hash = testHash(s.t, u.Password)
 	}
-	sealed := any(nil)
-	if sp.totp {
-		sealed = "v1:test:wrapped:nonce:ct" // 满足 CHECK（启用 TOTP 须有密文）；第二步属 1.17，这里不会被解密
-	}
-	s.e.root(s.t, "INSERT INTO §.users (uid, user_type, email, display_name, password_hash, status, totp_enabled, totp_secret_enc, must_change_password) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		u.UID, typ, u.Email, "测试用户", hash, sp.status, sp.totp, sealed, sp.mustChange)
+	s.e.root(s.t, "INSERT INTO §.users (uid, user_type, email, display_name, password_hash, status, must_change_password) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		u.UID, typ, u.Email, "测试用户", hash, sp.status, sp.mustChange)
 	u.ID = uint64(s.e.rootInt(s.t, "SELECT id FROM §.users WHERE uid = ?", u.UID))
 	if typ == "tenant" && !sp.noMember {
 		tuid := ids.MustNew()
@@ -356,7 +369,7 @@ func nowClock() clock.Clock { return clock.System() }
 func (s *stack) restartServer(s2 *stack) *httptest.Server {
 	s.t.Helper()
 	r, err := httpx.NewRouter(httpx.Options{Logger: zap.NewNop(), IDs: uid.NewGenerator(clock.System()),
-		Hooks: httpx.WithSelfService(httpx.Hooks{Authenticator: s2.mod.Authenticator()}, s2.mod.SelfService)})
+		Hooks: assemble(s2.mod)})
 	if err != nil {
 		s.t.Fatal(err)
 	}
@@ -391,4 +404,32 @@ func weakHash(t testing.TB, pw string) string {
 	key := argon2.IDKey([]byte(pw), salt, 1, 8192, 1, 32)
 	b64 := base64.RawStdEncoding
 	return fmt.Sprintf("$argon2id$v=%d$m=8192,t=1,p=1$%s$%s", argon2.Version, b64.EncodeToString(salt), b64.EncodeToString(key))
+}
+
+// assemble 是与 cmd/lingedge-server 的 assembleHooks 同构的钩子装配（认证 + 自助最小授权 + L4 再认证检查）。
+func assemble(m auth.Module) httpx.Hooks {
+	return httpx.WithReauth(httpx.WithSelfService(httpx.Hooks{Authenticator: m.Authenticator()}, m.SelfService), m.ReauthChecker())
+}
+
+// newBox 在临时目录写 0400 主密钥文件（运行期随机生成），返回真实 FileKeyProvider 支撑的 Box（与生产同一实现）。
+func newBox(t testing.TB) *secretbox.Box {
+	t.Helper()
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(t.TempDir(), "master.key")
+	if err := os.WriteFile(p, []byte("k1:"+base64.RawURLEncoding.EncodeToString(raw)+"\n"), 0o400); err != nil {
+		t.Fatal(err)
+	}
+	kp, err := secretbox.NewFileKeyProvider(secretbox.FileOptions{Path: p})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(kp.Close)
+	b, err := secretbox.New(kp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
 }

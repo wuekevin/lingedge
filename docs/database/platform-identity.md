@@ -27,7 +27,7 @@ updated: 2026-11-16（依据架构评审修订，见 docs/bmad/architecture-revi
 - 索引：`uk_system_settings_key(setting_key)`、`idx_system_settings_group(group_name)`。
 - 约束：`ck_system_settings_one_value`：`(value_json IS NULL) <> (value_enc IS NULL)`。
 - 保留：永久。变更写审计。
-- **已定义的键**（节选，其余随功能追加；键名为跨文档契约）：`system.run_mode`、`brand.*`、`login.*`、`retention.*`、`deploy.lineage`（BIGINT，初值 1；DB 恢复后由 `lingedge-server lineage bump` 提升，ADR-002 §12）、`ssrf.allow_cidrs`（平台 SSRF 白名单 CIDR 数组，写需 `setting:write` + 再认证，进入各集群 `global` 块的 `ssrf_allow_cidrs`，ADR-004 §6）、`auth.reauth_window_s`（L4 再认证窗口，默认 300 `[ASSUMPTION]`，ADR-018）、`auth.session_idle_ttl_s` / `auth.session_absolute_ttl_s`（会话滑动/绝对过期，秒；代码默认 7200 / 43200 `[ASSUMPTION]`，UD-27 待基线，Story 1.16）、`login.throttle_window_s` / `login.throttle_account_max` / `login.throttle_ip_max`（登录节流窗口与「账号 / 来源 IP」两个维度的失败阈值；代码默认 900 秒 / 10 / 30 `[ASSUMPTION]`，UD-27，Story 1.16）、`placement.default_cluster_uids`（租户建站时由平台默认绑定的集群，租户不可选，ADR-009 §5）、`grpc.tls.san_extra`（Server 叶证书额外 SAN）、`website.revalidate_secret`（`value_enc`，P2）。
+- **已定义的键**（节选，其余随功能追加；键名为跨文档契约）：`system.run_mode`、`brand.*`、`login.*`、`retention.*`、`deploy.lineage`（BIGINT，初值 1；DB 恢复后由 `lingedge-server lineage bump` 提升，ADR-002 §12）、`ssrf.allow_cidrs`（平台 SSRF 白名单 CIDR 数组，写需 `setting:write` + 再认证，进入各集群 `global` 块的 `ssrf_allow_cidrs`，ADR-004 §6）、`auth.reauth_window_s`（L4 再认证窗口，默认 300，UD-29 采纳，ADR-018）、`auth.mfa_window_s`（近期 MFA 窗口，默认 900 `[ASSUMPTION]`：基线与 UD 均未规定，Story 1.17）、`login.totp_required_for_admin`（JSON 布尔，强制管理员启用 TOTP，缺省 false）、`auth.session_idle_ttl_s` / `auth.session_absolute_ttl_s`（会话滑动/绝对过期，秒；代码默认 7200 / 43200 `[ASSUMPTION]`，UD-27 待基线，Story 1.16）、`login.throttle_window_s` / `login.throttle_account_max` / `login.throttle_ip_max`（登录节流窗口与「账号 / 来源 IP」两个维度的失败阈值；代码默认 900 秒 / 10 / 30 `[ASSUMPTION]`，UD-27，Story 1.16）、`placement.default_cluster_uids`（租户建站时由平台默认绑定的集群，租户不可选，ADR-009 §5）、`grpc.tls.san_extra`（Server 叶证书额外 SAN）、`website.revalidate_secret`（`value_enc`，P2）。
 
 ### 1.2 `system_installations`　**M1**
 
@@ -69,7 +69,8 @@ updated: 2026-11-16（依据架构评审修订，见 docs/bmad/architecture-revi
 | locale | VARCHAR(8) | N | 'zh-CN' | `zh-CN`/`en` |
 | timezone | VARCHAR(48) | N | 'UTC' | |
 | totp_enabled | TINYINT(1) | N | 0 | |
-| totp_secret_enc | TEXT | Y | — | TOTP 密钥信封密文（5 段，README §2.2） |
+| totp_secret_enc | TEXT | Y | — | TOTP 密钥信封密文（5 段，README §2.2）；AAD=`users|totp_secret_enc|<uid>`（Story 1.17）。setup 后、enable 前为「待确认」密文（`totp_enabled=0`） |
+| totp_last_step | BIGINT UNSIGNED | Y | — | 已用的 TOTP time-step（`unix/30`）；原子 compare-and-set 实现「同一验证码在窗口内重放被拒」。**000017 追加**（Story 1.17、CC-5） |
 | must_change_password | TINYINT(1) | N | 0 | 初始/重置后强制修改 |
 | password_changed_at | DATETIME(3) | Y | — | |
 | failed_login_count | INT UNSIGNED | N | 0 | 连续失败计数（节流以 Redis 为主，此处为兜底） |
@@ -92,6 +93,26 @@ updated: 2026-11-16（依据架构评审修订，见 docs/bmad/architecture-revi
 | used_at | DATETIME(3) | Y | — | |
 
 - 唯一：`uk_user_recovery_codes(user_id, code_hash)`。保留：随用户。
+- 实现（Story 1.17）：启用 TOTP 时一次性发放 10 个码（各 80 位 CSPRNG，Base32 16 字符），`code_hash = SHA-256("lingedge/recovery/v1\0" + 规整后的码)`；码本身是高熵随机数，故不用慢哈希（离线穷举 2^80 不可行；确定性哈希才能按 `(user_id, code_hash)` 原子地「用掉」一个码）。单次有效：`UPDATE … SET used_at = ? WHERE … AND used_at IS NULL`。停用 TOTP 或重新启用时整批删除/替换。
+
+### 2.2.1 `login_mfa_challenges`　**追加 · 000016**
+
+用途：登录第一步（口令正确、账号已启用 TOTP）发放的一次性 `mfa_token` 挑战（OpenAPI `LoginResponse.mfa_token`：5 分钟、一次性）。存 MySQL 而非 Redis，因此多实例一致、Redis 不可用时仍有效（ADR-025）。C2，无 `uid`（不对外引用）。**不属 M1 冻结的 61 表**（Story 1.17、CC-5）。
+
+| 列 | 类型 | 空 | 默认 | 说明 |
+|---|---|---|---|---|
+| id | BIGINT UNSIGNED | N | AUTO_INCREMENT | |
+| created_at | DATETIME(3) | N | CURRENT_TIMESTAMP(3) | |
+| token_hash | CHAR(64) | N | — | SHA-256(32 字节 CSPRNG 令牌)；明文只在登录响应里出现一次 |
+| user_id | BIGINT UNSIGNED | N | — | FK → users(id) ON DELETE CASCADE |
+| realm | VARCHAR(16) | N | — | `admin`/`console`（CHECK） |
+| ip | VARBINARY(16) | Y | — | |
+| expires_at | DATETIME(3) | N | — | 发放后 5 分钟 |
+| attempts | SMALLINT UNSIGNED | N | 0 | 验证码失败次数；达到 5 次即作废 |
+| consumed_at | DATETIME(3) | Y | — | 成功使用时间（原子 UPDATE，保证一次性） |
+
+- 唯一：`uk_login_mfa_token(token_hash)`。索引：`idx_login_mfa_user(user_id)`、`idx_login_mfa_exp(expires_at)`。
+- 保留：创建新挑战时顺带清理过期一小时以上的行（`DELETE … LIMIT 100`）；其余随用户级联删除。
 
 ### 2.3 `roles`　**M1**
 
@@ -157,7 +178,7 @@ C2。`role_id` FK→roles CASCADE；`permission_id` FK→permissions CASCADE。�
 | tenant_id | BIGINT UNSIGNED | Y | — | Console 当前租户；FK → tenants(id) **RESTRICT** |
 | ip | VARBINARY(16) | Y | — | |
 | user_agent | VARCHAR(512) | Y | — | |
-| mfa_verified_at | DATETIME(3) | Y | — | TOTP 通过时间 |
+| mfa_verified_at | DATETIME(3) | Y | — | 第二因子（TOTP/恢复码）通过时间：两步登录建立会话时写入；`enable` 与含验证码的 `POST /auth/reauth` 刷新。改密码、创建 API Token 等敏感操作要求 `NOW - mfa_verified_at ≤ auth.mfa_window_s`（已启用 TOTP 的账号；Story 1.17） |
 | reauth_at | DATETIME(3) | Y | — | 最近一次 `POST /auth/reauth`（L4 再认证）通过时间；`x-reauth` 路由要求 `NOW(3) - reauth_at ≤ auth.reauth_window_s`，否则 `403 auth.reauth_required`（ADR-018） |
 | last_seen_at | DATETIME(3) | N | — | |
 | expires_at | DATETIME(3) | N | — | 滑动过期 |

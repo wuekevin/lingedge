@@ -178,7 +178,7 @@ func TestServerProcessLifecycle(t *testing.T) {
 	if err := json.Unmarshal(body, &rep); err != nil || code != 200 || rep.Status != httpx.StatusOK {
 		t.Fatalf("/healthz/ready: %d %s %v", code, body, err)
 	}
-	if m := rep.Checks["migrations"]; m.Status != "ok" || m.Applied == nil || m.Latest == nil || *m.Applied != 15 || *m.Latest != 15 || m.Pending == nil || *m.Pending != 0 {
+	if m := rep.Checks["migrations"]; m.Status != "ok" || m.Applied == nil || m.Latest == nil || *m.Applied != 17 || *m.Latest != 17 || m.Pending == nil || *m.Pending != 0 {
 		t.Fatalf("app 账号应能读到迁移版本并与内嵌一致: %+v", rep.Checks["migrations"])
 	}
 	if rep.Checks["database"].Status != "up" || rep.Checks["redis"].Status != "up" {

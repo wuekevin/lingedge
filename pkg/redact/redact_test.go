@@ -235,6 +235,8 @@ func TestKeyValueMaskingExactOutputs(t *testing.T) {
 		{"方案词加凭据", "Authorization: Bearer abc123xyz, trace=1", "Authorization: ***, trace=1"},
 		{"URL 查询串", "GET /a?access_token=t0k&page=2", "GET /a?access_token=***&page=2"},
 		{"多个键", "password=a token=b secret=c", "password=*** token=*** secret=***"},
+		{"恢复码键值（Story 1.17）", "recovery_code=K7QM-2WXA-9PRT-ZB4N ok", "recovery_code=*** ok"},
+		{"恢复码 JSON 数组（Story 1.17）", `{"recovery_codes":["K7QM-2WXA-9PRT-ZB4N","AAAA-BBBB-CCCC-DDDD"]}`, `{"recovery_codes":***}`},
 		{"键名前缀", "db_password=x api-key=y x-api-key: z", "db_password=*** api-key=*** x-api-key: ***"},
 		{"圆括号收尾", "(using password: YES)", "(using password: ***)"},
 		{"已是掩码", "password=*** token: ***", "password=*** token: ***"},

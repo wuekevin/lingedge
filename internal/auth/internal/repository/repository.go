@@ -117,8 +117,8 @@ func (r *Repo) CreateSession(ctx context.Context, s domain.NewSession) error {
 		ua = &v
 	}
 	_, err := r.ex(ctx).Exec(ctx, db.Q(`INSERT INTO sessions (uid, created_at, token_hash, csrf_hash, user_id, realm, tenant_id, ip, user_agent,
-		last_seen_at, expires_at, absolute_expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-		s.UID, s.Now, s.TokenHash, s.CSRFHash, s.UserID, string(s.Realm), s.TenantID, nilIfEmpty(s.IP), ua, s.Now, s.ExpiresAt, s.AbsoluteExpiresAt)
+		mfa_verified_at, last_seen_at, expires_at, absolute_expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		s.UID, s.Now, s.TokenHash, s.CSRFHash, s.UserID, string(s.Realm), s.TenantID, nilIfEmpty(s.IP), ua, s.MFAVerifiedAt, s.Now, s.ExpiresAt, s.AbsoluteExpiresAt)
 	return err
 }
 
@@ -268,7 +268,8 @@ func (r *Repo) ReadSettings(ctx context.Context) (map[string]json.RawMessage, er
 		Value json.RawMessage `db:"value_json"`
 	}
 	if err := r.ex(ctx).Select(ctx, &rows, db.Q(`SELECT setting_key, value_json FROM system_settings
-		WHERE setting_key IN ('auth.session_idle_ttl_s', 'auth.session_absolute_ttl_s', 'login.throttle_window_s', 'login.throttle_account_max', 'login.throttle_ip_max', 'system.run_mode')`)); err != nil {
+		WHERE setting_key IN ('auth.session_idle_ttl_s', 'auth.session_absolute_ttl_s', 'login.throttle_window_s', 'login.throttle_account_max', 'login.throttle_ip_max', 'system.run_mode',
+		'auth.reauth_window_s', 'auth.mfa_window_s', 'login.totp_required_for_admin')`)); err != nil {
 		return nil, err
 	}
 	out := make(map[string]json.RawMessage, len(rows))
@@ -285,4 +286,11 @@ func nilIfEmpty(b []byte) any {
 		return nil
 	}
 	return b
+}
+
+// UpdatePasswordHash 只升级口令哈希（参数提升时的透明 rehash；不改任何其他列）。
+// lingedge:platform-table=users
+func (r *Repo) UpdatePasswordHash(ctx context.Context, userID uint64, hash string) error {
+	_, err := r.ex(ctx).Exec(ctx, db.Q(`UPDATE users SET password_hash = ? WHERE id = ?`), hash, userID)
+	return err
 }
