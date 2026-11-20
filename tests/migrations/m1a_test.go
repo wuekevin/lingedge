@@ -875,10 +875,13 @@ func TestM1AConstraintsOnRealDatabase(t *testing.T) {
 
 // fixtureFromEmbedded 复制嵌入迁移中的 A 批（000001–000005）为可变的内存集合：本文件的测试只针对 A 批，
 // 后续 Story 追加 000006+ 不会改变这里的期望（表数、授权数、版本序列）。
-func fixtureFromEmbedded(t testing.TB) map[string]*mapFile {
+func fixtureFromEmbedded(t testing.TB) map[string]*mapFile { return fixtureOf(t, m1aFiles) }
+
+// fixtureOf 从嵌入的真实迁移中取出指定文件，组成内存集合（可变异）。
+func fixtureOf(t testing.TB, names []string) map[string]*mapFile {
 	t.Helper()
 	out := map[string]*mapFile{}
-	for _, name := range m1aFiles {
+	for _, name := range names {
 		b, err := fs.ReadFile(migrations.FS, name)
 		if err != nil {
 			t.Fatal(err)

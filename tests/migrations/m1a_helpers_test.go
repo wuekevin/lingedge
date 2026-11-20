@@ -15,7 +15,6 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/wuekevin/lingedge/internal/platform/migrate"
-	"github.com/wuekevin/lingedge/migrations"
 	"github.com/wuekevin/lingedge/tests/mysqltest"
 )
 
@@ -42,7 +41,8 @@ var m1aFiles = []string{
 func m1aUp(t testing.TB) (*env, *migrate.Runner) {
 	t.Helper()
 	e := newEnv(t)
-	r := e.runner(t, migrations.FS)
+	// A 批测试基于只含 000001–000005 的内存集合：Story 1.8/1.9 追加 000006+ 后本批断言（表数、版本号）保持不变。
+	r := e.runner(t, toMapFS(fixtureFromEmbedded(t)))
 	if f := r.Findings(); len(f) != 0 {
 		t.Fatalf("真实迁移必须通过 lint: %v", f)
 	}

@@ -40,6 +40,7 @@ var tenantTables = map[string]bool{
 	"origin_groups": true, "origins": true, "site_versions": true,
 	"site_rules": true, "rule_versions": true,
 	"cache_policies": true, "cache_tasks": true, "certificates": true,
+	"certificate_deployments": true, "origin_health": true, "site_cluster_bindings": true, "cache_task_nodes": true,
 }
 
 var crossTenantRe = regexp.MustCompile(`lingedge:cross-tenant-index=(\w+)(?:[ \t]+(\S[^\n]*))?`)
