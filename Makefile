@@ -169,9 +169,16 @@ proto-check:
 	$(BUF) breaking proto --against '.git#ref=$(CONTRACT_BASE),subdir=proto'
 	BUF='$(BUF)' bash scripts/proto-check-gen.sh
 
-# OpenAPI 3.1 校验 + 元数据/路径无冒号/R-T1/x-reauth/分页/无内部 id 静态规则（AC1、AC8），再相对 $(CONTRACT_BASE) 做破坏性变更检测（AC2）。
+# OpenAPI 3.1 校验 + 元数据/路径无冒号/同位置路径参数名一致/R-T1/x-reauth/分页/无内部 id 静态规则（Story 1.3 AC1、AC8），
+# 再校验运行时路由清单（Story 1.12 AC2/AC7：lingedge-server routes 导出的真实注册路由 ⊆ openapi.yaml 且元数据与 x-* 一致、路径不含 ':'），
+# 并输出「M1 未实现 operation 清单」（阶段出口用 `make openapi-check M1_EXIT=1`：清单非空即失败，不以 501 假实现充数），
+# 最后相对 $(CONTRACT_BASE) 做破坏性变更检测（Story 1.3 AC2）。
+ROUTES_JSON ?= bin/routes.json
+M1_EXIT     ?=
 openapi-check: contract-bin
-	$(CONTRACT) openapi-check
+	@mkdir -p bin
+	$(GO) run ./cmd/lingedge-server routes -o $(ROUTES_JSON)
+	$(CONTRACT) openapi-check -routes $(ROUTES_JSON) $(if $(M1_EXIT),-require-m1-complete)
 	$(CONTRACT) openapi-breaking -base-ref '$(CONTRACT_BASE)' -oasdiff '$(OASDIFF)' $(if $(CONTRACT_NOTE),-note '$(CONTRACT_NOTE)')
 
 openapi-breaking: contract-bin

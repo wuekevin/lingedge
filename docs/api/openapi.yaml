@@ -6698,6 +6698,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/IdempotencyKeyReuse'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -9329,14 +9331,14 @@ paths:
       x-tenant-scope: either
       x-audit: true
       x-phase: P3
-  /dns/zones/{zoneId}/records:
+  /dns/zones/{dnsZoneId}/records:
     get:
       tags:
       - dns
       operationId: listDnsRecords
       summary: 列出DNS 记录（A/AAAA/CNAME/TXT/MX/CAA/SRV/SOA/NS）
       parameters:
-      - $ref: '#/components/parameters/p_zoneId'
+      - $ref: '#/components/parameters/p_dnsZoneId'
       - $ref: '#/components/parameters/XRequestID'
       - $ref: '#/components/parameters/XTenantID'
       - $ref: '#/components/parameters/Page'
@@ -9373,7 +9375,7 @@ paths:
       operationId: createDnsRecord
       summary: 创建DNS 记录（A/AAAA/CNAME/TXT/MX/CAA/SRV/SOA/NS）
       parameters:
-      - $ref: '#/components/parameters/p_zoneId'
+      - $ref: '#/components/parameters/p_dnsZoneId'
       - $ref: '#/components/parameters/XRequestID'
       - $ref: '#/components/parameters/XTenantID'
       - $ref: '#/components/parameters/XCSRFToken'
@@ -9415,14 +9417,14 @@ paths:
       x-tenant-scope: either
       x-audit: true
       x-phase: P3
-  /dns/zones/{zoneId}/records/{dnsRecordId}:
+  /dns/zones/{dnsZoneId}/records/{dnsRecordId}:
     get:
       tags:
       - dns
       operationId: getDnsRecord
       summary: 获取DNS 记录（A/AAAA/CNAME/TXT/MX/CAA/SRV/SOA/NS）详情
       parameters:
-      - $ref: '#/components/parameters/p_zoneId'
+      - $ref: '#/components/parameters/p_dnsZoneId'
       - $ref: '#/components/parameters/p_dnsRecordId'
       - $ref: '#/components/parameters/XRequestID'
       - $ref: '#/components/parameters/XTenantID'
@@ -9455,7 +9457,7 @@ paths:
       operationId: updateDnsRecord
       summary: 更新DNS 记录（A/AAAA/CNAME/TXT/MX/CAA/SRV/SOA/NS）
       parameters:
-      - $ref: '#/components/parameters/p_zoneId'
+      - $ref: '#/components/parameters/p_dnsZoneId'
       - $ref: '#/components/parameters/p_dnsRecordId'
       - $ref: '#/components/parameters/XRequestID'
       - $ref: '#/components/parameters/XTenantID'
@@ -9501,7 +9503,7 @@ paths:
       operationId: deleteDnsRecord
       summary: 删除DNS 记录（A/AAAA/CNAME/TXT/MX/CAA/SRV/SOA/NS）
       parameters:
-      - $ref: '#/components/parameters/p_zoneId'
+      - $ref: '#/components/parameters/p_dnsZoneId'
       - $ref: '#/components/parameters/p_dnsRecordId'
       - $ref: '#/components/parameters/XRequestID'
       - $ref: '#/components/parameters/XTenantID'
@@ -9531,14 +9533,14 @@ paths:
       x-tenant-scope: either
       x-audit: true
       x-phase: P3
-  /dns/zones/{zoneId}/routes:
+  /dns/zones/{dnsZoneId}/routes:
     get:
       tags:
       - dns
       operationId: listDnsRoutes
       summary: 列出智能线路（GeoDNS/运营商/权重）
       parameters:
-      - $ref: '#/components/parameters/p_zoneId'
+      - $ref: '#/components/parameters/p_dnsZoneId'
       - $ref: '#/components/parameters/XRequestID'
       - $ref: '#/components/parameters/XTenantID'
       - $ref: '#/components/parameters/Page'
@@ -9575,7 +9577,7 @@ paths:
       operationId: createDnsRoute
       summary: 创建智能线路（GeoDNS/运营商/权重）
       parameters:
-      - $ref: '#/components/parameters/p_zoneId'
+      - $ref: '#/components/parameters/p_dnsZoneId'
       - $ref: '#/components/parameters/XRequestID'
       - $ref: '#/components/parameters/XTenantID'
       - $ref: '#/components/parameters/XCSRFToken'
@@ -9617,14 +9619,14 @@ paths:
       x-tenant-scope: either
       x-audit: true
       x-phase: P3
-  /dns/zones/{zoneId}/routes/{dnsRouteId}:
+  /dns/zones/{dnsZoneId}/routes/{dnsRouteId}:
     get:
       tags:
       - dns
       operationId: getDnsRoute
       summary: 获取智能线路（GeoDNS/运营商/权重）详情
       parameters:
-      - $ref: '#/components/parameters/p_zoneId'
+      - $ref: '#/components/parameters/p_dnsZoneId'
       - $ref: '#/components/parameters/p_dnsRouteId'
       - $ref: '#/components/parameters/XRequestID'
       - $ref: '#/components/parameters/XTenantID'
@@ -9657,7 +9659,7 @@ paths:
       operationId: updateDnsRoute
       summary: 更新智能线路（GeoDNS/运营商/权重）
       parameters:
-      - $ref: '#/components/parameters/p_zoneId'
+      - $ref: '#/components/parameters/p_dnsZoneId'
       - $ref: '#/components/parameters/p_dnsRouteId'
       - $ref: '#/components/parameters/XRequestID'
       - $ref: '#/components/parameters/XTenantID'
@@ -9703,7 +9705,7 @@ paths:
       operationId: deleteDnsRoute
       summary: 删除智能线路（GeoDNS/运营商/权重）
       parameters:
-      - $ref: '#/components/parameters/p_zoneId'
+      - $ref: '#/components/parameters/p_dnsZoneId'
       - $ref: '#/components/parameters/p_dnsRouteId'
       - $ref: '#/components/parameters/XRequestID'
       - $ref: '#/components/parameters/XTenantID'
@@ -9733,14 +9735,14 @@ paths:
       x-tenant-scope: either
       x-audit: true
       x-phase: P3
-  /dns/zones/{zoneId}/sync:
+  /dns/zones/{dnsZoneId}/sync:
     post:
       tags:
       - dns
       operationId: syncDnsZone
       summary: 触发 DNS 同步任务（Provider 同步/权威节点推送）
       parameters:
-      - $ref: '#/components/parameters/p_zoneId'
+      - $ref: '#/components/parameters/p_dnsZoneId'
       - $ref: '#/components/parameters/XRequestID'
       - $ref: '#/components/parameters/XTenantID'
       - $ref: '#/components/parameters/XCSRFToken'
@@ -10032,7 +10034,7 @@ paths:
       x-tenant-scope: either
       x-audit: false
       x-phase: P3
-  /dns/zones/{zoneId}/dnssec:
+  /dns/zones/{dnsZoneId}/dnssec:
     put:
       tags:
       - dns
@@ -10040,7 +10042,7 @@ paths:
       summary: 配置 DNSSEC
       description: P6：须独立技术验证后实现，验证前返回 403 feature.disabled（FR-93、R-8）。
       parameters:
-      - $ref: '#/components/parameters/p_zoneId'
+      - $ref: '#/components/parameters/p_dnsZoneId'
       - $ref: '#/components/parameters/XRequestID'
       - $ref: '#/components/parameters/XTenantID'
       - $ref: '#/components/parameters/XCSRFToken'
@@ -11825,14 +11827,14 @@ paths:
       x-tenant-scope: either
       x-audit: true
       x-phase: P4
-  /waf/rulesets/{rulesetId}/rules:
+  /waf/rulesets/{wafRulesetId}/rules:
     get:
       tags:
       - waf
       operationId: listWafRules
       summary: 列出WAF 规则
       parameters:
-      - $ref: '#/components/parameters/p_rulesetId'
+      - $ref: '#/components/parameters/p_wafRulesetId'
       - $ref: '#/components/parameters/XRequestID'
       - $ref: '#/components/parameters/XTenantID'
       - $ref: '#/components/parameters/Page'
@@ -11869,7 +11871,7 @@ paths:
       operationId: createWafRule
       summary: 创建WAF 规则
       parameters:
-      - $ref: '#/components/parameters/p_rulesetId'
+      - $ref: '#/components/parameters/p_wafRulesetId'
       - $ref: '#/components/parameters/XRequestID'
       - $ref: '#/components/parameters/XTenantID'
       - $ref: '#/components/parameters/XCSRFToken'
@@ -11911,14 +11913,14 @@ paths:
       x-tenant-scope: either
       x-audit: true
       x-phase: P4
-  /waf/rulesets/{rulesetId}/rules/{wafRuleId}:
+  /waf/rulesets/{wafRulesetId}/rules/{wafRuleId}:
     get:
       tags:
       - waf
       operationId: getWafRule
       summary: 获取WAF 规则详情
       parameters:
-      - $ref: '#/components/parameters/p_rulesetId'
+      - $ref: '#/components/parameters/p_wafRulesetId'
       - $ref: '#/components/parameters/p_wafRuleId'
       - $ref: '#/components/parameters/XRequestID'
       - $ref: '#/components/parameters/XTenantID'
@@ -11951,7 +11953,7 @@ paths:
       operationId: updateWafRule
       summary: 更新WAF 规则
       parameters:
-      - $ref: '#/components/parameters/p_rulesetId'
+      - $ref: '#/components/parameters/p_wafRulesetId'
       - $ref: '#/components/parameters/p_wafRuleId'
       - $ref: '#/components/parameters/XRequestID'
       - $ref: '#/components/parameters/XTenantID'
@@ -11997,7 +11999,7 @@ paths:
       operationId: deleteWafRule
       summary: 删除WAF 规则
       parameters:
-      - $ref: '#/components/parameters/p_rulesetId'
+      - $ref: '#/components/parameters/p_wafRulesetId'
       - $ref: '#/components/parameters/p_wafRuleId'
       - $ref: '#/components/parameters/XRequestID'
       - $ref: '#/components/parameters/XTenantID'
@@ -12720,14 +12722,14 @@ paths:
       x-tenant-scope: either
       x-audit: true
       x-phase: P4
-  /l4/applications/{appId}/listeners:
+  /l4/applications/{l4ApplicationId}/listeners:
     get:
       tags:
       - l4
       operationId: listL4Listeners
       summary: 列出监听端口
       parameters:
-      - $ref: '#/components/parameters/p_appId'
+      - $ref: '#/components/parameters/p_l4ApplicationId'
       - $ref: '#/components/parameters/XRequestID'
       - $ref: '#/components/parameters/XTenantID'
       - $ref: '#/components/parameters/Page'
@@ -12764,7 +12766,7 @@ paths:
       operationId: createL4Listener
       summary: 创建监听端口
       parameters:
-      - $ref: '#/components/parameters/p_appId'
+      - $ref: '#/components/parameters/p_l4ApplicationId'
       - $ref: '#/components/parameters/XRequestID'
       - $ref: '#/components/parameters/XTenantID'
       - $ref: '#/components/parameters/XCSRFToken'
@@ -12806,14 +12808,14 @@ paths:
       x-tenant-scope: either
       x-audit: true
       x-phase: P4
-  /l4/applications/{appId}/listeners/{l4ListenerId}:
+  /l4/applications/{l4ApplicationId}/listeners/{l4ListenerId}:
     get:
       tags:
       - l4
       operationId: getL4Listener
       summary: 获取监听端口详情
       parameters:
-      - $ref: '#/components/parameters/p_appId'
+      - $ref: '#/components/parameters/p_l4ApplicationId'
       - $ref: '#/components/parameters/p_l4ListenerId'
       - $ref: '#/components/parameters/XRequestID'
       - $ref: '#/components/parameters/XTenantID'
@@ -12846,7 +12848,7 @@ paths:
       operationId: updateL4Listener
       summary: 更新监听端口
       parameters:
-      - $ref: '#/components/parameters/p_appId'
+      - $ref: '#/components/parameters/p_l4ApplicationId'
       - $ref: '#/components/parameters/p_l4ListenerId'
       - $ref: '#/components/parameters/XRequestID'
       - $ref: '#/components/parameters/XTenantID'
@@ -12892,7 +12894,7 @@ paths:
       operationId: deleteL4Listener
       summary: 删除监听端口
       parameters:
-      - $ref: '#/components/parameters/p_appId'
+      - $ref: '#/components/parameters/p_l4ApplicationId'
       - $ref: '#/components/parameters/p_l4ListenerId'
       - $ref: '#/components/parameters/XRequestID'
       - $ref: '#/components/parameters/XTenantID'
@@ -12922,14 +12924,14 @@ paths:
       x-tenant-scope: either
       x-audit: true
       x-phase: P4
-  /l4/applications/{appId}/backends:
+  /l4/applications/{l4ApplicationId}/backends:
     get:
       tags:
       - l4
       operationId: listL4Backends
       summary: 列出后端
       parameters:
-      - $ref: '#/components/parameters/p_appId'
+      - $ref: '#/components/parameters/p_l4ApplicationId'
       - $ref: '#/components/parameters/XRequestID'
       - $ref: '#/components/parameters/XTenantID'
       - $ref: '#/components/parameters/Page'
@@ -12966,7 +12968,7 @@ paths:
       operationId: createL4Backend
       summary: 创建后端
       parameters:
-      - $ref: '#/components/parameters/p_appId'
+      - $ref: '#/components/parameters/p_l4ApplicationId'
       - $ref: '#/components/parameters/XRequestID'
       - $ref: '#/components/parameters/XTenantID'
       - $ref: '#/components/parameters/XCSRFToken'
@@ -13008,14 +13010,14 @@ paths:
       x-tenant-scope: either
       x-audit: true
       x-phase: P4
-  /l4/applications/{appId}/backends/{l4BackendId}:
+  /l4/applications/{l4ApplicationId}/backends/{l4BackendId}:
     get:
       tags:
       - l4
       operationId: getL4Backend
       summary: 获取后端详情
       parameters:
-      - $ref: '#/components/parameters/p_appId'
+      - $ref: '#/components/parameters/p_l4ApplicationId'
       - $ref: '#/components/parameters/p_l4BackendId'
       - $ref: '#/components/parameters/XRequestID'
       - $ref: '#/components/parameters/XTenantID'
@@ -13048,7 +13050,7 @@ paths:
       operationId: updateL4Backend
       summary: 更新后端
       parameters:
-      - $ref: '#/components/parameters/p_appId'
+      - $ref: '#/components/parameters/p_l4ApplicationId'
       - $ref: '#/components/parameters/p_l4BackendId'
       - $ref: '#/components/parameters/XRequestID'
       - $ref: '#/components/parameters/XTenantID'
@@ -13094,7 +13096,7 @@ paths:
       operationId: deleteL4Backend
       summary: 删除后端
       parameters:
-      - $ref: '#/components/parameters/p_appId'
+      - $ref: '#/components/parameters/p_l4ApplicationId'
       - $ref: '#/components/parameters/p_l4BackendId'
       - $ref: '#/components/parameters/XRequestID'
       - $ref: '#/components/parameters/XTenantID'
@@ -13124,14 +13126,14 @@ paths:
       x-tenant-scope: either
       x-audit: true
       x-phase: P4
-  /l4/applications/{appId}/stats:
+  /l4/applications/{l4ApplicationId}/stats:
     get:
       tags:
       - l4
       operationId: getL4Stats
       summary: 四层流量统计
       parameters:
-      - $ref: '#/components/parameters/p_appId'
+      - $ref: '#/components/parameters/p_l4ApplicationId'
       - $ref: '#/components/parameters/XRequestID'
       - $ref: '#/components/parameters/XTenantID'
       - name: from
@@ -19825,13 +19827,6 @@ components:
       name: dnsZoneId
       in: path
       required: true
-      description: dnsZoneId
-      schema:
-        $ref: '#/components/schemas/Uid'
-    p_zoneId:
-      name: zoneId
-      in: path
-      required: true
       description: DNS Zone uid
       schema:
         $ref: '#/components/schemas/Uid'
@@ -19909,13 +19904,6 @@ components:
       name: wafRulesetId
       in: path
       required: true
-      description: wafRulesetId
-      schema:
-        $ref: '#/components/schemas/Uid'
-    p_rulesetId:
-      name: rulesetId
-      in: path
-      required: true
       description: WAF 规则集 uid
       schema:
         $ref: '#/components/schemas/Uid'
@@ -19935,13 +19923,6 @@ components:
         $ref: '#/components/schemas/Uid'
     p_l4ApplicationId:
       name: l4ApplicationId
-      in: path
-      required: true
-      description: l4ApplicationId
-      schema:
-        $ref: '#/components/schemas/Uid'
-    p_appId:
-      name: appId
       in: path
       required: true
       description: 四层应用 uid

@@ -36,6 +36,8 @@ func cmdOpenAPICheck(args []string) int {
 	fl := flag.NewFlagSet("openapi-check", flag.ContinueOnError)
 	file := fl.String("file", "docs/api/openapi.yaml", "OpenAPI 文件")
 	reauth := fl.String("reauth", "scripts/contract/data/x-reauth.txt", "固定的 x-reauth operationId 清单")
+	routes := fl.String("routes", "", "运行时路由清单 JSON（lingedge-server routes 的输出）；给出时校验路由集合 ⊆ openapi 与元数据一致，并输出「M1 未实现 operation 清单」")
+	m1Exit := fl.Bool("require-m1-complete", false, "M1 阶段出口：M1 未实现 operation 清单必须为空，否则失败（NFR-2，不得以 501 假实现充数）")
 	if err := fl.Parse(args); err != nil {
 		return 2
 	}
@@ -60,6 +62,14 @@ func cmdOpenAPICheck(args []string) int {
 		printFindings(fs)
 		return 1
 	}
+	if *routes != "" {
+		if code := reportRoutes(doc, *routes, *m1Exit); code != 0 {
+			return code
+		}
+	} else if *m1Exit {
+		fmt.Fprintln(os.Stderr, "-require-m1-complete 需要同时给出 -routes")
+		return 2
+	}
 	st := statsOf(doc)
 	fmt.Printf("openapi-check OK: %s（OpenAPI %s）路径 %d、operation %d、x-reauth %d；各阶段 %s\n",
 		*file, doc.OpenAPI, st.Paths, st.Ops, len(reauthOps(doc)), st.PhaseSummary())
@@ -71,6 +81,8 @@ func runAllChecks(doc *openapi3T, pinnedReauth []string) []finding {
 	var fs []finding
 	fs = append(fs, checkMetadata(doc)...)
 	fs = append(fs, checkNoColonPaths(doc)...)
+	fs = append(fs, checkPathParamNames(doc)...)
+	fs = append(fs, checkIdempotencyResponses(doc)...)
 	fs = append(fs, checkTenantLeak(doc)...)
 	fs = append(fs, checkReauthSet(doc, pinnedReauth)...)
 	fs = append(fs, checkListPagination(doc)...)
@@ -236,5 +248,30 @@ func cmdOpenAPIBreaking(args []string) int {
 		return 1
 	}
 	fmt.Printf("openapi-breaking: %d 处破坏性变更已由变更说明 %s 放行（须评审确认）\n", len(changes), *note)
+	return 0
+}
+
+// reportRoutes 校验运行时路由清单并输出「M1 未实现 operation 清单」；m1Exit 为真时该清单非空即失败。
+func reportRoutes(doc *openapi3T, routesFile string, m1Exit bool) int {
+	rs, err := readRoutes(routesFile)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "读取路由清单失败:", err)
+		return 2
+	}
+	fs, todo := checkRoutes(doc, rs)
+	if len(fs) > 0 {
+		fmt.Fprintf(os.Stderr, "openapi-check 失败: 运行时路由与 openapi.yaml 不一致，%d 处违规\n", len(fs))
+		printFindings(fs)
+		return 1
+	}
+	fmt.Printf("路由清单 OK: 运行时已注册 %d 条路由，均在 openapi.yaml 中且元数据一致\n", len(rs))
+	fmt.Printf("M1 未实现 operation 清单（%d 个；阶段出口时必须为空，不以 501 假实现充数）:\n", len(todo))
+	for _, t := range todo {
+		fmt.Println("  - " + t)
+	}
+	if m1Exit && len(todo) > 0 {
+		fmt.Fprintf(os.Stderr, "openapi-check 失败: M1 阶段出口要求未实现清单为空，仍有 %d 个\n", len(todo))
+		return 1
+	}
 	return 0
 }

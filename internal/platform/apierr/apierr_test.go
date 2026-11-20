@@ -244,3 +244,25 @@ func TestToBodyMatchesRender(t *testing.T) {
 		t.Errorf("ToBody: %d %+v", st, b)
 	}
 }
+
+// Story 1.12 AC3：HTTP 映射的构造器与状态码。
+func TestStoryConstructorsMapToStatus(t *testing.T) {
+	cases := []struct {
+		name   string
+		err    *Error
+		status int
+		code   Code
+	}{
+		{"校验失败", Validation(Detail{Field: "name", Reason: "required"}), 400, ValidationFailed},
+		{"跨租户/不存在", NotFound(), 404, ResourceNotFound},
+		{"乐观锁/前置条件", PreconditionFailed(), 412, ResourcePreconditionFailed},
+		{"资源状态冲突", Conflict("state does not allow this"), 409, ResourceConflict},
+		{"幂等键异体复用", KeyReuse(), 422, IdempotencyKeyReuse},
+	}
+	for _, c := range cases {
+		r := Render(c.err, "01J0000000000000000000REQ1")
+		if r.Status != c.status || r.Body.Error.Code != string(c.code) {
+			t.Errorf("%s: 得到 %d %s，期望 %d %s", c.name, r.Status, r.Body.Error.Code, c.status, c.code)
+		}
+	}
+}

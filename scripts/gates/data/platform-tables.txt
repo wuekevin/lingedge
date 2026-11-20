@@ -31,3 +31,4 @@ products
 plans
 pricing_rules
 resellers
+idempotency_keys

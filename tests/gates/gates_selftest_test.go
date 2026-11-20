@@ -229,6 +229,10 @@ func TestLintGatesBlockViolationsAndAllowLegitimate(t *testing.T) {
 		"internal/auth/internal/handler/maint_pool_alias.go":  {"package handler\n\nimport (\n\t\"context\"\n\n\tdbx \"github.com/wuekevin/lingedge/internal/platform/db\"\n)\n\nvar OpenMaintAliasBad = func(ctx context.Context) {\n\t_, _ = dbx.OpenMaint(ctx, dbx.Config{})\n}\n", "forbidigo", "[db-pool-maint]"},
 		"internal/billing/internal/service/migrate_pool.go":   {"package service\n\nimport (\n\t\"context\"\n\n\t\"github.com/wuekevin/lingedge/internal/platform/db\"\n)\n\nvar OpenMigrateBad = func(ctx context.Context) {\n\t_, _ = db.OpenMigrate(ctx, db.Config{})\n}\n", "forbidigo", "[db-pool-migrate]"},
 		"internal/scheduler/internal/service/migrate_pool.go": {"package service\n\nimport (\n\t\"context\"\n\n\t\"github.com/wuekevin/lingedge/internal/platform/db\"\n)\n\nvar OpenMigrateSchedBad = func(ctx context.Context) {\n\t_, _ = db.OpenMigrate(ctx, db.Config{})\n}\n", "forbidigo", "[db-pool-migrate]"},
+		// Gin 裸引擎（Story 1.12）：只有 internal/platform/httpx 可以构造 Gin 引擎，路由必须经 Router.Register 注册（别名导入同样被识别）。
+		"internal/auth/internal/handler/raw_gin.go":      {"package handler\n\nimport \"github.com/gin-gonic/gin\"\n\nvar Raw = func() *gin.Engine {\n\treturn gin.New()\n}\n", "forbidigo", "[gin-raw-engine]"},
+		"cmd/lingedge-server/raw_gin_default.go":         {"package main\n\nimport g \"github.com/gin-gonic/gin\"\n\nvar RawDefault = func() *g.Engine {\n\treturn g.Default()\n}\n", "forbidigo", "[gin-raw-engine]"},
+		"internal/platform/other/raw_gin_in_platform.go": {"package other\n\nimport \"github.com/gin-gonic/gin\"\n\nvar Raw = func() *gin.Engine {\n\treturn gin.New()\n}\n", "forbidigo", "[gin-raw-engine]"},
 		// Scope 构造入口（AC2）：Handler/Service/Repository 不得自己造 Scope。
 		"internal/auth/internal/handler/mint_scope.go":       {"package handler\n\nimport \"github.com/wuekevin/lingedge/internal/platform/tenantscope\"\n\nvar Mint = func() {\n\t_, _ = tenantscope.FromTask(1, 1)\n}\n", "forbidigo", "[tenantscope-mint]"},
 		"internal/website/internal/service/mint_ctx.go":      {"package service\n\nimport (\n\t\"context\"\n\n\t\"github.com/wuekevin/lingedge/internal/platform/tenantscope\"\n)\n\nvar Mint = func(ctx context.Context) context.Context {\n\treturn tenantscope.NewContext(ctx, tenantscope.PlatformForJob(1))\n}\n", "forbidigo", "[tenantscope-mint]"},
@@ -274,6 +278,10 @@ func TestLintGatesBlockViolationsAndAllowLegitimate(t *testing.T) {
 		"internal/platform/task/ok_scope.go":                "package task\n\nimport \"github.com/wuekevin/lingedge/internal/platform/tenantscope\"\n\nvar Mint = func() {\n\t_, _ = tenantscope.FromTask(1, 0)\n\t_ = tenantscope.PlatformForJob(1)\n}\n",
 		"cmd/lingedge-server/ok_scope.go":                   "package main\n\nimport \"github.com/wuekevin/lingedge/internal/platform/tenantscope\"\n\nvar _ = tenantscope.PlatformForJob\n",
 		"internal/website/internal/handler/ok_scope_ctx.go": "package handler\n\nimport (\n\t\"context\"\n\n\t\"github.com/wuekevin/lingedge/internal/platform/tenantscope\"\n)\n\nvar Get = func(ctx context.Context) bool {\n\t_, ok := tenantscope.FromContext(ctx)\n\treturn ok\n}\n",
+		// Gin：httpx 包内可构造引擎；handler 只使用 gin.Context/HandlerFunc 类型；测试代码不受限。
+		"internal/platform/httpx/ok_gin_engine.go":          "package httpx\n\nimport \"github.com/gin-gonic/gin\"\n\nvar NewEngine = func() *gin.Engine {\n\treturn gin.New()\n}\n",
+		"internal/auth/internal/handler/ok_gin_handler.go":  "package handler\n\nimport \"github.com/gin-gonic/gin\"\n\nvar Handle gin.HandlerFunc = func(c *gin.Context) {\n\tc.Status(204)\n}\n",
+		"internal/auth/internal/handler/ok_gin_test.go":     "package handler\n\nimport \"github.com/gin-gonic/gin\"\n\nvar _ = gin.New\n",
 		"internal/website/internal/service/ok_mint_test.go": "package service\n\nimport \"github.com/wuekevin/lingedge/internal/platform/tenantscope\"\n\nvar _ = tenantscope.FromTask\n",
 	}
 	put(t, dst, "internal/cache/internal/domain/d.go", "package domain\n") // ok_own_impl.go 引用的自有实现包

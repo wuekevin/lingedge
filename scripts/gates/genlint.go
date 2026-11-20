@@ -192,6 +192,7 @@ func renderLintConfig() string {
 	w("        - pattern: %s\n          msg: %s\n", q(`^(?:.*/)?db\.OpenMaint$`), q(maintPoolMarker+" 禁止在白名单之外构造 maint 连接池（Story 1.5 AC6）：maint 仅 retention.cleanup/partition.maintain 使用，请求路径不得持有；白名单见 scripts/gates/spec.go"))
 	w("        - pattern: %s\n          msg: %s\n", q(`^(?:.*/)?db\.OpenMigrate$`), q(migratePoolMarker+" 禁止在白名单之外构造 migrate 连接池（Story 1.5 AC6）：migrate 仅 lingedge-server migrate 与向导迁移步骤使用；白名单见 scripts/gates/spec.go"))
 	w("        - pattern: %s\n          msg: %s\n", q(`^(?:.*/)?tenantscope\.(FromPrincipal|FromTask|PlatformForJob|NewContext)$`), q(scopeMintMarker+" 禁止在白名单之外构造租户 Scope（Story 1.5 AC2、ADR-009 §1）：Handler/Service/Repository 只能经 tenantscope.FromContext 取得中间件放入 context 的 Scope；白名单见 scripts/gates/spec.go"))
+	w("        - pattern: %s\n          msg: %s\n", q(`^(?:.*/)?gin\.(New|Default)$`), q(ginEngineMarker+" 禁止在 internal/platform/httpx 之外构造 Gin 引擎（Story 1.12、NFR-4）：路由只能经 httpx.Router.Register(RouteMeta, handler) 注册，裸引擎会绕过固定中间件链与路由元数据校验"))
 	w("  exclusions:\n    generated: lax\n    rules:\n")
 	w("      # 唯一白名单入口：internal/tools/security（其内部仍受 `gates shell` 的参数数组/无 shell 检查约束）。\n")
 	w("      - path: %s\n        linters:\n          - forbidigo\n", q(`^internal/tools/security/`))
@@ -207,6 +208,7 @@ func renderLintConfig() string {
 	w("      - path: %s\n        linters:\n          - forbidigo\n        text: %s\n", q(maintPoolPaths), q(regexpQuote(maintPoolMarker)))
 	w("      - path: %s\n        linters:\n          - forbidigo\n        text: %s\n", q(migratePoolPaths), q(regexpQuote(migratePoolMarker)))
 	w("      - path: %s\n        linters:\n          - forbidigo\n        text: %s\n", q(scopeMintPaths), q(regexpQuote(scopeMintMarker)))
+	w("      - path: %s\n        linters:\n          - forbidigo\n        text: %s\n", q(ginEnginePaths), q(regexpQuote(ginEngineMarker)))
 	return b.String()
 }
 

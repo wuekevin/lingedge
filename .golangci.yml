@@ -1426,6 +1426,8 @@ linters:
           msg: "[db-pool-migrate] 禁止在白名单之外构造 migrate 连接池（Story 1.5 AC6）：migrate 仅 lingedge-server migrate 与向导迁移步骤使用；白名单见 scripts/gates/spec.go"
         - pattern: "^(?:.*/)?tenantscope\\.(FromPrincipal|FromTask|PlatformForJob|NewContext)$"
           msg: "[tenantscope-mint] 禁止在白名单之外构造租户 Scope（Story 1.5 AC2、ADR-009 §1）：Handler/Service/Repository 只能经 tenantscope.FromContext 取得中间件放入 context 的 Scope；白名单见 scripts/gates/spec.go"
+        - pattern: "^(?:.*/)?gin\\.(New|Default)$"
+          msg: "[gin-raw-engine] 禁止在 internal/platform/httpx 之外构造 Gin 引擎（Story 1.12、NFR-4）：路由只能经 httpx.Router.Register(RouteMeta, handler) 注册，裸引擎会绕过固定中间件链与路由元数据校验"
   exclusions:
     generated: lax
     rules:
@@ -1468,3 +1470,7 @@ linters:
         linters:
           - forbidigo
         text: "\\[tenantscope-mint\\]"
+      - path: "^internal/platform/httpx/"
+        linters:
+          - forbidigo
+        text: "\\[gin-raw-engine\\]"

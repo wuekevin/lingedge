@@ -1,7 +1,7 @@
 // Command contract 是 LingEdge 的契约工具链（Story 1.3）：OpenAPI 静态规则与破坏性变更检测、
 // proto 符号核对、迁移哈希清单、CF-1 冻结前置复核。
 //
-// 它是独立的 Go module（scripts/contract/go.mod），第三方依赖（kin-openapi）不进入仓库根 go.mod；
+// 它是独立的 Go module（scripts/contract/go.mod），其依赖版本与仓库根 go.mod 里的 kin-openapi（仅供 httpx/contracttest 测试助手使用）保持一致；
 // 外部二进制工具（buf、oasdiff）一律由 Makefile 以 `go run <pkg>@<固定版本>` 提供。
 package main
 

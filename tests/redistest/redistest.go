@@ -75,11 +75,15 @@ var (
 )
 
 // Main 运行测试并在结束时关闭、清理全部实例。
-func Main(m *testing.M) int {
+func Main(m *testing.M) int { return MainWith(m, (*testing.M).Run) }
+
+// MainWith 与 Main 相同，但由 run 执行测试：一个测试包同时需要 Redis 与 MySQL 临时实例时，
+// 写 `os.Exit(redistest.MainWith(m, mysqltest.Main))`——两者的清理都会执行。
+func MainWith(m *testing.M, run func(*testing.M) int) int {
 	mu.Lock()
 	mainUsed = true
 	mu.Unlock()
-	code := m.Run()
+	code := run(m)
 	mu.Lock()
 	for _, in := range live {
 		in.destroy()

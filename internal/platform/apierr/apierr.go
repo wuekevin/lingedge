@@ -97,6 +97,21 @@ func NotFound() *Error {
 	return &Error{Code: ResourceNotFound, Message: "resource not found"}
 }
 
+// Conflict 构造 409 resource.conflict（资源状态冲突：唯一性、状态不允许、被引用）。模块专属冲突码（如 site.domain_conflict）直接用 New。
+func Conflict(message string, details ...Detail) *Error {
+	return &Error{Code: ResourceConflict, Message: message, Details: details}
+}
+
+// PreconditionFailed 构造 412 resource.precondition_failed（If-Match 版本不符；乐观锁一律此码，不用 409，IMP-13）。
+func PreconditionFailed() *Error {
+	return &Error{Code: ResourcePreconditionFailed, Message: "precondition failed"}
+}
+
+// KeyReuse 构造 422 idempotency.key_reuse（同一 Idempotency-Key 用于不同请求；「校验统一 400」的唯一例外）。
+func KeyReuse() *Error {
+	return &Error{Code: IdempotencyKeyReuse, Message: "idempotency key was already used with a different request"}
+}
+
 // Internal 构造 500 internal.error；cause 只留在错误链里。
 func Internal(cause error) *Error {
 	return &Error{Code: InternalError, Message: internalMessage, cause: cause}

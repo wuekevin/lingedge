@@ -152,6 +152,14 @@ const (
 	scopeMintPaths  = `^(?:internal/platform/|internal/tenant/|internal/scheduler/|cmd/lingedge-(?:server|worker|scheduler)/)`
 )
 
+// Gin 引擎只能由 internal/platform/httpx 构造（Story 1.12 AC2、NFR-4）：路由只能经 Router.Register(RouteMeta, handler) 注册，
+// 元数据缺失即启动失败；直接 gin.New()/gin.Default() 会得到一个没有固定中间件链、没有元数据校验的裸引擎，绕过 FR-20 的全部保证。
+// 测试代码（_test.go、tests/）不受限。
+const (
+	ginEngineMarker = "[gin-raw-engine]"
+	ginEnginePaths  = `^internal/platform/httpx/`
+)
+
 // sqlConcatMarker：Repository 包内禁止用格式化/字符串函数构造 SQL（NFR-9）。运行期拼接的 SQL 本来就无法通过 db.Q 的编译，
 // 这条 forbidigo 规则是第二道闸，并给出明确的诊断。
 const sqlConcatMarker = "[no-sql-concat]"
