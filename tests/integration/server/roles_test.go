@@ -13,6 +13,7 @@ import (
 	"github.com/wuekevin/lingedge/internal/platform/httpx"
 	"github.com/wuekevin/lingedge/internal/platform/logx"
 	"github.com/wuekevin/lingedge/internal/platform/server"
+	"github.com/wuekevin/lingedge/internal/platform/taskrt/taskapi"
 )
 
 type runningServer struct {
@@ -76,13 +77,13 @@ func TestRolesMatrix(t *testing.T) {
 		skel    []string
 	}{
 		{"api", true, nil},
-		{"worker", false, []string{"worker"}},
+		{"worker", false, nil},
 		{"scheduler", false, []string{"scheduler"}},
 		{"grpc", false, []string{"grpc"}},
-		{"api,worker", true, []string{"worker"}},
-		{"scheduler,worker", false, []string{"scheduler", "worker"}},
-		{"", true, []string{"grpc", "scheduler", "worker"}}, // 默认全开
-		{"api,grpc,scheduler,worker", true, []string{"grpc", "scheduler", "worker"}},
+		{"api,worker", true, nil},
+		{"scheduler,worker", false, []string{"scheduler"}},
+		{"", true, []string{"grpc", "scheduler"}}, // 默认全开
+		{"api,grpc,scheduler,worker", true, []string{"grpc", "scheduler"}},
 	}
 	for _, c := range cases {
 		name := c.roles
@@ -114,13 +115,21 @@ func TestRolesMatrix(t *testing.T) {
 				for _, s := range c.skel {
 					want = want || s == rl
 				}
-				logged := strings.Contains(r.logs.String(), `"role":"`+rl+`"`) && strings.Contains(r.logs.String(), "仅生命周期骨架")
+				logged := false // 同一行同时含该角色与「仅生命周期骨架」
+				for _, ln := range strings.Split(r.logs.String(), "\n") {
+					logged = logged || strings.Contains(ln, `"role":"`+rl+`"`) && strings.Contains(ln, "仅生命周期骨架")
+				}
 				if want != logged {
 					t.Errorf("角色 %s 骨架装配 = %v，期望 %v\n%s", rl, logged, want, r.logs.String())
 				}
 			}
-			if !strings.Contains(r.logs.String(), "Story 1.14") && containsRole(c.skel, "worker") {
-				t.Errorf("worker 骨架日志应标明由 Story 1.14 实现")
+			// worker 角色自 Story 1.14 起是真实的任务运行时（不再是骨架）：装配日志标明，且未登记任何任务类型时空闲不领取。
+			hasWorker := strings.Contains(c.roles, "worker") || c.roles == ""
+			if got := strings.Contains(r.logs.String(), "角色已装配（任务运行时）"); got != hasWorker {
+				t.Errorf("worker 运行时装配 = %v，期望 %v\n%s", got, hasWorker, r.logs.String())
+			}
+			if hasWorker {
+				eventually(t, "worker 空闲日志", 5*time.Second, func() bool { return strings.Contains(r.logs.String(), "未登记任何任务类型") })
 			}
 			r.stop(t)
 			if !dialRefused(r.info.MetricsAddr) {
@@ -131,15 +140,6 @@ func TestRolesMatrix(t *testing.T) {
 			}
 		})
 	}
-}
-
-func containsRole(list []string, r string) bool {
-	for _, x := range list {
-		if x == r {
-			return true
-		}
-	}
-	return false
 }
 
 // 迁移版本探针（CC-3）：app 账号只读 schema_migrations——已迁移库就绪；未迁移库（app 无授权）fail-closed 为 503/unknown。
@@ -175,4 +175,62 @@ func TestReadyMigrationProbeFailClosedWhenUnmigrated(t *testing.T) {
 		defer func() { _ = resp.Body.Close() }()
 		return resp.StatusCode == 200
 	})
+}
+
+// Story 1.14：任务中心路由经 server.Run 的真实装配注册（生产的 registerRoutes 逻辑由 cmd 提供；这里用与之相同的 taskapi.Register），
+// 认证钩子仍是安全拒绝默认：任何请求都是 401，不会放行；同时 /healthz 不受影响。
+func TestTaskRoutesAreDenyByDefaultInRealAssembly(t *testing.T) {
+	e := newEnv(t, all)
+	rs, err := server.ParseRoles("api,worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	logs := &syncBuf{}
+	lg, err := logx.New(logx.Options{Level: "info", Output: logs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	ready := make(chan server.Info, 1)
+	done := make(chan error, 1)
+	go func() {
+		done <- server.Run(ctx, server.Options{Config: e.loadConfig(t), Roles: rs, Logger: lg, OnReady: func(i server.Info) { ready <- i },
+			Register: func(r *httpx.Router, d server.Deps) error { return taskapi.Register(r, d.Tasks) }})
+	}()
+	defer cancel()
+	var info server.Info
+	select {
+	case info = <-ready:
+	case err := <-done:
+		t.Fatalf("启动失败: %v\n%s", err, logs.String())
+	case <-time.After(30 * time.Second):
+		t.Fatal("启动超时")
+	}
+	base := "http://" + info.HTTPAddr
+	for _, p := range []string{"/api/v1/tasks", "/api/v1/tasks/01J8Z3Q9V6X2N4M5K7R8T0WABC", "/api/v1/tasks/01J8Z3Q9V6X2N4M5K7R8T0WABC/events"} {
+		if code, _, _ := httpGet(t, base+p); code != 401 {
+			t.Errorf("GET %s 默认应 401，实际 %d", p, code)
+		}
+	}
+	req, _ := http.NewRequest("POST", base+"/api/v1/tasks/01J8Z3Q9V6X2N4M5K7R8T0WABC/cancel", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != 401 {
+		t.Errorf("POST cancel 默认应 401，实际 %d", resp.StatusCode)
+	}
+	if code, _, _ := httpGet(t, base+"/healthz"); code != 200 {
+		t.Errorf("/healthz: %d", code)
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("优雅停机应无错误: %v\n%s", err, logs.String())
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("停机超时")
+	}
 }

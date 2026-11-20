@@ -45,9 +45,9 @@ func TestRoleSetHas(t *testing.T) {
 	if got := DefaultRoles().List(); len(got) != 4 {
 		t.Fatalf("默认全开: %v", got)
 	}
-	// 每个骨架角色都登记了实现它的 Story。
+	// 每个骨架角色都登记了实现它的 Story（api 与 worker 是真实实现：worker 自 Story 1.14 起接入任务运行时）。
 	for _, r := range AllRoles {
-		if r != RoleAPI && skeletonOwner[r] == "" {
+		if r != RoleAPI && r != RoleWorker && skeletonOwner[r] == "" {
 			t.Errorf("角色 %s 缺少实现 Story 登记", r)
 		}
 	}

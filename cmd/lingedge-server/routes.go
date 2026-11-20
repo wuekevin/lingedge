@@ -9,16 +9,18 @@ import (
 
 	"github.com/wuekevin/lingedge/internal/platform/clock"
 	"github.com/wuekevin/lingedge/internal/platform/httpx"
+	"github.com/wuekevin/lingedge/internal/platform/server"
+	"github.com/wuekevin/lingedge/internal/platform/taskrt/taskapi"
 	"github.com/wuekevin/lingedge/internal/platform/uid"
 )
 
 // registerRoutes 是 REST 路由的唯一装配点（Story 1.12）：各业务模块的路由注册函数在这里被调用（Story 1.16 起逐个追加），
 // 进程装配（Story 1.13）与 `lingedge-server routes` 共用它，因此导出的清单就是真实会被服务的路由集合。
 //
-// 当前 M1 没有任何已实现的业务路由：不注册、不用 501 占位（NFR-2）；`make openapi-check` 会输出「M1 未实现 operation 清单」。
-func registerRoutes(r *httpx.Router) error {
-	_ = r
-	return nil
+// 已注册（Story 1.14）：任务中心 listTasks/getTask/listTaskEvents/cancelTask。其余 M1 业务路由由各 Story 追加，不用 501 占位（NFR-2）；
+// `make openapi-check` 会输出「M1 未实现 operation 清单」。认证/授权钩子仍是安全拒绝默认（1.16–1.21），因此这些路由现在对所有请求 401/403。
+func registerRoutes(r *httpx.Router, deps server.Deps) error {
+	return taskapi.Register(r, deps.Tasks)
 }
 
 // routesMain 实现 `lingedge-server routes [-o 文件]`：把路由清单（JSON）写到 stdout 或文件，供 make openapi-check 校验
@@ -35,7 +37,7 @@ func routesMain(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintln(stderr, "routes:", err)
 		return 1
 	}
-	if err := registerRoutes(r); err != nil {
+	if err := registerRoutes(r, server.Deps{}); err != nil {
 		_, _ = fmt.Fprintln(stderr, "routes: 注册路由失败:", err)
 		return 1
 	}

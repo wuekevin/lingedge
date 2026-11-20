@@ -77,9 +77,14 @@ func serveMain(args []string, stderr io.Writer, environ []string) int {
 		stop()
 	}()
 
+	tasks, err := assembleTaskRegistry()
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "%s: 拒绝启动：任务类型注册表无效: %v\n", name, err)
+		return 1
+	}
 	err = server.Run(ctx, server.Options{
 		Config: cfg, Roles: rs, Logger: logger,
-		Register: registerRoutes, Hooks: assembleHooks(), ShutdownTimeout: *timeout,
+		Register: registerRoutes, Hooks: assembleHooks(), Tasks: tasks, ShutdownTimeout: *timeout,
 	})
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "%s: %v\n", name, err)

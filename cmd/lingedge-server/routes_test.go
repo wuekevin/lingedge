@@ -8,8 +8,8 @@ import (
 	"testing"
 )
 
-// `lingedge-server routes` 导出的是 registerRoutes 装配的真实路由集合。M1 当前没有已实现的业务路由，清单为空数组
-// （而不是 501 占位路由）；`make openapi-check` 因此输出完整的「M1 未实现 operation 清单」。
+// `lingedge-server routes` 导出的是 registerRoutes 装配的真实路由集合。Story 1.14 起含任务中心 4 个 operation，
+// 其余 M1 业务路由未实现（不用 501 占位）；`make openapi-check` 据此输出「M1 未实现 operation 清单」。
 func TestRoutesSubcommandExportsManifest(t *testing.T) {
 	var out, errb bytes.Buffer
 	if code := routesMain(nil, &out, &errb); code != 0 {
@@ -18,6 +18,18 @@ func TestRoutesSubcommandExportsManifest(t *testing.T) {
 	var m []map[string]any
 	if err := json.Unmarshal(out.Bytes(), &m); err != nil {
 		t.Fatalf("清单不是 JSON 数组: %v\n%s", err, out.String())
+	}
+	got := map[string]bool{}
+	for _, e := range m {
+		got[e["operation_id"].(string)] = true
+	}
+	for _, id := range []string{"listTasks", "getTask", "listTaskEvents", "cancelTask"} {
+		if !got[id] {
+			t.Errorf("清单缺少任务中心路由 %s", id)
+		}
+	}
+	if len(m) != 4 {
+		t.Errorf("当前应恰有 4 条路由，实际 %d", len(m))
 	}
 	for _, e := range m {
 		if e["operation_id"] == "" {

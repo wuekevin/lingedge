@@ -504,3 +504,101 @@ func TestRepositoryPathRegex(t *testing.T) {
 		}
 	}
 }
+
+// ---- tasktype（G-12：任务类型白名单，Story 1.14）----
+
+const ttOpenAPI = "openapi: 3.1.0\ncomponents:\n  schemas:\n    Other:\n      type: string\n    TaskType:\n      type: string\n      enum:\n      - cache.purge_url\n      - retention.cleanup\n      - system.backup\n      description: x\n    Next:\n      type: string\n"
+
+func ttRoot(t *testing.T, typesGo string, extra map[string]string) string {
+	t.Helper()
+	root := baseRoot(t)
+	write(t, root, "docs/api/openapi.yaml", ttOpenAPI)
+	write(t, root, "internal/platform/taskrt/types.go", typesGo)
+	for rel, c := range extra {
+		write(t, root, rel, c)
+	}
+	return root
+}
+
+const ttGoodTypes = "package taskrt\n\ntype Type string\n\nconst (\n\tA Type = \"cache.purge_url\"\n\tB Type = \"retention.cleanup\"\n)\n"
+
+func TestOpenapiTaskTypesParser(t *testing.T) {
+	got := openapiTaskTypes([]byte(ttOpenAPI))
+	if strings.Join(got, ",") != "cache.purge_url,retention.cleanup,system.backup" {
+		t.Fatalf("解析结果: %v", got)
+	}
+	if len(openapiTaskTypes([]byte("components:\n  schemas:\n    X:\n      type: string\n"))) != 0 {
+		t.Fatal("没有 TaskType 时应返回空")
+	}
+}
+
+func TestTasktypeGate(t *testing.T) {
+	neg := []struct {
+		name, types string
+		extra       map[string]string
+		rule, file  string
+		noSpec      bool
+	}{
+		{"常量不在 OpenAPI 枚举内", ttGoodTypes + "\nconst C Type = \"cert.issue\"\n", nil, "tasktype-unknown", "internal/platform/taskrt/types.go", false},
+		{"命令类常量（即使有人把它加进了枚举也不行）", "package taskrt\n\ntype Type string\n\nconst X Type = \"shell.exec\"\n", nil, "tasktype-command", "internal/platform/taskrt/types.go", false},
+		{"带空白的 sh -c 形态常量", "package taskrt\n\ntype Type string\n\nconst X Type = \"sh -c\"\n", nil, "tasktype-command", "internal/platform/taskrt/types.go", false},
+		{"run 片段", "package taskrt\n\ntype Type string\n\nconst X Type = \"node.run_command\"\n", nil, "tasktype-command", "internal/platform/taskrt/types.go", false},
+		{"登记字面量不在枚举内", ttGoodTypes, map[string]string{"cmd/lingedge-server/tasks.go": "package main\n\nimport \"example.com/x/taskrt\"\n\nvar _ = taskrt.Spec{Type: \"dns.sync\"}\n"}, "tasktype-unknown", "cmd/lingedge-server/tasks.go", false},
+		{"入队字面量为命令类", ttGoodTypes, map[string]string{"internal/cache/x.go": "package cache\n\nimport \"example.com/x/taskrt\"\n\nvar _ = taskrt.EnqueueRequest{Type: taskrt.Type(\"exec.command\")}\n"}, "tasktype-command", "internal/cache/x.go", false},
+		{"包内裸 Spec 字面量", ttGoodTypes, map[string]string{"internal/platform/taskrt/reg.go": "package taskrt\n\nvar _ = Spec{Type: \"bogus.type\"}\n"}, "tasktype-unknown", "internal/platform/taskrt/reg.go", false},
+		{"缺少 OpenAPI 事实源不得放行", ttGoodTypes, nil, "tasktype-spec", "docs/api/openapi.yaml", true},
+		{"无法解析的 Go 文件", ttGoodTypes, map[string]string{"internal/cache/bad.go": "package cache\n\nfunc (\n"}, "tasktype-unparseable", "internal/cache/bad.go", false},
+	}
+	for _, c := range neg {
+		t.Run("负向/"+c.name, func(t *testing.T) {
+			root := ttRoot(t, c.types, c.extra)
+			if c.noSpec {
+				write(t, root, "docs/api/openapi.yaml", "openapi: 3.1.0\n")
+			}
+			expectRule(t, mustRun(t, runTasktype, root, options{}), c.rule, c.file)
+		})
+	}
+	pos := []struct {
+		name, types string
+		extra       map[string]string
+	}{
+		{"合法常量与登记", ttGoodTypes, map[string]string{"cmd/lingedge-server/tasks.go": "package main\n\nimport \"example.com/x/taskrt\"\n\nvar _ = taskrt.Spec{Type: \"system.backup\"}\n"}},
+		{"测试代码不受限", ttGoodTypes, map[string]string{"internal/cache/x_test.go": "package cache\n\nimport \"example.com/x/taskrt\"\n\nvar _ = taskrt.Spec{Type: \"shell.exec\"}\n"}},
+		{"无关包的 Spec 字面量", ttGoodTypes, map[string]string{"internal/cache/y.go": "package cache\n\nimport \"example.com/other\"\n\nvar _ = other.Spec{Type: \"anything goes\"}\n"}},
+	}
+	for _, c := range pos {
+		t.Run("正向/"+c.name, func(t *testing.T) {
+			if fs := mustRun(t, runTasktype, ttRoot(t, c.types, c.extra), options{}); len(fs) != 0 {
+				t.Fatalf("不应失败: %v", fs)
+			}
+		})
+	}
+	// 没有任务运行时的仓库：门禁无事可检（不要求 openapi）。
+	if fs := mustRun(t, runTasktype, baseRoot(t), options{}); len(fs) != 0 {
+		t.Fatalf("无 taskrt 时不应失败: %v", fs)
+	}
+}
+
+// 运行时与门禁各有一份「命令语义片段」表：两者必须一致，否则任一处放宽都会让另一处形同虚设。
+func TestTasktypeSegmentsMatchRuntime(t *testing.T) {
+	b, err := os.ReadFile("../../internal/platform/taskrt/types.go")
+	if err != nil {
+		t.Skip("无运行时源码: " + err.Error())
+	}
+	m := regexp.MustCompile(`(?s)var forbiddenSegments = map\[string\]bool\{(.*?)\}`).FindSubmatch(b)
+	if m == nil {
+		t.Fatal("找不到运行时的 forbiddenSegments")
+	}
+	rt := map[string]bool{}
+	for _, s := range regexp.MustCompile(`"([a-z_]+)":`).FindAllSubmatch(m[1], -1) {
+		rt[string(s[1])] = true
+	}
+	if len(rt) != len(taskTypeForbiddenSegments) {
+		t.Fatalf("片段表不一致：运行时 %v 门禁 %v", rt, taskTypeForbiddenSegments)
+	}
+	for k := range rt {
+		if !taskTypeForbiddenSegments[k] {
+			t.Errorf("门禁缺少片段 %s", k)
+		}
+	}
+}

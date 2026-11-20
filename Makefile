@@ -207,7 +207,7 @@ e2e:
 edge-test:
 	$(call not_implemented,3.22)
 
-# 本目标当前只覆盖 Story 1.2 的静态门禁：G-6 固定口令、G-11 测试替身隔离、G-12 命令注入、NFR-29 品牌。
+# 本目标当前只覆盖 Story 1.2 的静态门禁：G-6 固定口令、G-11 测试替身隔离、G-12 命令注入（Story 1.14 追加任务类型白名单 tasktype）、NFR-29 品牌。
 # Story 1.11 追加 G-5（日志脱敏扫描：向真实 logx 注入私钥/Token/主密钥/明文，断言输出无泄露，含负向自测）。
 # 威胁模型 §9 的其余门禁（G-1…G-4、G-7…G-10、G-13）尚未接入，由对应 Story 逐项追加到本目标；
 # 因此本目标通过只表示上述已列项通过，不代表整套安全门禁通过。
@@ -216,8 +216,9 @@ security:
 	$(GATES) passwords
 	$(GATES) brand
 	$(GATES) shell
+	$(GATES) tasktype
 	$(GO) test -count=1 ./tests/security/...
-	@echo "make security: 已覆盖 G-5/G-6/G-11/G-12/品牌；未接入（随对应 Story 追加）: G-1 G-2 G-3 G-4 G-7 G-8 G-9 G-10 G-13" >&2
+	@echo "make security: 已覆盖 G-5/G-6/G-11/G-12（含任务类型白名单 tasktype）/品牌；未接入（随对应 Story 追加）: G-1 G-2 G-3 G-4 G-7 G-8 G-9 G-10 G-13" >&2
 
 release:
 	$(call not_implemented,1.34)

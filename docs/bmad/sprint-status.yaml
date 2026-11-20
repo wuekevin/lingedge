@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 11-16-2026 23:18
-last_updated: 11-20-2026 23:00
+last_updated: 11-21-2026 04:00
 project: LingEdge（凌界云）
 project_key: NOKEY
 tracking_system: file-system
@@ -49,7 +49,7 @@ development_status:
   1-11-密钥基础库-secretbox-keyprovider-主密钥: review   # 开发完成、本机门禁全绿（真实 AES-256-GCM 信封加密：AAD 搬迁/篡改/轮换 rewrap 250 条/KEK 移除核对、主密钥文件 0400/0440+属主+符号链接、缺主密钥负向、DEK/KEK 清零、-race、G-5 日志扫描已接入 make security）；RecordStore 真实 MySQL 实现与端到端轮换（独立临时 mysqld、13 个迁移、lingedge_app）已补齐；裸 base64 主密钥脱敏已保守接入；真实 systemd $CREDENTIALS_DIRECTORY、root 属主场景与 LimitCORE=0 生效属等待环境验证，备份 kek_ids_required 数据源依赖 Story 1.41；待独立复验后转 done
   1-12-http-服务骨架-路由元数据-统一响应-幂等-健康检查: review   # 开发完成、本机门禁全绿（httpx 固定中间件链与默认拒绝钩子、Register 元数据校验/启动失败、运行时路由⊆openapi 与「M1 未实现清单」（200，无 501 占位）、错误映射 400/404/412/409/422、分页助手、真实 MySQL 幂等（重放/异体 422/并发恰一次/过期/同一 Task）、就绪检查（真实 MySQL+迁移状态+真实 Redis 杀进程降级/自愈）、9180 Prometheus 文本、kin-openapi 契约助手；契约冲突 CC-2：P3/P4 路径参数名统一+retryDeployment 补 422）；Linux 验收机/MySQL 8.0.16、真实 Nginx 反代与 Prometheus 抓取、1.16–1.21 真实钩子整链属等待环境验证；待独立复验后转 done
   1-13-lingedge-server-进程装配-roles-子命令-sd_notify: review   # 开发完成、本机门禁全绿（真实子进程+独立临时 MySQL/Redis：roles 矩阵 8 种组合、migrate/healthz/version/lineage show|bump 真实可用且 setup 未注册、sd_notify READY=1/STOPPING=1 经自建 unixgram socket、SIGTERM 排空在途请求后退出码 0、缺/错主密钥与口令/端口占用拒绝启动、日志含 request-id；1.12 遗留迁移版本探针选方案(a)：CC-3 + 迁移 000014 仅授予 app 对 schema_migrations 的 SELECT）；真实 systemd Type=notify 全流程、Linux 抽象 socket 收发、MySQL 8.0.16 属等待环境验证；待独立复验后转 done
-  1-14-任务运行时-tasks-队列-租约-围栏-白名单任务类型: backlog
+  1-14-任务运行时-tasks-队列-租约-围栏-白名单任务类型: review   # 开发完成、本机门禁全绿（真实 MySQL/Redis 临时实例 + 真实 Worker 子进程：N Worker 并发恰好一次、每 lease/3 续约、kill -9 回收（pending 退避/超限 failed）、SIGSTOP 僵尸写回被 fence 拒绝、Redis 唤醒丢失/宕机后轮询兜底、白名单与 payload 脱敏、协作式取消、任务中心 4 路由经 OpenAPI 契约校验且租户越权 404；G-12 新增 tasktype 门禁含负向自测；无契约变更/无新迁移；生产注册表当前为空（内核无必需 TaskType，内部周期作业归 1.15）；幂等键保留期清理 DeleteExpired 调用点登记给 1.15）；Linux 验收机/MySQL 8.0.16/基线复核属等待环境验证；待独立复验后转 done
   1-15-scheduler-角色与内部周期任务: backlog
   1-16-认证-i-登录-会话-csrf-登录节流-登录日志: backlog
   1-17-认证-ii-totp-恢复码-近期-mfa: backlog
@@ -411,8 +411,8 @@ sprint_plan:
       - key: "1-14-任务运行时-tasks-队列-租约-围栏-白名单任务类型"
         id: "1.14"
         depends_on: ["1.7", "1.12"]
-        env: "本机 MySQL（+ Redis 唤醒）"
-        waiting_env_verification: false
+        env: "本机 MySQL（+ Redis 唤醒）；MySQL 8.0.16 与 Linux 验收机重跑需 ENV-LNX"
+        waiting_env_verification: true
       - key: "1-15-scheduler-角色与内部周期任务"
         id: "1.15"
         depends_on: ["1.14"]
@@ -583,6 +583,14 @@ environment_verification:   # 『等待环境验证』登记（验证人/日期�
     condition: "本机通过仅代表 macOS + 8.0.46 临时 mysqld + Redis 8.10.1 临时实例上的行为，sd_notify 以测试自建 unixgram socket 验证协议；真实 systemd Type=notify 全流程、Linux 抽象 socket 收发、最低版本 MySQL 8.0.16，不得由本机通过代替。"
     done_locally: "make lint security gate-selftest race vuln contract-check build verify-build migrate-test 全绿：roles 矩阵（8 种组合，真实 MySQL/Redis）、真实子进程启动/READY=1/STOPPING=1/SIGTERM 排空在途请求后退出码 0、缺/错主密钥与口令/端口占用/配置写口令拒绝启动、日志含 request-id 且无口令/密钥、migrate/healthz/version/lineage show|bump 子命令（lineage 真实 MySQL：max(当前值+1,UNIX 秒)、严格递增、并发串行、审计、失败回滚、未安装拒绝）、setup 未注册、CC-3 迁移 000014（app 仅 SELECT schema_migrations）与就绪迁移版本探针。"
     pending: "① 真实 systemd Type=notify（NotifyAccess、TimeoutStartSec、systemctl stop 的优雅停机）；② Linux 抽象 socket（@ 前缀）端到端收发；③ MySQL 8.0.16 与 Linux 验收机重跑 tests/integration/server、tests/migrations；④ systemd LoadCredential 下的主密钥启动路径（同 1.11）；⑤ Tools backup restore 联调 lineage bump（1.41/1.43）。"
+    verified_by: ""
+    verified_on: ""
+  1-14-任务运行时-tasks-队列-租约-围栏-白名单任务类型:
+    status: partial
+    required_env: "ENV-LNX（Linux 验收机）；MySQL 8.0.16"
+    condition: "本机通过仅代表 macOS + 8.0.46 临时 mysqld + Redis 8.10.1 临时实例上的行为；SKIP LOCKED/租约/围栏在最低版本 MySQL 8.0.16 上的行为、Linux 进程信号语义（kill -9/SIGSTOP）与默认租约/轮询间隔在 Linux 与生产规模下的基线复核，不得由本机通过代替。"
+    done_locally: "make lint security gate-selftest race vuln contract-check build verify-build migrate-test 全绿：并发恰好一次（12 路领取 120 个；8 Worker×4 并发处理 150 个）、续约、kill -9 真实 Worker 子进程回收与超限 failed、SIGSTOP 僵尸进程写回被围栏拒绝、租约过期回收退避、优雅停机归还、Redis 唤醒/丢失/宕机后的轮询兜底、白名单（含命令类类型被拒、数据库 CHECK）、payload 脱敏、协作式取消、任务中心 4 路由（契约校验、租户越权 404、202+Location、与 1.12 幂等联动）、处理函数幂等性助手（含负向样本）、tasktype 门禁与自测、注册表==OpenAPI TaskType==迁移 CHECK。"
+    pending: "① MySQL 8.0.16 与 Linux 验收机重跑 tests/integration/taskrt、tests/integration/server；② 默认租约 30s/轮询 2s 在 Linux 与生产规模下的基线复核（本机空领取 p99≈0.3ms 仅作参考）；③ 1.16–1.21 真实钩子装配后，任务中心路由与取消审计（x-audit）的整链端到端；④ 1.15 接入 Scheduler 后 tasks.reap 与幂等键保留期清理 DeleteExpired 的联调。"
     verified_by: ""
     verified_on: ""
   1-24-server-setup-mode-与-web-安装向导后端-含-setup-token:

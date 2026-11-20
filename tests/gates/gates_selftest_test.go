@@ -69,6 +69,10 @@ func copyRepo(t *testing.T) string {
 			t.Fatal(err)
 		}
 	}
+	// tasktype 门禁以 docs/api/openapi.yaml 的 TaskType 枚举为事实源（Story 1.14）。
+	if err := copyFile(filepath.Join(root, "docs", "api", "openapi.yaml"), filepath.Join(dst, "docs", "api", "openapi.yaml")); err != nil {
+		t.Fatal(err)
+	}
 	for _, d := range []string{"cmd", "internal", "migrations", "pkg", "scripts"} {
 		err := filepath.WalkDir(filepath.Join(root, d), func(p string, e fs.DirEntry, err error) error {
 			if err != nil || e.IsDir() {
@@ -360,7 +364,7 @@ func TestGateCommandsNegativeAndCleanup(t *testing.T) {
 	}
 	dst := copyRepo(t)
 	// 门禁在 gates 目录自身被跳过；副本里的 docs/ 不存在，品牌与口令门禁只看代码与配置。
-	for _, g := range []string{"arch", "testdouble", "passwords", "brand", "shell", "repo"} {
+	for _, g := range []string{"arch", "testdouble", "passwords", "brand", "shell", "repo", "tasktype"} {
 		if code, out := runGate(t, dst, g); code != 0 {
 			t.Fatalf("干净副本的 %s 门禁应通过，退出码 %d:\n%s", g, code, out)
 		}
@@ -462,6 +466,15 @@ func TestGateCommandsNegativeAndCleanup(t *testing.T) {
 		{
 			name: "导出的包级函数同样要求 Scope", gate: "repo", wantRule: "repo-scope", wantText: "FindSite",
 			files: map[string]string{"internal/platform/task/repository/bad.go": repoSrc("func FindSite(ctx context.Context, uid string) error { return nil }")},
+		},
+		{
+			// 任务类型白名单（G-12、FR-35）：登记/入队的类型字面量必须在 OpenAPI TaskType 枚举内，且不得带命令语义。
+			name: "登记不在 OpenAPI 枚举内的任务类型", gate: "tasktype", wantRule: "tasktype-unknown", wantText: "TaskType 枚举",
+			files: map[string]string{"cmd/lingedge-server/extra_tasks.go": "package main\n\nimport \"" + mod + "/internal/platform/taskrt\"\n\nvar _ = taskrt.Spec{Type: \"custom.job\"}\n"},
+		},
+		{
+			name: "入队执行命令类任务类型", gate: "tasktype", wantRule: "tasktype-command", wantText: "不存在执行任意命令",
+			files: map[string]string{"internal/cache/enq.go": "package cache\n\nimport \"" + mod + "/internal/platform/taskrt\"\n\nvar _ = taskrt.EnqueueRequest{Type: \"shell.exec\"}\n"},
 		},
 		{
 			name: "字符串拼接的 exec", gate: "shell", wantRule: "shell-exec",

@@ -11,7 +11,8 @@
 //	api        真实：REST 路由器（httpx 固定中间件链 + /healthz + /healthz/ready）与 HTTP 监听；业务路由由 Options.Register 注册（Story 1.16 起追加）。
 //	grpc       仅生命周期骨架：不监听任何端口（Node mTLS :9443 / Enroll :9444 由 Story 3.13 实现）。
 //	scheduler  仅生命周期骨架：不调度任何任务（Story 1.15 实现，含租约与内部周期任务）。
-//	worker     仅生命周期骨架：不消费 tasks（Story 1.14 实现任务运行时）。
+//	worker     真实（Story 1.14）：任务运行时——按 Options.Tasks 登记的任务类型从 tasks 表领取（SKIP LOCKED + 租约 + 围栏）、续约、写回并回收过期租约，
+//	           Redis 唤醒仅加速（轮询兜底）；未登记任何类型时空闲（不领取）。停机时停止领取，排空在途任务，超时则归还。
 //
 // metrics（默认 127.0.0.1:9180）对所有角色常开：进程级指标不依赖 api 角色。
 //
@@ -39,6 +40,9 @@ import (
 	"github.com/wuekevin/lingedge/internal/platform/redisx"
 	"github.com/wuekevin/lingedge/internal/platform/requestid"
 	"github.com/wuekevin/lingedge/internal/platform/sdnotify"
+	"github.com/wuekevin/lingedge/internal/platform/taskrt"
+	taskrepo "github.com/wuekevin/lingedge/internal/platform/taskrt/repository"
+	"github.com/wuekevin/lingedge/internal/platform/tenantscope"
 	"github.com/wuekevin/lingedge/internal/platform/uid"
 	"github.com/wuekevin/lingedge/migrations"
 	"github.com/wuekevin/lingedge/pkg/secretbox"
@@ -56,13 +60,23 @@ type Options struct {
 	Clock  clock.Clock
 
 	// Register 是 REST 路由的装配点（cmd/lingedge-server 的 registerRoutes）；nil 表示不注册任何路由。
-	Register func(*httpx.Router) error
+	Register func(*httpx.Router, Deps) error
+	// Tasks 是任务类型注册表（白名单，Story 1.14）；nil = 空注册表（worker 角色空闲，入队一律被拒）。
+	Tasks *taskrt.Registry
 	// Hooks 是认证/授权/Scope/审计钩子；零值（各项 nil）= 安全拒绝默认实现（1.16–1.21 前保持不变）。
 	Hooks httpx.Hooks
 
 	ShutdownTimeout time.Duration
 	// OnReady 在全部监听就绪且 READY=1 已发出后调用（集成测试据此取得实际监听地址）；可为 nil。
 	OnReady func(Info)
+}
+
+// Deps 是装配完成后交给路由注册函数的共享依赖。
+type Deps struct {
+	// Tasks 是任务存储（任务中心路由与业务模块入队使用）。
+	Tasks taskrt.Store
+	// Enqueuer 是入队服务（白名单校验 + Redis 唤醒）；业务模块的耗时操作经它返回 202 + Task。
+	Enqueuer *taskrt.Enqueuer
 }
 
 // Info 是就绪后的实际状态。
@@ -75,6 +89,8 @@ type Info struct {
 // component 是角色的生命周期抽象。
 type component interface {
 	Name() string
+	// Start 启动后台工作（非阻塞）；骨架角色无事可做。
+	Start(ctx context.Context)
 	Shutdown(ctx context.Context) error
 }
 
@@ -169,6 +185,25 @@ func Run(ctx context.Context, o Options) error {
 		return fail(err)
 	}
 
+	// 5b. 任务运行时（Story 1.14）：tasks 存储（app 池）、入队服务（Redis 唤醒仅加速）。
+	if o.Tasks == nil {
+		o.Tasks = taskrt.NewRegistry()
+	}
+	taskStore, err := taskrepo.New(app, ids)
+	if err != nil {
+		return fail(err)
+	}
+	waker, err := taskrt.NewRedisWaker(rc, o.Logger)
+	if err != nil {
+		return fail(err)
+	}
+	enq, err := taskrt.NewEnqueuer(taskStore, o.Tasks, ids, waker)
+	if err != nil {
+		return fail(err)
+	}
+	enq.InTx = func(ctx context.Context) bool { _, in := db.TxFromContext(ctx, app); return in }
+	deps := Deps{Tasks: taskStore, Enqueuer: enq}
+
 	metrics := httpx.NewMetrics()
 	metrics.RegisterGauge("lingedge_db_open_connections", "app 连接池当前打开的连接数", func() float64 { return float64(app.Stats().OpenConnections) })
 	metrics.RegisterGauge("lingedge_redis_up", "Redis 是否可用（1=up，0=降级）", func() float64 {
@@ -208,7 +243,7 @@ func Run(ctx context.Context, o Options) error {
 			return fail(err)
 		}
 		if o.Register != nil {
-			if err := o.Register(router); err != nil {
+			if err := o.Register(router, deps); err != nil {
 				return fail(fmt.Errorf("注册路由失败: %w", err))
 			}
 		}
@@ -228,10 +263,18 @@ func Run(ctx context.Context, o Options) error {
 		}, ln})
 	}
 	for _, r := range o.Roles.List() {
-		if r == RoleAPI {
+		switch r {
+		case RoleAPI:
 			continue
+		case RoleWorker:
+			wc, err := newWorkerComponent(o, taskStore, rc, log)
+			if err != nil {
+				return fail(err)
+			}
+			comps = append(comps, wc)
+		default:
+			comps = append(comps, newSkeleton(r, log))
 		}
-		comps = append(comps, newSkeleton(r, log))
 	}
 
 	// 7. 开始服务。
@@ -245,7 +288,11 @@ func Run(ctx context.Context, o Options) error {
 		log.Info("监听已就绪", zap.String("server", s.name), zap.String("addr", s.ln.Addr().String()))
 	}
 	for _, c := range comps {
-		log.Info("角色已装配（仅生命周期骨架，尚无功能）", zap.String("role", c.Name()), zap.String("implemented_by", skeletonOwner[Role(c.Name())]))
+		if sk, ok := c.(*skeleton); ok {
+			log.Info("角色已装配（仅生命周期骨架，尚无功能）", zap.String("role", sk.Name()), zap.String("implemented_by", skeletonOwner[sk.role]))
+			continue
+		}
+		c.Start(ctx)
 	}
 
 	// 8. 就绪通知：仅写 $NOTIFY_SOCKET，非 systemd 环境为 no-op。失败不终止进程（Type=notify 由 systemd 超时判定）。
@@ -310,7 +357,6 @@ func isLoopbackHost(h string) bool {
 var skeletonOwner = map[Role]string{
 	RoleGRPC:      "Story 3.13（gRPC 骨架：Node mTLS :9443 / Enroll :9444）",
 	RoleScheduler: "Story 1.15（Scheduler 角色与内部周期任务）",
-	RoleWorker:    "Story 1.14（任务运行时：tasks 队列 / 租约 / 围栏）",
 }
 
 // skeleton 是尚无真实实现的角色的生命周期骨架：不监听、不调度、不消费，仅占位并随进程停止。
@@ -323,7 +369,63 @@ func newSkeleton(r Role, log *zap.Logger) *skeleton { return &skeleton{role: r, 
 
 func (s *skeleton) Name() string { return string(s.role) }
 
+// Start 实现 component（骨架无后台工作）。
+func (s *skeleton) Start(context.Context) {}
+
 func (s *skeleton) Shutdown(context.Context) error {
 	s.log.Info("角色骨架已停止", zap.String("role", string(s.role)))
 	return nil
+}
+
+// workerComponent 是 worker 角色的真实运行时（Story 1.14）：taskrt.Worker 的生命周期封装。
+type workerComponent struct {
+	w      *taskrt.Worker
+	log    *zap.Logger
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
+func newWorkerComponent(o Options, store taskrt.Store, rc *redisx.Client, log *zap.Logger) (*workerComponent, error) {
+	drain := taskrt.DefaultDrainTimeout
+	if lim := o.ShutdownTimeout * 5 / 6; lim < drain { // 排空必须在进程停机预算内结束，留出归还与关闭资源的时间
+		drain = lim
+	}
+	w, err := taskrt.NewWorker(taskrt.WorkerConfig{
+		Store: store, Registry: o.Tasks, Logger: log, Redis: rc, Clock: o.Clock, DrainTimeout: drain,
+		Owner: taskrt.NewOwner(uid.NewGenerator(o.Clock)),
+		Scope: tenantscope.PlatformForJob(0), // [tenantscope-mint] Worker 是跨租户的平台进程；处理函数按任务的 tenant_id 获得各自的 Scope
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &workerComponent{w: w, log: log, done: make(chan struct{})}, nil
+}
+
+func (c *workerComponent) Name() string { return string(RoleWorker) }
+
+// Start 在后台运行 Worker。其 ctx 与进程 ctx 解耦：SIGTERM 时由 Shutdown 触发停止，使排空发生在监听关闭之后的统一停机阶段。
+func (c *workerComponent) Start(ctx context.Context) {
+	wctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	c.cancel = cancel
+	c.log.Info("角色已装配（任务运行时）", zap.String("role", c.Name()), zap.String("owner", c.w.Owner()))
+	go func() {
+		defer close(c.done)
+		if err := c.w.Run(wctx); err != nil {
+			c.log.Error("任务运行时异常退出", zap.Error(err))
+		}
+	}()
+}
+
+// Shutdown 停止领取并等待在途任务排空（至多 ctx 的剩余预算；Worker 自身有 DrainTimeout，超时会归还任务）。
+func (c *workerComponent) Shutdown(ctx context.Context) error {
+	if c.cancel == nil {
+		return nil
+	}
+	c.cancel()
+	select {
+	case <-c.done:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("任务运行时未在停机预算内退出: %w", ctx.Err())
+	}
 }
