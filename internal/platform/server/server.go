@@ -69,8 +69,11 @@ type Options struct {
 	Register func(*httpx.Router, Deps) error
 	// Tasks 是任务类型注册表（白名单，Story 1.14）；nil = 空注册表（worker 角色空闲，入队一律被拒）。
 	Tasks *taskrt.Registry
-	// Hooks 是认证/授权/Scope/审计钩子；零值（各项 nil）= 安全拒绝默认实现（1.16–1.21 前保持不变）。
+	// Hooks 是认证/授权/Scope/审计钩子；零值（各项 nil）= 安全拒绝默认实现（尚未实现的钩子保持不变，1.17–1.21）。
 	Hooks httpx.Hooks
+	// BuildHooks 在基础设施（MySQL/Redis）就绪后构造钩子（Story 1.16：认证钩子需要数据库与 Redis）；非 nil 时取代 Hooks。
+	// 返回错误即拒绝启动。
+	BuildHooks func(Deps) (httpx.Hooks, error)
 
 	// Cron 是周期任务的登记点（Story 1.15）：后续 Story 在此向 cron 注册表登记自己的周期任务（Registry.Task：确定性幂等键入队 OpenAPI TaskType）
 	// 或内部作业（Registry.Internal）。内置的四个内部作业已由 scheduler 角色自行登记，不需要在这里重复。nil = 只有内置作业。
@@ -94,6 +97,15 @@ type Deps struct {
 	Tasks taskrt.Store
 	// Enqueuer 是入队服务（白名单校验 + Redis 唤醒）；业务模块的耗时操作经它返回 202 + Task。
 	Enqueuer *taskrt.Enqueuer
+
+	// 以下是装配层构造业务模块所需的共享基础设施（Story 1.16 起；路由清单导出模式下为零值）。
+	// DB 是 app 连接池（请求路径只持有 app 账号，CC-3）；Redis 已按 ADR-025 封装（不可达时降级）。
+	DB     db.Pool
+	Redis  *redisx.Client
+	Clock  clock.Clock
+	IDs    *uid.Generator
+	Logger *zap.Logger
+	Config *config.Config
 }
 
 // Info 是就绪后的实际状态。
@@ -219,7 +231,7 @@ func Run(ctx context.Context, o Options) error {
 		return fail(err)
 	}
 	enq.InTx = func(ctx context.Context) bool { _, in := db.TxFromContext(ctx, app); return in }
-	deps := Deps{Tasks: taskStore, Enqueuer: enq}
+	deps := Deps{Tasks: taskStore, Enqueuer: enq, DB: app, Redis: rc, Clock: o.Clock, IDs: ids, Logger: o.Logger, Config: cfg}
 
 	metrics := httpx.NewMetrics()
 	metrics.RegisterGauge("lingedge_db_open_connections", "app 连接池当前打开的连接数", func() float64 { return float64(app.Stats().OpenConnections) })
@@ -252,8 +264,14 @@ func Run(ctx context.Context, o Options) error {
 	servers = append(servers, served{"metrics", httpx.NewMetricsServer(cfg.Metrics.Listen, metrics), mln})
 
 	if o.Roles.Has(RoleAPI) {
+		hooks := o.Hooks
+		if o.BuildHooks != nil {
+			if hooks, err = o.BuildHooks(deps); err != nil {
+				return fail(fmt.Errorf("装配认证/授权钩子失败: %w", err))
+			}
+		}
 		router, err := httpx.NewRouter(httpx.Options{
-			Logger: o.Logger, Clock: o.Clock, IDs: ids, Hooks: o.Hooks, Metrics: metrics, Idempotency: idem,
+			Logger: o.Logger, Clock: o.Clock, IDs: ids, Hooks: hooks, Metrics: metrics, Idempotency: idem,
 			Health: httpx.HealthOptions{DB: app, Migrations: probe, Redis: rc},
 		})
 		if err != nil {

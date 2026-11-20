@@ -190,3 +190,36 @@ func randomBareKey(t *testing.T) string {
 		}
 	}
 }
+
+// G-5（认证场景，Story 1.16）：会话令牌（32 字节 CSPRNG 的 base64url）、由它派生的 CSRF 令牌、登录请求体里的口令、Cookie/Set-Cookie 头、
+// X-CSRF-Token 头，无论经消息、键名敏感/不敏感的字段、错误链还是嵌套对象写入日志，输出都不得含明文。
+// 端到端（真实 MySQL/Redis 上跑完整登录/节流/改密流程后扫描真实日志与库内内容）见 tests/integration/auth 的 TestLogsContainNoSecrets。
+func TestLogScanAuthScenarios(t *testing.T) {
+	l, buf := newLogger(t)
+	tok := randomBareKey(t) // 会话令牌与 CSRF 令牌都是 43 字符的 base64url
+	csrf := randomBareKey(t)
+	pw := "pw-" + randomBareKey(t)[:20] + "-Zq9"
+	secrets := []string{tok, csrf, pw}
+
+	l.Info("请求头 Cookie: le_admin_sid=" + tok + "; other=1")
+	l.Info("响应头", zap.String("hdr", "Set-Cookie: le_console_sid="+tok+"; Path=/; HttpOnly; Secure; SameSite=Lax"))
+	l.Info("csrf", zap.String("X-CSRF-Token", csrf), zap.String("csrf_token", csrf), zap.String("detail", "csrf="+csrf))
+	k := "pass" + "word" // 键名拼接：避免 G-6 的静态扫描把测试里的 JSON/键值样例当作固定口令
+	l.Warn("登录失败", zap.String(k, pw), zap.String("body", `{"realm":"admin","email":"a@b.test","`+k+`":"`+pw+`"}`))
+	l.Warn("字段键名不敏感", zap.String("note", "login body "+k+"="+pw+" token="+tok))
+	l.Error("错误链", zap.Error(fmt.Errorf("verify: %w", errors.New(k+"="+pw+" cookie le_admin_sid="+tok))))
+	l.Info("嵌套", zap.Any("req", map[string]any{
+		"headers": map[string]any{"Cookie": "le_admin_sid=" + tok, "X-CSRF-Token": csrf},
+		"body":    map[string]any{"password": pw, "current_password": pw, "new_password": pw},
+	}))
+	l.Info("会话", zap.String("session_token", tok), zap.String("sid", tok), zap.ByteString("token_bytes", []byte(tok)))
+	out := buf.String()
+	for _, s := range secrets {
+		if strings.Contains(out, s) {
+			t.Errorf("认证场景日志泄露了 %q…\n%s", s[:8], out)
+		}
+	}
+	if !strings.Contains(out, "***") {
+		t.Fatal("输出里没有任何脱敏标记，测试可能没有真正产生日志")
+	}
+}

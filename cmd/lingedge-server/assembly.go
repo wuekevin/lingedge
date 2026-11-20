@@ -1,19 +1,49 @@
 package main
 
-import "github.com/wuekevin/lingedge/internal/platform/httpx"
+import (
+	"context"
+	"errors"
 
-// assembleHooks 是 REST 认证/授权/租户 Scope/审计四个钩子的唯一装配点（Story 1.12 约定，1.13 接入进程）。
-//
-// 在 Story 1.16–1.21 提供真实实现之前，这里保持零值 Hooks：httpx 对未装配的钩子使用**安全拒绝**默认实现
-// （认证 401、授权/Scope 403、需要审计的路由 500——无法留痕就不执行），因此当前进程不可能放行任何受保护路由。
-// 由各 Story 在此处逐个填入：
-//
-//	Authenticator  Story 1.16（会话/CSRF）、1.19（API Token）
-//	Authorizer     Story 1.18（RBAC 权限串）
-//	Scope          Story 1.20（租户 Scope 解析、acting-as）
-//	Auditor        Story 1.21（审计，与业务同事务）
-//
-// 周期作业的登记点见 cron.go（Story 1.15）。
-func assembleHooks() httpx.Hooks {
-	return httpx.Hooks{}
+	"github.com/wuekevin/lingedge/internal/auth"
+	"github.com/wuekevin/lingedge/internal/platform/httpx"
+	"github.com/wuekevin/lingedge/internal/platform/server"
+)
+
+// assembly 持有一次进程装配中被多处共享的模块实例（认证模块同时提供认证钩子与 /auth/* 路由，二者必须是同一个实例）。
+// 每次 serveMain 新建一个，不用包级变量，因此同一进程内可以重复运行（测试）。
+type assembly struct {
+	auth auth.Module
 }
+
+// buildHooks 是 REST 认证/授权/租户 Scope/审计四个钩子的唯一装配点（Story 1.12 约定，1.13 接入进程）。
+//
+// 现状（诚实声明）：
+//
+//	Authenticator  已实现（Story 1.16）：Cookie 会话（realm 隔离/滑动+绝对过期/CSRF）；Bearer API Token 待 1.19（携带 Bearer 一律 401）。
+//	Authorizer     未实现（1.18）：默认安全拒绝；仅对「自助」operation（auth.SelfService：/auth/* 中 x-permissions 为空且不要求再认证的路由）
+//	               授予最小授权语义——已认证主体即可，因为它们只作用于调用者自己的身份/会话/登录日志。见 httpx.WithSelfService。
+//	Scope          未实现（1.20）：默认安全拒绝；自助 operation 同上，只从主体自身推导 Scope（忽略 X-Tenant-ID，不做代租户）。
+//	Auditor        未实现（1.21）：默认拒绝需要审计的路由；自助 operation 的留痕由 login_logs 承担（登录/登出/失败/锁定/改密/会话吊销），
+//	               audit_logs 的统一接入属 1.21。
+//
+// 因此：其余任何路由（如任务中心）认证通过后仍会被授权钩子拒绝（403），不会因为「已登录」而放行。
+func (a *assembly) buildHooks(d server.Deps) (httpx.Hooks, error) {
+	if d.DB == nil || d.Redis == nil || d.Config == nil {
+		return httpx.Hooks{}, errors.New("装配认证模块需要 MySQL 池、Redis 与配置")
+	}
+	m, err := auth.New(context.Background(), auth.Options{
+		Pool: d.DB, Redis: d.Redis, Clock: d.Clock, IDs: d.IDs, Log: d.Logger, Argon2: d.Config.Auth.Argon2,
+	})
+	if err != nil {
+		return httpx.Hooks{}, err
+	}
+	a.auth = m
+	return assembleHooks(m), nil
+}
+
+// assembleHooks 把认证模块装配成 httpx.Hooks（见 buildHooks 说明）。
+func assembleHooks(m auth.Module) httpx.Hooks {
+	return httpx.WithSelfService(httpx.Hooks{Authenticator: m.Authenticator()}, m.SelfService)
+}
+
+// 周期作业的登记点见 cron.go（Story 1.15）。

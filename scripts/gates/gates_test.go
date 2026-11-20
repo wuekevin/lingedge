@@ -182,6 +182,25 @@ func TestGenLintCheck(t *testing.T) {
 
 // ---- arch ----
 
+// 纯委托的 New 构造函数是 api.go 唯一允许的函数（见 checkRootFileContent）：正向用例必须通过。
+func TestArchAllowsDelegatingConstructor(t *testing.T) {
+	root := baseRoot(t)
+	svc := filepath.Join(root, "internal", "origin", "internal", "service")
+	if err := os.MkdirAll(svc, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(svc, "s.go"), []byte("package service\n\nfunc New() int { return 1 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	api := "package origin\n\nimport impl \"" + modulePath + "/internal/origin/internal/service\"\n\ntype Service interface{ Do() }\n\nfunc New() int { return impl.New() }\n\nfunc NewOther() int { return impl.New() }\n"
+	if err := os.WriteFile(filepath.Join(root, "internal", "origin", "api.go"), []byte(api), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if fs := mustRun(t, runArch, root, options{}); len(fs) != 0 {
+		t.Fatalf("纯委托的 New 构造函数应通过 arch 门禁: %v", fs)
+	}
+}
+
 func TestArch(t *testing.T) {
 	if fs := mustRun(t, runArch, baseRoot(t), options{}); len(fs) != 0 {
 		t.Fatalf("基线骨架应通过: %v", fs)
@@ -201,6 +220,11 @@ func TestArch(t *testing.T) {
 		{name: "ports 含清单外接口", rel: "internal/platform/ports/x.go", content: "package ports\n\ntype Sneaky interface{ Do() }\n", rule: "arch-ports", fileSub: "ports/x.go"},
 		{name: "ports 含子包", rel: "internal/platform/ports/impl/i.go", content: "package impl\n", rule: "arch-ports", fileSub: "ports/impl"},
 		{name: "api.go 含函数实现", rel: "internal/origin/api.go", content: "package origin\n\nfunc New() int { return 1 }\n", rule: "arch-module-root", fileSub: "internal/origin/api.go"},
+		{name: "api.go 的 New 不委托 internal 包", rel: "internal/origin/api.go", content: "package origin\n\nimport \"strings\"\n\nfunc New() string { return strings.ToUpper(\"x\") }\n", rule: "arch-module-root", fileSub: "internal/origin/api.go"},
+		{name: "api.go 的 New 委托了别的模块的 internal 包", rel: "internal/origin/api.go", content: "package origin\n\nimport x \"" + modulePath + "/internal/cache/internal/service\"\n\nfunc New() int { return x.New() }\n", rule: "arch-module-root", fileSub: "internal/origin/api.go"},
+		{name: "api.go 的非 New 函数即使委托也不允许", rel: "internal/origin/api.go", content: "package origin\n\nimport s \"" + modulePath + "/internal/origin/internal/service\"\n\nfunc Helper() int { return s.Do() }\n", rule: "arch-module-root", fileSub: "internal/origin/api.go"},
+		{name: "api.go 的 New 含多条语句", rel: "internal/origin/api.go", content: "package origin\n\nimport s \"" + modulePath + "/internal/origin/internal/service\"\n\nfunc New() int { _ = 1; return s.New() }\n", rule: "arch-module-root", fileSub: "internal/origin/api.go"},
+		{name: "api.go 含方法", rel: "internal/origin/api.go", content: "package origin\n\ntype T struct{}\n\nfunc (T) NewX() {}\n", rule: "arch-module-root", fileSub: "internal/origin/api.go"},
 		{name: "doc.go 含变量", rel: "internal/origin/doc.go", content: "package origin\n\nvar X = 1\n", rule: "arch-module-root", fileSub: "internal/origin/doc.go"},
 		{name: "ports 含未导出的清单外接口", rel: "internal/platform/ports/x.go", content: "package ports\n\ntype sneaky interface{ Do() }\n", rule: "arch-ports", fileSub: "ports/x.go"},
 		{name: "ports 含类型别名", rel: "internal/platform/ports/x.go", content: "package ports\n\nimport \"time\"\n\ntype T = time.Time\n", rule: "arch-ports", fileSub: "ports/x.go"},
@@ -477,6 +501,41 @@ func TestPlatformTablesMatchDocs(t *testing.T) {
 		if regexp.MustCompile(`(?m)^\|\s*tenant_id\s*\|`).MatchString(section) {
 			t.Errorf("表 %q 在文档中有 tenant_id 列，不得列为平台级表", tbl)
 		}
+	}
+}
+
+// 认证/身份表清单（Story 1.16 的受限例外）：每张表须在 docs/database 有定义标题，不得与平台级表重复，
+// 且不得是租户业务表（站点/规则/证书/任务等）——用一份显式的禁入名单钉住。
+func TestIdentityTablesMatchDocs(t *testing.T) {
+	docs, err := filepath.Glob("../../docs/database/*.md")
+	if err != nil || len(docs) == 0 {
+		t.Skip("未找到 docs/database（在仓库副本中运行时跳过）")
+	}
+	var text strings.Builder
+	for _, d := range docs {
+		b, err := os.ReadFile(d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		text.Write(b)
+		text.WriteString("\n")
+	}
+	all := text.String()
+	plat := platformTables()
+	forbidden := map[string]bool{"sites": true, "tasks": true, "certificates": true, "origins": true, "rules": true, "audit_logs": true, "api_tokens": true}
+	for tbl := range identityTables() {
+		if !regexp.MustCompile("(?m)^#{3,4} [0-9.]+ `" + regexp.QuoteMeta(tbl) + "`").MatchString(all) {
+			t.Errorf("身份表清单含 %q，但 docs/database 中没有该表的定义标题", tbl)
+		}
+		if plat[tbl] {
+			t.Errorf("表 %q 同时在平台级表与身份表清单中", tbl)
+		}
+		if forbidden[tbl] {
+			t.Errorf("表 %q 是业务/审计表，不得列入身份表清单", tbl)
+		}
+	}
+	if len(identityTables()) == 0 {
+		t.Error("身份表清单为空")
 	}
 }
 

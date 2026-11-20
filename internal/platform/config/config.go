@@ -46,6 +46,7 @@ type Config struct {
 	Log      Log      `yaml:"log"`
 	Release  Release  `yaml:"release"`
 	Secrets  Secrets  `yaml:"secrets"`
+	Auth     Auth     `yaml:"auth"`
 }
 
 // Server 是进程级设置。
@@ -116,6 +117,30 @@ type Secrets struct {
 	MasterKeyFile string `yaml:"master_key_file"`
 }
 
+// Auth 是认证设置（Story 1.16、ADR-018 §4）。会话时长与登录节流阈值是系统设置（system_settings，UD-27），不在此处。
+type Auth struct {
+	Argon2 Argon2 `yaml:"argon2"`
+}
+
+// Argon2 是 argon2id 口令哈希参数（ADR-018 §4：参数以实现时基准测定并写入配置）。
+// 缺省值来自开发机基准（方法与数值见 docs/bmad/stories/1-16-*.md 与 internal/auth/internal/service 的 BenchmarkArgon2idHash），
+// **生产机须按其 CPU/内存复测后调整**（目标：单次哈希约 50–250 ms；参数低于 OWASP 下限会被拒绝）。
+// 改参数只影响之后的哈希：登录成功时发现旧哈希参数不同会自动重新哈希（rehash）。
+type Argon2 struct {
+	MemoryKiB   int `yaml:"memory_kib"`
+	Iterations  int `yaml:"iterations"`
+	Parallelism int `yaml:"parallelism"`
+}
+
+// Argon2 参数边界：下限取 OWASP 对 argon2id 的最低建议（m=19 MiB, t=2, p=1）；上限防止误配置拖垮进程。
+const (
+	MinArgon2MemoryKiB  = 19 * 1024
+	MaxArgon2MemoryKiB  = 1024 * 1024
+	MinArgon2Iterations = 2
+	MaxArgon2Iterations = 16
+	MaxArgon2Parallel   = 16
+)
+
 // Log 是日志设置。
 type Log struct {
 	Level  string `yaml:"level"`
@@ -137,6 +162,7 @@ func Defaults() Config {
 		Metrics:  Metrics{Listen: "127.0.0.1:9180"},
 		Database: Database{Port: 3306},
 		Log:      Log{Level: "info", Format: "json"},
+		Auth:     Auth{Argon2: Argon2{MemoryKiB: 65536, Iterations: 4, Parallelism: 4}},
 	}
 }
 
@@ -558,6 +584,15 @@ func (c *Config) validateProblems() []Problem {
 	}
 	if r.DB < 0 || r.DB > 15 {
 		add("redis.db", "必须在 0–15")
+	}
+
+	// auth.argon2
+	if a := c.Auth.Argon2; a.MemoryKiB < MinArgon2MemoryKiB || a.MemoryKiB > MaxArgon2MemoryKiB {
+		add("auth.argon2.memory_kib", fmt.Sprintf("必须在 %d–%d（KiB；下限为 OWASP 对 argon2id 的最低建议）", MinArgon2MemoryKiB, MaxArgon2MemoryKiB))
+	} else if a.Iterations < MinArgon2Iterations || a.Iterations > MaxArgon2Iterations {
+		add("auth.argon2.iterations", fmt.Sprintf("必须在 %d–%d", MinArgon2Iterations, MaxArgon2Iterations))
+	} else if a.Parallelism < 1 || a.Parallelism > MaxArgon2Parallel {
+		add("auth.argon2.parallelism", fmt.Sprintf("必须在 1–%d", MaxArgon2Parallel))
 	}
 
 	// log

@@ -1,2 +1,3 @@
-// Package auth 为 Server 业务模块的占位根包，Story 交付前不含实现。
+// Package auth 是认证模块（Story 1.16：登录 / 会话 / CSRF / 登录节流 / 登录日志；TOTP、RBAC、API Token 由 1.17–1.19 追加）。
+// 根包只含对外契约 api.go（Module 接口、Options、纯委托的 New）；实现在 internal/auth/internal/{domain,repository,service,handler}。
 package auth

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -101,6 +102,11 @@ func checkStandaloneDeps(root string) []Finding {
 }
 
 // checkRootFileContent：doc.go 只承载包注释；api.go 只有接口与 DTO，不得含函数/方法实现或包级变量。
+//
+// 唯一的例外（Story 1.16 修订 ADR-001 §3）：api.go 可以导出**纯委托的构造函数**——函数名以 New 开头、无接收者、函数体只有一条
+// `return <internal 包别名>.<函数>(…)`，且被调用的包位于本模块的 internal/<mod>/internal/… 下。原因：实现包位于
+// internal/<mod>/internal/…，按 Go 的 internal 规则只有 internal/<mod> 子树内的代码能 import 它们，cmd/lingedge-server 的装配层
+// （ADR-001 §4「手写 wire」）因此只能经根包拿到模块实例；没有这个出口，模块无法被装配。委托形态保证根包里没有任何实现逻辑。
 func checkRootFileContent(root, mod, name string) []Finding {
 	rel := "internal/" + mod + "/" + name
 	fset := token.NewFileSet()
@@ -112,7 +118,10 @@ func checkRootFileContent(root, mod, name string) []Finding {
 	for _, decl := range f.Decls {
 		switch d := decl.(type) {
 		case *ast.FuncDecl:
-			out = append(out, Finding{File: rel, Line: fset.Position(d.Pos()).Line, Rule: "arch-module-root", Msg: "模块根包不得含函数/方法实现：" + d.Name.Name + "（实现放 internal/" + mod + "/internal/…，ADR-001 §3）"})
+			if name == "api.go" && isDelegatingConstructor(d, f, mod) {
+				continue
+			}
+			out = append(out, Finding{File: rel, Line: fset.Position(d.Pos()).Line, Rule: "arch-module-root", Msg: "模块根包不得含函数/方法实现：" + d.Name.Name + "（实现放 internal/" + mod + "/internal/…，ADR-001 §3；唯一例外是纯委托的 New* 构造函数）"})
 		case *ast.GenDecl:
 			if d.Tok == token.VAR || (name == "doc.go" && d.Tok != token.IMPORT) {
 				out = append(out, Finding{File: rel, Line: fset.Position(d.Pos()).Line, Rule: "arch-module-root", Msg: "模块根包 " + name + " 不得含包级变量（doc.go 仅承载包注释）"})
@@ -120,6 +129,45 @@ func checkRootFileContent(root, mod, name string) []Finding {
 		}
 	}
 	return out
+}
+
+// isDelegatingConstructor 判断 d 是否是「纯委托的构造函数」：名称 New 或 New<大写>…、无接收者、非泛型、函数体恰为单条
+// `return <包别名>.<函数>(…)`，且该包别名对应 modulePath/internal/<mod>/internal/… 下的包。
+func isDelegatingConstructor(d *ast.FuncDecl, f *ast.File, mod string) bool {
+	if d.Recv != nil || !isConstructorName(d.Name.Name) || d.Body == nil || len(d.Body.List) != 1 {
+		return false
+	}
+	ret, ok := d.Body.List[0].(*ast.ReturnStmt)
+	if !ok || len(ret.Results) != 1 {
+		return false
+	}
+	call, ok := ret.Results[0].(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	id, ok := sel.X.(*ast.Ident)
+	if !ok {
+		return false
+	}
+	prefix := modulePath + "/internal/" + mod + "/internal/"
+	for _, imp := range f.Imports {
+		p, err := strconv.Unquote(imp.Path.Value)
+		if err != nil || !strings.HasPrefix(p, prefix) {
+			continue
+		}
+		local := p[strings.LastIndex(p, "/")+1:]
+		if imp.Name != nil {
+			local = imp.Name.Name
+		}
+		if local == id.Name {
+			return true
+		}
+	}
+	return false
 }
 
 func checkModuleLayout(root, mod string) []Finding {

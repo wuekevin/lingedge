@@ -2,6 +2,7 @@ package redisx
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -155,4 +156,77 @@ func (l *localWindows) allow(key string, limit int, d time.Duration) Decision {
 		dec.RetryAfter = w.end.Sub(now)
 	}
 	return dec
+}
+
+// Peek 只读取 key 在当前窗口内的计数，不增加计数：返回的 Allowed 表示「再来一次是否仍低于 limit」（计数 < limit）。
+// 用于「只计失败」的节流（登录）：先 Peek 判断是否已被锁定，失败后再 Allow 计数。
+// Redis 不可用时回退到进程内窗口（只读）；DB 兜底层由调用方（有账号维度的 Repository）自行叠加，本方法不调用 DBFallback
+// （其语义是计数并判定，不适合只读）。参数非法返回 error；Redis 故障不返回 error，而是降级判定（Degraded=true）。
+func (l *Limiter) Peek(ctx context.Context, key Key, limit int, window time.Duration) (Decision, error) {
+	if !key.Valid() {
+		return Decision{}, ErrBadKey
+	}
+	if limit <= 0 || window < time.Millisecond {
+		return Decision{}, fmt.Errorf("redisx: 限流参数非法（limit=%d window=%s）", limit, window)
+	}
+	var n, pttl int64
+	err := l.c.run(ctx, func(r *redis.Client) error {
+		v, err := r.Get(ctx, key.s).Int64()
+		switch {
+		case errors.Is(err, redis.Nil):
+			return nil
+		case err != nil:
+			return err
+		}
+		n = v
+		pttl = r.PTTL(ctx, key.s).Val().Milliseconds()
+		return nil
+	})
+	if err == nil {
+		d := Decision{Allowed: n < int64(limit), Remaining: max(0, limit-int(n)), Source: SourceRedis}
+		if !d.Allowed && pttl > 0 {
+			d.RetryAfter = time.Duration(pttl) * time.Millisecond
+		}
+		return d, nil
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return Decision{}, ctxErr
+	}
+	l.c.noteFallback()
+	d := l.local.peek(key.s, limit)
+	d.Degraded = true
+	return d, nil
+}
+
+// Reset 清除 key 的计数（如登录成功后清零该账号的失败计数）。Redis 不可用时只清进程内窗口；尽力而为，不返回 Redis 故障。
+func (l *Limiter) Reset(ctx context.Context, key Key) error {
+	if !key.Valid() {
+		return ErrBadKey
+	}
+	l.local.reset(key.s)
+	if err := l.c.Del(ctx, key); err != nil && !errors.Is(err, ErrUnavailable) {
+		return err
+	}
+	return nil
+}
+
+func (l *localWindows) peek(key string, limit int) Decision {
+	now := l.clk.Now()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	w := l.w[key]
+	if w == nil || !w.end.After(now) {
+		return Decision{Allowed: true, Remaining: limit, Source: SourceLocal}
+	}
+	dec := Decision{Allowed: w.n < limit, Remaining: max(0, limit-w.n), Source: SourceLocal}
+	if !dec.Allowed {
+		dec.RetryAfter = w.end.Sub(now)
+	}
+	return dec
+}
+
+func (l *localWindows) reset(key string) {
+	l.mu.Lock()
+	delete(l.w, key)
+	l.mu.Unlock()
 }

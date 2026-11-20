@@ -27,7 +27,7 @@ updated: 2026-11-16（依据架构评审修订，见 docs/bmad/architecture-revi
 - 索引：`uk_system_settings_key(setting_key)`、`idx_system_settings_group(group_name)`。
 - 约束：`ck_system_settings_one_value`：`(value_json IS NULL) <> (value_enc IS NULL)`。
 - 保留：永久。变更写审计。
-- **已定义的键**（节选，其余随功能追加；键名为跨文档契约）：`system.run_mode`、`brand.*`、`login.*`、`retention.*`、`deploy.lineage`（BIGINT，初值 1；DB 恢复后由 `lingedge-server lineage bump` 提升，ADR-002 §12）、`ssrf.allow_cidrs`（平台 SSRF 白名单 CIDR 数组，写需 `setting:write` + 再认证，进入各集群 `global` 块的 `ssrf_allow_cidrs`，ADR-004 §6）、`auth.reauth_window_s`（L4 再认证窗口，默认 300 `[ASSUMPTION]`，ADR-018）、`placement.default_cluster_uids`（租户建站时由平台默认绑定的集群，租户不可选，ADR-009 §5）、`grpc.tls.san_extra`（Server 叶证书额外 SAN）、`website.revalidate_secret`（`value_enc`，P2）。
+- **已定义的键**（节选，其余随功能追加；键名为跨文档契约）：`system.run_mode`、`brand.*`、`login.*`、`retention.*`、`deploy.lineage`（BIGINT，初值 1；DB 恢复后由 `lingedge-server lineage bump` 提升，ADR-002 §12）、`ssrf.allow_cidrs`（平台 SSRF 白名单 CIDR 数组，写需 `setting:write` + 再认证，进入各集群 `global` 块的 `ssrf_allow_cidrs`，ADR-004 §6）、`auth.reauth_window_s`（L4 再认证窗口，默认 300 `[ASSUMPTION]`，ADR-018）、`auth.session_idle_ttl_s` / `auth.session_absolute_ttl_s`（会话滑动/绝对过期，秒；代码默认 7200 / 43200 `[ASSUMPTION]`，UD-27 待基线，Story 1.16）、`login.throttle_window_s` / `login.throttle_account_max` / `login.throttle_ip_max`（登录节流窗口与「账号 / 来源 IP」两个维度的失败阈值；代码默认 900 秒 / 10 / 30 `[ASSUMPTION]`，UD-27，Story 1.16）、`placement.default_cluster_uids`（租户建站时由平台默认绑定的集群，租户不可选，ADR-009 §5）、`grpc.tls.san_extra`（Server 叶证书额外 SAN）、`website.revalidate_secret`（`value_enc`，P2）。
 
 ### 1.2 `system_installations`　**M1**
 
@@ -145,12 +145,13 @@ C2。`role_id` FK→roles CASCADE；`permission_id` FK→permissions CASCADE。�
 
 ### 2.7 `sessions`　**M1**
 
-用途：Cookie 会话（ADR-018）。C2（无 uid；会话标识为令牌哈希）。
+用途：Cookie 会话（ADR-018）。C2；会话标识为令牌哈希；**对外引用 `uid`**（迁移 `000015`、CC-4）：OpenAPI 的 `session_ref`/`{sessionId}` 是 ULID，不暴露自增 id 与令牌哈希。
 
 | 列 | 类型 | 空 | 默认 | 说明 |
 |---|---|---|---|---|
+| uid | CHAR(26) | Y | — | 对外引用（ULID，`session_ref`）；000015 追加，应用写入路径永远带值；唯一 `uk_sessions_uid` |
 | token_hash | CHAR(64) | N | — | SHA-256(32B 随机令牌)；明文只在 Cookie |
-| csrf_hash | CHAR(64) | N | — | CSRF 令牌哈希 |
+| csrf_hash | CHAR(64) | N | — | CSRF 令牌哈希：`SHA-256(csrf)`，其中 `csrf = base64url(HMAC-SHA256(key=会话令牌原值, "lingedge/csrf/v1"))`——由会话令牌派生，故 `/auth/me`、`/auth/csrf` 对同一会话返回同一令牌（Story 1.16） |
 | user_id | BIGINT UNSIGNED | N | — | FK → users(id) ON DELETE CASCADE |
 | realm | VARCHAR(16) | N | — | `admin`/`console`（互不通用） |
 | tenant_id | BIGINT UNSIGNED | Y | — | Console 当前租户；FK → tenants(id) **RESTRICT** |

@@ -82,9 +82,10 @@ func serveMain(args []string, stderr io.Writer, environ []string) int {
 		_, _ = fmt.Fprintf(stderr, "%s: 拒绝启动：任务类型注册表无效: %v\n", name, err)
 		return 1
 	}
+	asm := &assembly{}
 	err = server.Run(ctx, server.Options{
 		Config: cfg, Roles: rs, Logger: logger,
-		Register: registerRoutes, Hooks: assembleHooks(), Tasks: tasks, Cron: registerCron, OpenMaint: openMaint, ShutdownTimeout: *timeout,
+		Register: asm.register, BuildHooks: asm.buildHooks, Tasks: tasks, Cron: registerCron, OpenMaint: openMaint, ShutdownTimeout: *timeout,
 	})
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "%s: %v\n", name, err)

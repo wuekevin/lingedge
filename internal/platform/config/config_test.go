@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -684,5 +685,41 @@ func TestDatabaseMaintConfig(t *testing.T) {
 	_, err := Parse([]byte(dbYAML("  maint:\n    user: lingedge_maint\n    "+"password"+"_file: "+f+"\n")), Options{Environ: []string{kv("LINGEDGE_DATABASE__MAINT__PASSWORD", "x1")}})
 	if err == nil || !hasProblem(problems(t, err), "database.maint", "只能设置其一") {
 		t.Errorf("password 与 password_file 应互斥: %v", err)
+	}
+}
+
+// ---- auth.argon2（Story 1.16）----
+
+func TestAuthArgon2Config(t *testing.T) {
+	d := Defaults()
+	if a := d.Auth.Argon2; a.MemoryKiB != 65536 || a.Iterations != 4 || a.Parallelism != 4 {
+		t.Errorf("缺省 argon2 参数应为基准测定值 64MiB/t=4/p=4: %+v", a)
+	}
+	if err := d.Validate(); err != nil {
+		t.Fatalf("缺省值应通过校验: %v", err)
+	}
+	cfg := mustParse(t, "auth:\n  argon2:\n    memory_kib: 32768\n    iterations: 3\n    parallelism: 2\n")
+	if a := cfg.Auth.Argon2; a.MemoryKiB != 32768 || a.Iterations != 3 || a.Parallelism != 2 {
+		t.Errorf("YAML 覆盖未生效: %+v", a)
+	}
+	// 环境变量覆盖。
+	cfg, err := Parse([]byte(""), Options{Environ: []string{"LINGEDGE_AUTH__ARGON2__MEMORY_KIB=24576"}})
+	if err != nil || cfg.Auth.Argon2.MemoryKiB != 24576 {
+		t.Errorf("环境变量覆盖: %v %+v", err, cfg)
+	}
+	// 低于 OWASP 下限 / 越界一律拒绝（错误只含键路径与规则，不回显取值）。
+	for _, c := range []struct{ yaml, path string }{
+		{"auth:\n  argon2:\n    memory_kib: 4096\n    iterations: 3\n    parallelism: 4\n", "auth.argon2.memory_kib"},
+		{"auth:\n  argon2:\n    memory_kib: 99999999\n    iterations: 3\n    parallelism: 4\n", "auth.argon2.memory_kib"},
+		{"auth:\n  argon2:\n    memory_kib: 65536\n    iterations: 1\n    parallelism: 4\n", "auth.argon2.iterations"},
+		{"auth:\n  argon2:\n    memory_kib: 65536\n    iterations: 99\n    parallelism: 4\n", "auth.argon2.iterations"},
+		{"auth:\n  argon2:\n    memory_kib: 65536\n    iterations: 3\n    parallelism: 0\n", "auth.argon2.parallelism"},
+		{"auth:\n  argon2:\n    memory_kib: 65536\n    iterations: 3\n    parallelism: 99\n", "auth.argon2.parallelism"},
+	} {
+		_, err := Parse([]byte(c.yaml), Options{})
+		var ce *Error
+		if !errors.As(err, &ce) || !hasProblem(ce.Problems, c.path, "") {
+			t.Errorf("%q 应报告 %s: %v", c.yaml, c.path, err)
+		}
 	}
 }

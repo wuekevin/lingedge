@@ -1,0 +1,11 @@
+# 认证/身份表（带 tenant_id 或按用户归属，但在「Scope 产生之前」或「以用户自身为边界」被访问）：repository 方法访问它们时可豁免「Scope 首参」规则（Story 1.16、ADR-009 §1 的受限例外）。
+# 豁免写法：方法/函数的文档注释中加一行 `lingedge:identity-table=<表名>`（多表逗号分隔）；表名必须在本清单内，否则门禁失败。
+# 为什么需要这个例外：登录、会话校验、登录日志写入发生在认证钩子里——此时还没有 Scope（Scope 钩子在认证之后才由主体生成，ADR-009 §5），
+# 而这些表的访问键恰好是用户自己的标识（email / token_hash / user_id），不是「按租户列举」。
+# 约束（由 gates_test 机器核对）：清单中的表必须在 docs/database 中定义；不得与 platform-tables.txt 重复；业务表（站点、规则、证书、任务……）一律不得列入。
+# 新增条目须随对应 Story 评审，并在该 Story 文档里说明理由。
+sessions
+login_logs
+tenant_members
+user_roles
+roles

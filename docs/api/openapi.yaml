@@ -88,7 +88,7 @@ paths:
       - auth
       operationId: login
       summary: 登录（口令）
-      description: 按 realm 建立会话。失败有节流（Redis + 登录日志）：超限统一返回 429 rate_limit.exceeded（含 Retry-After），节流按 identifier 计数而不论账号是否存在，故不存在账号枚举预言机（ADR-018）。启用 TOTP 的用户返回 status=totp_required 与 mfa_token。
+      description: 按 realm 建立会话。失败有节流（Redis + 登录日志）：超限统一返回 429 rate_limit.exceeded（含 Retry-After），节流按 identifier 计数而不论账号是否存在，故不存在账号枚举预言机（ADR-018）。凭据无效（用户不存在、口令错误、realm 不符、账号停用）统一返回 401 auth.invalid_credentials，响应逐字节相同。启用 TOTP 的用户返回 status=totp_required 与 mfa_token。
       parameters:
       - $ref: '#/components/parameters/XRequestID'
       requestBody:
@@ -109,6 +109,8 @@ paths:
                 $ref: '#/components/schemas/LoginResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -20671,7 +20673,7 @@ components:
       - code
     PasswordChangeRequest:
       type: object
-      description: 新密码强度策略由系统设置 login.* 决定；成功后吊销该用户其余会话。
+      description: 新密码强度策略由系统设置 login.* 决定；成功后吊销该用户的全部会话（含当前会话，须重新登录；Story 1.16 AC5）。
       properties:
         current_password:
           type: string

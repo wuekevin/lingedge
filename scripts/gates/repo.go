@@ -23,6 +23,18 @@ import (
 // 允许 `// lingedge:…` 与 `//lingedge:…`（后者被 go/ast 的 Doc.Text() 当作指令剔除，故直接扫描注释原文）；值整体取出后逐项核对，逗号分隔的多表一并检查。
 var rePlatformTable = regexp.MustCompile(`lingedge:platform-table=([A-Za-z0-9_,]+)`)
 
+// 认证/身份表豁免（Story 1.16）：这些表带 tenant_id 或按用户归属，但在「Scope 产生之前」（登录、会话校验、登录日志）被访问，
+// 访问键是用户自己的标识。清单 data/identity-tables.txt；与平台级表一样，名称必须在清单内，且不得用于 AcrossTenants 方法。
+var reIdentityTable = regexp.MustCompile(`lingedge:identity-table=([A-Za-z0-9_,]+)`)
+
+func identityTables() map[string]bool {
+	m := map[string]bool{}
+	for _, l := range loadLines("identity-tables.txt") {
+		m[l] = true
+	}
+	return m
+}
+
 // isConstructorName：仅 `New` 或 `New<大写开头>` 的包级函数是构造函数（NewestSites 之类不是）。
 func isConstructorName(name string) bool {
 	if name == "New" {
@@ -43,6 +55,7 @@ func runRepo(root string, _ options) ([]Finding, error) {
 	var out []Finding
 	fset := token.NewFileSet()
 	plat := platformTables()
+	ident := identityTables()
 	err := walkText(root, func(rel string, isDir bool) bool {
 		if isDir {
 			return rel != "internal" && !strings.HasPrefix(rel, "internal/")
@@ -54,7 +67,7 @@ func runRepo(root string, _ options) ([]Finding, error) {
 			out = append(out, Finding{File: f.Rel, Rule: "repo-unparseable", Msg: "无法解析 Go 文件，Scope 检查无法执行: " + err.Error()})
 			return
 		}
-		out = append(out, checkRepoFile(fset, f.Rel, file, plat)...)
+		out = append(out, checkRepoFile(fset, f.Rel, file, plat, ident)...)
 	})
 	return out, err
 }
@@ -70,7 +83,7 @@ func inRepositoryPackage(rel string) bool {
 	return reRepoPath.MatchString(rel[:i] + "/")
 }
 
-func checkRepoFile(fset *token.FileSet, rel string, file *ast.File, plat map[string]bool) []Finding {
+func checkRepoFile(fset *token.FileSet, rel string, file *ast.File, plat, ident map[string]bool) []Finding {
 	var out []Finding
 	// 本地名 → import 路径，用于识别 Scope 与 context.Context（含别名）。
 	locals := map[string]string{}
@@ -125,20 +138,28 @@ func checkRepoFile(fset *token.FileSet, rel string, file *ast.File, plat map[str
 		}
 
 		if fn.Doc != nil {
-			var tables []string
+			var platTables, identTables []string
 			for _, c := range fn.Doc.List {
 				if m := rePlatformTable.FindStringSubmatch(c.Text); m != nil {
-					tables = append(tables, strings.Split(m[1], ",")...)
+					platTables = append(platTables, strings.Split(m[1], ",")...)
+				}
+				if m := reIdentityTable.FindStringSubmatch(c.Text); m != nil {
+					identTables = append(identTables, strings.Split(m[1], ",")...)
 				}
 			}
-			if len(tables) > 0 {
-				for _, tbl := range tables {
+			if len(platTables) > 0 || len(identTables) > 0 {
+				for _, tbl := range platTables {
 					if !plat[tbl] {
 						add("豁免的表 " + tbl + " 不在平台级表清单（scripts/gates/data/platform-tables.txt）内；租户表不得豁免 Scope 首参（ADR-009 §1）")
 					}
 				}
+				for _, tbl := range identTables {
+					if !ident[tbl] {
+						add("豁免的表 " + tbl + " 不在认证/身份表清单（scripts/gates/data/identity-tables.txt）内；租户业务表不得豁免 Scope 首参（ADR-009 §1）")
+					}
+				}
 				if strings.Contains(fn.Name.Name, "AcrossTenants") {
-					add("名称含 AcrossTenants 的方法必须以 Scope 为首参（平台范围），不得用平台表豁免")
+					add("名称含 AcrossTenants 的方法必须以 Scope 为首参（平台范围），不得用平台表/身份表豁免")
 				}
 				continue
 			}

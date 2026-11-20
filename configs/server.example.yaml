@@ -59,6 +59,17 @@ log:
   # json | console（生产与日志采集使用 json）
   format: json
 
+auth:
+  # 口令哈希 argon2id 参数（Story 1.16、ADR-018 §4）。缺省值来自开发机（Apple M2 / 8 核）基准：m=64MiB、t=4、p=4 ≈ 47 ms/次；
+  # **生产机必须按其 CPU/内存复测后调整**（方法：go test -run '^$' -bench Argon2idHash -benchtime 20x ./internal/auth/internal/service/，
+  # 可用 LE_ARGON2_M/T/P 环境变量试不同组合；目标单次约 50–250 ms；并发峰值内存 ≈ 并发登录数 × m）。
+  # 下限（OWASP 最低建议）m>=19456 KiB、t>=2、p>=1，低于下限拒绝启动。改参数后，用户下次登录成功时其哈希会自动升级。
+  # 会话滑动/绝对过期、登录节流窗口与阈值是系统设置（system_settings 的 auth.* / login.* 键，UD-27），不在此处。
+  argon2:
+    memory_kib: 65536
+    iterations: 4
+    parallelism: 4
+
 secrets:
   # 主密钥文件（ADR-011）。留空 = 读取 $CREDENTIALS_DIRECTORY/master.key（systemd LoadCredential）。
   # 文件须 0400/0440 且属主为 root 或运行用户，否则拒绝启动；内容不在本文件、不入库、不入日志。

@@ -448,12 +448,24 @@ func TestGateCommandsNegativeAndCleanup(t *testing.T) {
 			files: map[string]string{"internal/origin/internal/repository/bad.go": repoSrc("func (SiteRepo) ListAcrossTenants(ctx context.Context) error { return nil }")},
 		},
 		{
-			name: "AcrossTenants 方法不得用平台表豁免", gate: "repo", wantRule: "repo-scope", wantText: "不得用平台表豁免",
+			name: "AcrossTenants 方法不得用平台表豁免", gate: "repo", wantRule: "repo-scope", wantText: "不得用平台表/身份表豁免",
 			files: map[string]string{"internal/website/internal/repository/bad.go": repoSrc("// lingedge:platform-table=nodes\nfunc (SiteRepo) ListNodesAcrossTenants(ctx context.Context) error { return nil }")},
 		},
 		{
 			name: "逗号分隔的多表豁免夹带租户表", gate: "repo", wantRule: "repo-scope", wantText: "表 sites 不在平台级表清单",
 			files: map[string]string{"internal/website/internal/repository/bad.go": repoSrc("// lingedge:platform-table=nodes,sites\nfunc (SiteRepo) Mixed(ctx context.Context) error { return nil }")},
+		},
+		{
+			name: "业务租户表不能用身份表豁免", gate: "repo", wantRule: "repo-scope", wantText: "不在认证/身份表清单",
+			files: map[string]string{"internal/website/internal/repository/bad.go": repoSrc("// ListAll 读全部站点。\n// lingedge:identity-table=sites\nfunc (SiteRepo) ListAll(ctx context.Context) error { return nil }")},
+		},
+		{
+			name: "身份表豁免夹带租户业务表", gate: "repo", wantRule: "repo-scope", wantText: "表 sites 不在认证/身份表清单",
+			files: map[string]string{"internal/auth/internal/repository/bad.go": repoSrc("// lingedge:identity-table=sessions,sites\nfunc (SiteRepo) Mixed(ctx context.Context) error { return nil }")},
+		},
+		{
+			name: "AcrossTenants 方法不得用身份表豁免", gate: "repo", wantRule: "repo-scope", wantText: "不得用平台表/身份表豁免",
+			files: map[string]string{"internal/auth/internal/repository/bad.go": repoSrc("// lingedge:identity-table=sessions\nfunc (SiteRepo) ListSessionsAcrossTenants(ctx context.Context) error { return nil }")},
 		},
 		{
 			name: "接口方法缺少 Scope", gate: "repo", wantRule: "repo-scope", wantText: "接口方法",
@@ -538,6 +550,10 @@ func (SiteRepo) ListNodes(ctx context.Context) error { return nil }
 
 //lingedge:platform-table=clusters
 func (SiteRepo) ListClusters(ctx context.Context) error { return nil }
+
+// FindSession 按令牌哈希取会话（认证钩子里还没有 Scope）。
+// lingedge:identity-table=sessions,tenant_members
+func (SiteRepo) FindSession(ctx context.Context, tokenHash string) error { return nil }
 
 type Reader interface {
 	Get(ctx context.Context, s scope.Scope, uid string) error

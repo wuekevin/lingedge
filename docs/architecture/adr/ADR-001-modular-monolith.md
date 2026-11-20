@@ -66,3 +66,8 @@
 
 - §3（L21）：对外契约改为**根包 `internal/<mod>`（仅 `api.go`）+ 实现在 `internal/<mod>/internal/…`**，与 architecture §5.2 统一；删除“`api.go` 是唯一可被 import 的文件”的不可执行说法。
 - §5（IMP-15）：新增 **ports 清单**（CertificateProvider、SiteDirectory、NodeDirectory、NodeTaskDispatcher、OriginHealthSink、RollupSink、LogSink/LogQuery、OriginGroupLookup、CachePolicyLookup、PlanCatalog）及“调用方只依赖 `platform/ports`、实现在装配层注入”的规则。原因：原依赖图禁止 node→L2、L2↔L2，但 gRPC `FetchCertificate`、`ReportOriginHealth`、`ReportRollups`、缓存任务派发、`LogQuery` 站点校验、规则引用源站/策略、CMS 读套餐都必需跨模块调用，depguard 按原图生成会使这些路径无法编译，只能临时豁免，边界规则形同虚设。
+
+## 修订记录 2026-11-21（Story 1.16，首个落地的业务模块）
+
+- §3：根包 `api.go` 可导出**纯委托的 `New*` 构造函数**（无接收者、函数体恰为单条 `return <本模块 internal 包>.<函数>(…)`；`scripts/gates` 的 arch 门禁据此放行，其他函数/方法/包级变量仍禁止）。原因：实现包位于 `internal/<mod>/internal/…`，按 Go 的 internal 规则只有 `internal/<mod>` 子树能 import 它们，`cmd/lingedge-server` 的装配层（§4「手写 wire」）因此无法取得模块实例——这个缺口此前没有任何模块触发。委托形态保证根包没有实现逻辑；模块契约（接口/DTO）仍在根包。
+- §9（ADR-009 §1 联动）：repo-scope 门禁新增受限例外 `lingedge:identity-table=<表>`（清单 `scripts/gates/data/identity-tables.txt`：`sessions, login_logs, tenant_members, user_roles, roles`）。原因：认证钩子里 Scope 尚未产生（Scope 钩子在认证之后才由主体生成），这些表的访问键是用户自己的标识；业务/审计表不得列入，`AcrossTenants` 方法仍不得豁免。

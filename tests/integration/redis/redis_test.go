@@ -667,3 +667,76 @@ func TestPublishSensitiveAndTenantForgery(t *testing.T) {
 
 // sensitiveValue 运行期拼出「口令赋值」形态的值（源码里不出现固定口令，NFR-6）。
 func sensitiveValue() string { return "pass" + "word=" + fmt.Sprintf("%d-xq", time.Now().UnixNano()) }
+
+// Story 1.16：Limiter.Peek（只读不计数）与 Reset——「只计失败」的登录节流所需。真实 Redis 上验证精确性、TTL、降级与恢复。
+func TestLimiterPeekAndReset(t *testing.T) {
+	in := redistest.Start(t)
+	c, _ := newClient(t, in, nil)
+	ctx := context.Background()
+	l := redisx.NewLimiter(c, nil)
+	k, _ := c.Keyspace().Key("auth", "login_acct", "peekkey")
+
+	// 空计数：放行、不创建键。
+	for i := 0; i < 3; i++ {
+		d, err := l.Peek(ctx, k, 2, time.Minute)
+		if err != nil || !d.Allowed || d.Remaining != 2 || d.Source != redisx.SourceRedis || d.Degraded {
+			t.Fatalf("空计数 Peek: %+v %v", d, err)
+		}
+	}
+	if _, ok, _ := c.TTL(ctx, k); ok {
+		t.Fatal("Peek 不得创建键（只读）")
+	}
+	// 计数 1、2：Peek 与 Allow 一致且不改变计数。
+	_, _ = l.Allow(ctx, k, 2, time.Minute)
+	if d, _ := l.Peek(ctx, k, 2, time.Minute); !d.Allowed || d.Remaining != 1 {
+		t.Fatalf("计数 1: %+v", d)
+	}
+	_, _ = l.Allow(ctx, k, 2, time.Minute)
+	d, err := l.Peek(ctx, k, 2, time.Minute)
+	if err != nil || d.Allowed || d.RetryAfter <= 0 || d.RetryAfter > time.Minute {
+		t.Fatalf("计数达到上限后 Peek 应拒绝并带 RetryAfter: %+v %v", d, err)
+	}
+	d2, _ := l.Peek(ctx, k, 2, time.Minute)
+	if d2.Allowed {
+		t.Fatal("重复 Peek 不得改变状态")
+	}
+	if got, _, _ := c.Get(ctx, k); got != "2" {
+		t.Fatalf("Peek 不得增加计数: %q", got)
+	}
+	// Reset 清零。
+	if err := l.Reset(ctx, k); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := l.Peek(ctx, k, 2, time.Minute); !d.Allowed || d.Remaining != 2 {
+		t.Fatalf("Reset 后应清零: %+v", d)
+	}
+	// 非法参数。
+	if _, err := l.Peek(ctx, k, 0, time.Minute); err == nil {
+		t.Fatal("limit<=0 应报错")
+	}
+	if _, err := l.Peek(ctx, redisx.Key{}, 2, time.Minute); err == nil {
+		t.Fatal("零值 Key 应报错")
+	}
+
+	// 降级：Peek 读进程内窗口（Allow 在降级期间累积的计数），Reset 清进程内窗口；恢复后回到 Redis。
+	in.Kill()
+	k2, _ := c.Keyspace().Key("auth", "login_acct", "peekdown")
+	for i := 0; i < 2; i++ {
+		_, _ = l.Allow(ctx, k2, 2, time.Minute)
+	}
+	d, err = l.Peek(ctx, k2, 2, time.Minute)
+	if err != nil || !d.Degraded || d.Allowed || d.Source != redisx.SourceLocal {
+		t.Fatalf("降级下 Peek 应读进程内窗口并拒绝: %+v %v", d, err)
+	}
+	if err := l.Reset(ctx, k2); err != nil {
+		t.Fatalf("降级下 Reset 不应报错: %v", err)
+	}
+	if d, _ := l.Peek(ctx, k2, 2, time.Minute); !d.Allowed || !d.Degraded {
+		t.Fatalf("降级下 Reset 后应放行: %+v", d)
+	}
+	in.Restart(t)
+	eventually(t, "Peek 回到 Redis", 5*time.Second, func() bool {
+		d, err := l.Peek(ctx, k, 2, time.Minute)
+		return err == nil && d.Source == redisx.SourceRedis && d.Allowed
+	})
+}

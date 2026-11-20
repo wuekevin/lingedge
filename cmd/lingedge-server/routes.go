@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 
+	"github.com/wuekevin/lingedge/internal/auth"
 	"github.com/wuekevin/lingedge/internal/platform/clock"
 	"github.com/wuekevin/lingedge/internal/platform/httpx"
 	"github.com/wuekevin/lingedge/internal/platform/server"
@@ -17,10 +19,23 @@ import (
 // registerRoutes 是 REST 路由的唯一装配点（Story 1.12）：各业务模块的路由注册函数在这里被调用（Story 1.16 起逐个追加），
 // 进程装配（Story 1.13）与 `lingedge-server routes` 共用它，因此导出的清单就是真实会被服务的路由集合。
 //
-// 已注册（Story 1.14）：任务中心 listTasks/getTask/listTaskEvents/cancelTask。其余 M1 业务路由由各 Story 追加，不用 501 占位（NFR-2）；
-// `make openapi-check` 会输出「M1 未实现 operation 清单」。认证/授权钩子仍是安全拒绝默认（1.16–1.21），因此这些路由现在对所有请求 401/403。
+// 已注册：任务中心 listTasks/getTask/listTaskEvents/cancelTask（Story 1.14）；认证 /auth/* 的 login/logout/getMe/getCsrfToken/changePassword/
+// listSessions/revokeSession/listMyLoginLogs（Story 1.16）。其余 M1 业务路由由各 Story 追加，不用 501 占位（NFR-2）；
+// `make openapi-check` 会输出「M1 未实现 operation 清单」。授权/Scope/审计钩子仍是安全拒绝默认（1.18–1.21）：任务中心路由认证通过后仍被授权钩子 403。
 func registerRoutes(r *httpx.Router, deps server.Deps) error {
-	return taskapi.Register(r, deps.Tasks)
+	return (&assembly{}).register(r, deps)
+}
+
+// register 注册全部路由：认证模块的 /auth/*（Story 1.16；a.auth 为 nil 时只用于导出清单）与任务中心。
+func (a *assembly) register(r *httpx.Router, deps server.Deps) error {
+	m := a.auth
+	if m == nil { // 仅导出路由清单（lingedge-server routes）：不需要数据库与 Redis
+		var err error
+		if m, err = auth.New(context.Background(), auth.Options{ManifestOnly: true}); err != nil {
+			return err
+		}
+	}
+	return errors.Join(m.Register(r), taskapi.Register(r, deps.Tasks))
 }
 
 // routesMain 实现 `lingedge-server routes [-o 文件]`：把路由清单（JSON）写到 stdout 或文件，供 make openapi-check 校验
