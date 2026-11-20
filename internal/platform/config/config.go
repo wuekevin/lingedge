@@ -45,6 +45,7 @@ type Config struct {
 	Redis    Redis    `yaml:"redis"`
 	Log      Log      `yaml:"log"`
 	Release  Release  `yaml:"release"`
+	Secrets  Secrets  `yaml:"secrets"`
 }
 
 // Server 是进程级设置。
@@ -92,6 +93,13 @@ type Redis struct {
 	TLS           bool   `yaml:"tls"`
 	TLSCAFile     string `yaml:"tls_ca_file"`
 	TLSServerName string `yaml:"tls_server_name"`
+}
+
+// Secrets 是密钥保管设置（ADR-011、Story 1.11）。主密钥内容绝不出现在配置里，这里只指向文件。
+type Secrets struct {
+	// MasterKeyFile 是主密钥文件的绝对路径；留空则读取 $CREDENTIALS_DIRECTORY/master.key（systemd LoadCredential）。
+	// 文件须 0400/0440 且属主正确，否则拒绝启动（pkg/secretbox.FileKeyProvider）。
+	MasterKeyFile string `yaml:"master_key_file"`
 }
 
 // Log 是日志设置。
@@ -540,6 +548,9 @@ func (c *Config) validateProblems() []Problem {
 	}
 	if c.Release.CAFile != "" && !filepath.IsAbs(c.Release.CAFile) {
 		add("release.ca_file", "必须是绝对路径")
+	}
+	if c.Secrets.MasterKeyFile != "" && !filepath.IsAbs(c.Secrets.MasterKeyFile) {
+		add("secrets.master_key_file", "必须是绝对路径")
 	}
 	if (r.TLSCAFile != "" || r.TLSServerName != "") && !r.TLS {
 		add("redis.tls", "设置了 tls_ca_file/tls_server_name 时必须 tls: true")

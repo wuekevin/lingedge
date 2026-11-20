@@ -46,7 +46,7 @@ development_status:
   1-8-m1-迁移-b-节点集群-站点-证书-源站-规则-缓存-000006-000011: review   # 开发完成、本机门禁全绿（真实 MySQL 空库 up 49 表/重放幂等/逐表授权与 maint 分区权限负向/复合外键与约束负向/循环外键/rule_versions 不可变/EXPLAIN/DDL 陷阱变异覆盖）；8.0.16 最低版本空库全量 up 与 CI 接入 MySQL 属等待环境验证；待独立复验后转 done
   1-9-m1-迁移-c-配置修订-发布队列-部署-观测-000012-000013-与契约冻结点-cf-2: review   # 开发完成、本机门禁全绿（真实 MySQL 空库 up 61 表/重放幂等/逐表授权/触发器与复合外键负向/DDL 陷阱变异）；跨租户外键以复合外键处置并有 CC-1；CF-2 封存（CHECKSUMS 13 条，标签 migrations-m1 本地）；8.0.16 最低版本空库全量 up 与 CI 接入 MySQL 属等待环境验证；待独立复验后转 done
   1-10-redis-边界封装与降级-adr-025: review   # 开发完成、本机门禁全绿（真实 redis-server 8.10.1 独立临时实例：连通/TTL/命名空间、杀进程/重启/FLUSHALL/SIGSTOP 超时注入后降级与自愈、口令与 TLS 脱敏、Pub/Sub 轮询兜底、并发混沌）；Linux 验收机 Redis 版本与 Redis 最低版本约束属等待环境验证；待独立复验后转 done
-  1-11-密钥基础库-secretbox-keyprovider-主密钥: backlog
+  1-11-密钥基础库-secretbox-keyprovider-主密钥: review   # 开发完成、本机门禁全绿（真实 AES-256-GCM 信封加密：AAD 搬迁/篡改/轮换 rewrap 250 条/KEK 移除核对、主密钥文件 0400/0440+属主+符号链接、缺主密钥负向、DEK/KEK 清零、-race、G-5 日志扫描已接入 make security）；真实 systemd $CREDENTIALS_DIRECTORY、root 属主场景与 LimitCORE=0 生效属等待环境验证；待独立复验后转 done
   1-12-http-服务骨架-路由元数据-统一响应-幂等-健康检查: backlog
   1-13-lingedge-server-进程装配-roles-子命令-sd_notify: backlog
   1-14-任务运行时-tasks-队列-租约-围栏-白名单任务类型: backlog

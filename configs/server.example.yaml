@@ -54,6 +54,11 @@ log:
   # json | console（生产与日志采集使用 json）
   format: json
 
+secrets:
+  # 主密钥文件（ADR-011）。留空 = 读取 $CREDENTIALS_DIRECTORY/master.key（systemd LoadCredential）。
+  # 文件须 0400/0440 且属主为 root 或运行用户，否则拒绝启动；内容不在本文件、不入库、不入日志。
+  # master_key_file: /etc/lingedge/server/master.key
+
 # release:
 #   # 官方发行源地址（未定，UD-3），必须是 https，不得内嵌凭据。
 #   base_url: https://releases.example.org/
