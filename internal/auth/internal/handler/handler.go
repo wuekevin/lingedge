@@ -59,6 +59,10 @@ func New(svc *service.Service) *Handlers { return &Handlers{svc: svc} }
 
 // Register 注册全部 /auth/* 路由。
 func (h *Handlers) Register(r *httpx.Router) error {
+	return errors.Join(h.registerAdmin(r), h.registerAuth(r))
+}
+
+func (h *Handlers) registerAuth(r *httpx.Router) error {
 	return errors.Join(
 		r.Register(MetaLogin, h.login),
 		r.Register(MetaLogout, h.logout),

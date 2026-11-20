@@ -1011,6 +1011,8 @@ paths:
           $ref: '#/components/responses/ReauthRequired'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -1083,11 +1085,19 @@ paths:
                   format: password
                   writeOnly: true
                   minLength: 12
-              required:
-              - new_password
+                  description: 由管理员设定的临时口令；省略（请求体 {}）时由服务端生成并经 200 响应的 temporary_password 回显一次
       responses:
+        '200':
+          description: 口令由服务端生成：temporary_password 仅此一次回显（响应带 Cache-Control no-store，不入日志）；用户 must_change_password=1 且全部会话已吊销
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemporaryPassword'
         '204':
-          description: 成功，无响应体
+          description: 成功（口令由管理员设定），无响应体
           headers:
             X-Request-ID:
               $ref: '#/components/headers/XRequestID'
@@ -1370,6 +1380,8 @@ paths:
           $ref: '#/components/responses/ReauthRequired'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -21176,6 +21188,10 @@ components:
           items:
             type: string
           description: 平台角色 code
+        temporary_password:
+          type: string
+          readOnly: true
+          description: 仅在 createUser 的 201 响应且口令由服务端生成时出现一次（明文一次性回显；之后不可再取得，忘记请 reset-password）。响应带 Cache-Control no-store
         created_at:
           $ref: '#/components/schemas/Timestamp'
         updated_at:
@@ -21214,7 +21230,7 @@ components:
           format: password
           writeOnly: true
           minLength: 12
-          description: 由创建者设定；创建后强制首次登录改密（must_change_password=1）。系统不产生任何固定默认口令（NFR-6）
+          description: 由创建者设定；省略时由服务端生成一次性随机口令，仅在本次 201 响应的 temporary_password 中回显一次（不入日志、不入幂等记录）。创建后强制首次登录改密（must_change_password=1）。系统不产生任何固定默认口令（NFR-6）
         role_codes:
           type: array
           items:
@@ -21228,7 +21244,6 @@ components:
       - email
       - display_name
       - user_type
-      - initial_password
     UserUpdate:
       type: object
       properties:
@@ -21333,6 +21348,14 @@ components:
           type: string
         description:
           type: string
+    TemporaryPassword:
+      type: object
+      properties:
+        temporary_password:
+          type: string
+          description: 服务端生成的一次性临时口令（明文仅此一次回显）
+      required:
+      - temporary_password
     RolePermissionsUpdate:
       type: object
       properties:

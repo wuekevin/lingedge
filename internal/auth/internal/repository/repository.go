@@ -129,7 +129,7 @@ func (r *Repo) FindSessionByTokenHash(ctx context.Context, tokenHash string) (do
 	var v domain.SessionView
 	err := r.ex(ctx).Get(ctx, &v, db.Q(`SELECT s.id, COALESCE(s.uid, '') AS uid, s.csrf_hash, s.user_id, s.realm, s.tenant_id, s.created_at, s.last_seen_at, s.expires_at,
 		s.absolute_expires_at, s.revoked_at, s.mfa_verified_at, s.reauth_at,
-		u.uid AS user_uid, u.user_type, u.email, u.display_name, u.status AS user_status, u.locale, u.totp_enabled, u.must_change_password,
+		u.uid AS user_uid, u.user_type, u.email, u.display_name, u.status AS user_status, u.locale, u.totp_enabled, u.must_change_password, u.permission_version,
 		u.deleted_at AS user_deleted_at,
 		t.uid AS tenant_uid, t.name AS tenant_name, t.slug AS tenant_slug, t.is_default AS tenant_is_default, t.status AS tenant_status, t.deleted_at AS tenant_deleted_at,
 		(m.id IS NOT NULL) AS member_ok

@@ -114,9 +114,28 @@ func TestServerProcessAuthLogin(t *testing.T) {
 	if code, body, _ := do("GET", "/auth/me", nil, tok, ""); code != 200 || !strings.Contains(string(body), `"realm":"admin"`) {
 		t.Fatalf("/auth/me: %d %s", code, body)
 	}
-	// 授权钩子尚未实现：认证通过的非自助路由（任务中心）仍被拒绝，不因「已登录」放行。
+	// Story 1.18：真实装配的 RBAC 授权钩子——没有任何角色的已认证用户访问受保护路由 → 403，不因「已登录」放行。
 	if code, body, _ := do("GET", "/tasks", nil, tok, ""); code != 403 {
-		t.Fatalf("任务中心在授权钩子实现前应 403: %d %s", code, body)
+		t.Fatalf("无角色用户访问任务中心应 403: %d %s", code, body)
+	}
+	if code, body, _ := do("GET", "/admin/permissions", nil, tok, ""); code != 403 {
+		t.Fatalf("无角色用户访问 /admin/permissions 应 403: %d %s", code, body)
+	}
+	// 授予内置 platform_admin（安装向导/已有管理员的授予，这里直接写库并递增 permission_version）→ 下一个请求即放行；真实进程的 /admin 路由可用。
+	e.root(t, "INSERT INTO §.user_roles (user_id, role_id, tenant_id) SELECT u.id, r.id, NULL FROM §.users u JOIN §.roles r ON r.code = 'platform_admin' AND r.tenant_id IS NULL WHERE u.email = ?", email)
+	e.root(t, "UPDATE §.users SET permission_version = permission_version + 1 WHERE email = ?", email)
+	if code, body, _ := do("GET", "/admin/permissions?page_size=5", nil, tok, ""); code != 200 || !strings.Contains(string(body), `"total":81`) {
+		t.Fatalf("platform_admin 应可读权限点字典: %d %s", code, body)
+	}
+	if code, body, _ := do("GET", "/admin/users", nil, tok, ""); code != 200 || !strings.Contains(string(body), email) {
+		t.Fatalf("platform_admin 应可列出用户: %d %s", code, body)
+	}
+	if code, body, _ := do("GET", "/tasks", nil, tok, ""); code != 200 {
+		t.Fatalf("platform_admin 跨租户只读任务中心应 200: %d %s", code, body)
+	}
+	// 写操作要求审计：真实进程里 /admin 写操作经过渡审计钩子（结构化日志）；高危操作窗口外 403 auth.reauth_required（先权限后再认证）。
+	if code, body, _ := do("POST", "/admin/users", map[string]any{"email": "x" + email, "display_name": "n", "user_type": "platform"}, tok, csrf); code != 403 || !strings.Contains(string(body), "auth.reauth_required") {
+		t.Fatalf("窗口外创建用户应 403 auth.reauth_required: %d %s", code, body)
 	}
 	if code, _, _ := do("GET", "/tasks", nil, "", ""); code != 401 {
 		t.Fatalf("未认证应 401: %d", code)

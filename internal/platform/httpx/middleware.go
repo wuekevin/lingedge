@@ -244,9 +244,14 @@ func authzMiddleware(h Authorizer, meta RouteMeta) gin.HandlerFunc {
 			Fail(c, apierr.New(apierr.AuthUnauthenticated, "authentication required"))
 			return
 		}
+		carrier := &accessCarrier{}
+		c.Request = c.Request.WithContext(withAccessCarrier(c.Request.Context(), carrier))
 		if err := h.Authorize(c.Request, meta, p); err != nil {
 			Fail(c, err)
 			return
+		}
+		if carrier.set { // 授权决策交给后续钩子（Scope 钩子，见 access.go）
+			c.Request = c.Request.WithContext(withAccess(c.Request.Context(), carrier.d))
 		}
 		c.Next()
 	}

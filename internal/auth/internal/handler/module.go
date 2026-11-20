@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -35,6 +36,10 @@ type Options struct {
 	Box *secretbox.Box
 	// MaxConcurrentHashes 限制并发的 argon2id 计算数（每次占用 m KiB 内存）；<=0 取 max(2, CPU 数)。
 	MaxConcurrentHashes int
+	// PermCacheTTL 是权限集缓存的 TTL（<=0 或 >60 秒时取 60 秒，ADR-025 §1）；测试可调小以验证 TTL 兜底。
+	PermCacheTTL time.Duration
+	// PermPollEvery 是权限失效广播的轮询兜底周期（<=0 取 30 秒）；测试可调小。
+	PermPollEvery time.Duration
 	// ManifestOnly 仅用于导出路由清单（lingedge-server routes）：不需要数据库与 Redis，处理函数不可被调用。
 	ManifestOnly bool
 }
@@ -44,12 +49,17 @@ type Module struct {
 	svc      *service.Service
 	handlers *Handlers
 	authn    *Authenticator
+	authz    *Authorizer
+	log      *zap.Logger
 }
 
 // NewModule 创建认证模块。
 func NewModule(ctx context.Context, o Options) (*Module, error) {
 	if o.ManifestOnly {
-		return &Module{handlers: New(nil)}, nil
+		return &Module{handlers: New(nil), log: zap.NewNop()}, nil
+	}
+	if o.Log == nil {
+		o.Log = zap.NewNop()
 	}
 	repo, err := repository.New(o.Pool)
 	if err != nil {
@@ -59,11 +69,11 @@ func NewModule(ctx context.Context, o Options) (*Module, error) {
 	if err != nil {
 		return nil, err
 	}
-	svc, err := service.New(ctx, service.Options{Repo: repo, WithTx: o.Pool.WithTx, Redis: o.Redis, Hasher: h, Box: o.Box, Clock: o.Clock, IDs: o.IDs, Log: o.Log})
+	svc, err := service.New(ctx, service.Options{Repo: repo, WithTx: o.Pool.WithTx, Redis: o.Redis, Hasher: h, Box: o.Box, Clock: o.Clock, IDs: o.IDs, Log: o.Log, PermCacheTTL: o.PermCacheTTL, PermPollEvery: o.PermPollEvery})
 	if err != nil {
 		return nil, err
 	}
-	return &Module{svc: svc, handlers: New(svc), authn: NewAuthenticator(svc, o.ExtraOrigins, o.Bearer)}, nil
+	return &Module{svc: svc, handlers: New(svc), authn: NewAuthenticator(svc, o.ExtraOrigins, o.Bearer), authz: NewAuthorizer(svc), log: o.Log.Named("auth")}, nil
 }
 
 // Authenticator 返回 httpx 认证钩子的真实实现（装配点：cmd/lingedge-server 的 assembleHooks）；ManifestOnly 时为 nil。
@@ -108,4 +118,28 @@ func (m *Module) Flush() {
 	if m.svc != nil {
 		m.svc.Flush()
 	}
+}
+
+// AdminRoute 报告 operationID 是否是本模块的 /admin 管理路由。
+func (m *Module) AdminRoute(operationID string) bool { return IsAdminOperation(operationID) }
+
+// Hooks 是 REST 四个钩子的唯一装配（cmd/lingedge-server 与集成测试共用，避免装配漂移）：
+//
+//	Authenticator  Cookie 会话（Bearer 待 1.19）。
+//	Authorizer     RBAC（Story 1.18）：权限集 ∩ 路由声明；平台/租户主体 × x-tenant-scope × X-Tenant-ID 的授权矩阵（rbac.Decide），
+//	               放行时登记授权决策；x-reauth 在权限通过之后由 httpx.WithReauth 执行（先权限后再认证）。
+//	Scope          过渡实现 httpx.WithAccessScope：只把「不需要解析 X-Tenant-ID」的授权决策落成 Scope；acting-as 与其他一切委托给安全拒绝默认（完整实现 Story 1.20）。
+//	Auditor        安全拒绝默认；仅本模块的 /admin 管理 operation 走结构化日志过渡（不是 audit_logs，待 Story 1.21）。
+//	WithSelfService  /auth/* 自助 operation 的最小授权语义（1.16；1.18–1.21 交付后评估是否保留）。
+func (m *Module) Hooks() httpx.Hooks {
+	base := httpx.Hooks{Authenticator: m.Authenticator(), Authorizer: m.authzHook(), Auditor: adminAuditor{inner: httpx.DenyAuditor{}, log: m.log}}
+	base = httpx.WithAccessScope(base)
+	return httpx.WithReauth(httpx.WithSelfService(base, m.SelfService), m.ReauthChecker())
+}
+
+func (m *Module) authzHook() httpx.Authorizer {
+	if m.authz == nil {
+		return nil // ManifestOnly：默认安全拒绝
+	}
+	return m.authz
 }

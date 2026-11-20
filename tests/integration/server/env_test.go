@@ -53,9 +53,9 @@ type env struct {
 
 type ports struct{ http, grpc, enroll, metrics int }
 
-// 迁移范围：all = 全部内嵌迁移（含追加迁移 000014–000017）；m1Only = 仅 M1 冻结范围 000001–000013（模拟「库尚未升级到 000014」）。
+// 迁移范围：all = 全部内嵌迁移（含追加迁移 000014–000018）；m1Only = 仅 M1 冻结范围 000001–000013（模拟「库尚未升级到 000014」）。
 const (
-	all    = 17
+	all    = 18
 	m1Only = 13
 )
 

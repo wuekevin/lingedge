@@ -24,13 +24,15 @@ func TestRoutesSubcommandExportsManifest(t *testing.T) {
 		got[e["operation_id"].(string)] = true
 	}
 	for _, id := range []string{"listTasks", "getTask", "listTaskEvents", "cancelTask",
-		"login", "logout", "getMe", "getCsrfToken", "changePassword", "listSessions", "revokeSession", "listMyLoginLogs"} {
+		"login", "logout", "getMe", "getCsrfToken", "changePassword", "listSessions", "revokeSession", "listMyLoginLogs",
+		"listUsers", "createUser", "getUser", "updateUser", "deleteUser", "setUserRoles", "unlockUser", "resetUserPassword", "revokeUserSessions",
+		"listRoles", "createRole", "getRole", "updateRole", "deleteRole", "setRolePermissions", "listPermissions"} {
 		if !got[id] {
-			t.Errorf("清单缺少任务中心路由 %s", id)
+			t.Errorf("清单缺少路由 %s", id)
 		}
 	}
-	if len(m) != 17 {
-		t.Errorf("当前应恰有 17 条路由（任务中心 4 + 认证 13），实际 %d", len(m))
+	if len(m) != 33 {
+		t.Errorf("当前应恰有 33 条路由（任务中心 4 + 认证 13 + 用户/角色/权限管理 16），实际 %d", len(m))
 	}
 	for _, e := range m {
 		if e["operation_id"] == "" {

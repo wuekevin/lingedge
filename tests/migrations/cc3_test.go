@@ -18,7 +18,7 @@ func TestCC3AppReadsSchemaMigrationsOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("全部（含 000014）迁移 up: %v", err)
 	}
-	if res.ToVersion != 17 {
+	if res.ToVersion != 18 {
 		t.Fatalf("up 结果: %+v", res)
 	}
 	app := e.appPool(t)
@@ -26,8 +26,8 @@ func TestCC3AppReadsSchemaMigrationsOnly(t *testing.T) {
 	ex := app.Executor(ctx)
 
 	var max int64
-	if err := ex.Get(ctx, &max, db.Q("SELECT MAX(version_id) FROM schema_migrations WHERE is_applied = 1")); err != nil || max != 17 {
-		t.Fatalf("app 应能读到迁移版本 17（最新）: %v %d", err, max)
+	if err := ex.Get(ctx, &max, db.Q("SELECT MAX(version_id) FROM schema_migrations WHERE is_applied = 1")); err != nil || max != 18 {
+		t.Fatalf("app 应能读到迁移版本 18（最新）: %v %d", err, max)
 	}
 	for _, c := range []struct {
 		name string

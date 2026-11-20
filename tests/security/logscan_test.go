@@ -255,3 +255,29 @@ func TestLogScanTOTPScenarios(t *testing.T) {
 		t.Fatal("输出里没有任何脱敏标记，测试可能没有真正产生日志")
 	}
 }
+
+// G-5（RBAC 用户管理场景，Story 1.18）：创建/重置口令时服务端生成的一次性口令（temporary_password）、创建者设定的口令（initial_password/new_password），
+// 无论经消息、键名敏感的字段、请求/响应体 JSON、错误链还是嵌套对象写入日志，输出都不得含明文。
+// 端到端（真实 MySQL/Redis 上创建/重置用户后扫描真实日志、幂等记录）见 tests/integration/auth 的 TestAdminUsersLifecycle。
+func TestLogScanAdminPasswordScenarios(t *testing.T) {
+	l, buf := newLogger(t)
+	gen := "Gq" + randomBareKey(t)[:22] // 形如服务端生成的 24 位一次性口令
+	set := "pw-" + randomBareKey(t)[:20] + "-Zq9"
+	secrets := []string{gen, set}
+	tp, ip, np := "temporary_"+"pass"+"word", "initial_"+"pass"+"word", "new_"+"pass"+"word"
+
+	l.Info("创建响应", zap.String(tp, gen), zap.String("body", `{"uid":"x","`+tp+`":"`+gen+`"}`))
+	l.Warn("创建请求体", zap.String("body", `{"email":"a@b.test","`+ip+`":"`+set+`"}`))
+	l.Warn("重置请求体", zap.String("body", `{"`+np+`":"`+set+`"}`), zap.String("note", np+"="+set+" "+tp+"="+gen))
+	l.Error("错误链", zap.Error(fmt.Errorf("reset: %w", errors.New(tp+"="+gen+" "+ip+"="+set))))
+	l.Info("嵌套", zap.Any("resp", map[string]any{tp: gen, "user": map[string]any{ip: set, np: set}}))
+	out := buf.String()
+	for _, s := range secrets {
+		if strings.Contains(out, s) {
+			t.Errorf("RBAC 口令场景日志泄露了 %q…\n%s", s[:8], out)
+		}
+	}
+	if !strings.Contains(out, "***") {
+		t.Fatal("输出里没有任何脱敏标记，测试可能没有真正产生日志")
+	}
+}

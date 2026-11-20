@@ -38,7 +38,8 @@ func (okAuthn) Authenticate(*http.Request, httpx.RouteMeta) (tenantscope.Princip
 	return &testPrincipal{actor: 1, tenant: 1}, nil
 }
 
-// WithReauth：x-reauth 路由先过再认证检查（失败则不进授权钩子、handler 不执行）；非 x-reauth 路由不检查；未装配检查组件时 fail-closed。
+// WithReauth：先权限后再认证（Story 1.18 修订）——授权钩子失败则不运行再认证检查（无权限者不会被提示再认证）；
+// 授权通过后 x-reauth 路由再过再认证检查（失败则 handler 不执行）；非 x-reauth 路由不检查；未装配检查组件时 fail-closed。
 func TestWithReauthOrderingAndFailClosed(t *testing.T) {
 	reauthMeta := meta("putRunMode", "PUT", "/admin/system/run-mode")
 	reauthMeta.Reauth, reauthMeta.TenantScope = true, httpx.ScopePlatform
@@ -54,11 +55,11 @@ func TestWithReauthOrderingAndFailClosed(t *testing.T) {
 		trace   []string
 		called  bool
 	}{
-		{"x-reauth 检查失败", reauthMeta, recordingChecker{err: apierr.New(apierr.AuthReauthRequired, "reauth")}, nil, 403, "auth.reauth_required", []string{"reauth"}, false},
-		{"x-reauth 检查通过后仍受授权约束", reauthMeta, recordingChecker{}, apierr.New(apierr.AuthForbidden, "no"), 403, "auth.forbidden", []string{"reauth", "authz"}, false},
-		{"x-reauth 检查与授权都通过", reauthMeta, recordingChecker{}, nil, 200, "", []string{"reauth", "authz"}, true},
+		{"授权通过后 x-reauth 检查失败", reauthMeta, recordingChecker{err: apierr.New(apierr.AuthReauthRequired, "reauth")}, nil, 403, "auth.reauth_required", []string{"authz", "reauth"}, false},
+		{"无权限者先得到 403 auth.forbidden，再认证检查不运行", reauthMeta, recordingChecker{err: apierr.New(apierr.AuthReauthRequired, "reauth")}, apierr.New(apierr.AuthForbidden, "no"), 403, "auth.forbidden", []string{"authz"}, false},
+		{"授权与 x-reauth 检查都通过", reauthMeta, recordingChecker{}, nil, 200, "", []string{"authz", "reauth"}, true},
 		{"非 x-reauth 路由不检查", plain, recordingChecker{err: apierr.New(apierr.AuthReauthRequired, "reauth")}, nil, 200, "", []string{"authz"}, true},
-		{"未装配检查组件：fail-closed", reauthMeta, nil, nil, 403, "auth.forbidden", nil, false},
+		{"未装配检查组件：fail-closed", reauthMeta, nil, nil, 403, "auth.forbidden", []string{"authz"}, false},
 	}
 	for _, c := range cases {
 		var trace []string

@@ -41,13 +41,13 @@ endef
 
 .PHONY: help build verify-build test race lint fmt vet check-scaffold clean \
         gen-lint arch-check golangci shell-check repo-check gate-selftest vuln verify-gates \
-        contract-bin contract-selftest openapi-breaking migrations-check migrations-seal freeze-check contract-check \
+        contract-bin contract-selftest openapi-breaking migrations-check migrations-seal freeze-check perms-check contract-check \
         print-ldflags migrate migrate-test proto proto-check openapi-check frontend e2e edge-test security release
 
 help:
 	@echo "目标: build verify-build test race lint migrate migrate-test proto proto-check openapi-check frontend e2e edge-test security release"
 	@echo "辅助: fmt vet check-scaffold clean gen-lint arch-check golangci shell-check gate-selftest vuln verify-gates"
-	@echo "契约(Story 1.3): contract-check（= contract-selftest openapi-check proto-check migrations-check freeze-check）migrations-seal"
+	@echo "契约(Story 1.3): contract-check（= contract-selftest openapi-check proto-check migrations-check freeze-check perms-check[Story 1.18]）migrations-seal"
 	@echo "迁移(Story 1.6): migrate（MIGRATE_ARGS=plan|up|down|status|recover|lint ...）migrate-test"
 	@echo "未实现的目标会输出 NOT_IMPLEMENTED(story X.Y) 并以非零退出。"
 
@@ -196,7 +196,12 @@ migrations-seal: contract-bin
 freeze-check: contract-bin
 	$(CONTRACT) freeze-check
 
-contract-check: contract-selftest openapi-check proto-check migrations-check freeze-check
+# 权限一致性（Story 1.18 AC1、ADR-018 §8）：代码权限注册表 ⇄ 种子迁移 ⇄ openapi.yaml 的 x-permissions 三方一致，且权限 scope 与路由的 x-tenant-scope 相容；
+# 门禁自身的负向样本在 scripts/gates/perms_test.go（随 make gate-selftest 运行）。
+perms-check:
+	$(GATES) perms
+
+contract-check: contract-selftest openapi-check proto-check migrations-check freeze-check perms-check
 
 frontend:
 	$(call not_implemented,1.36)

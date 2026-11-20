@@ -172,6 +172,7 @@ func TestXReauthOperationsEnforcedInChain(t *testing.T) {
 	}
 
 	u := s.seedUser("platform")
+	s.grantPlatformRole(u, "platform_admin") // 先权限后再认证（Story 1.18）：x-reauth 路由的再认证检查只对已通过权限判定的主体运行
 	_, token, csrf := s.login(u, freshIP())
 	call := func(o opx, extra ...reqOpt) resp {
 		var body any
@@ -188,18 +189,37 @@ func TestXReauthOperationsEnforcedInChain(t *testing.T) {
 		}
 		s.contract(o.id, o.method, o.path, r)
 	}
-	// 再认证后：窗口内不再是 reauth_required（授权钩子在 1.18 前仍拒绝 → auth.forbidden，证明再认证检查已通过且未放行未授权的操作）。
+	// 再认证后：窗口内越过再认证与授权（占位路由到达 handler → 200；1.18 已实现的真实 handler 因空请求体/不存在的目标返回 400/404，但绝不是 403）。
 	if r := s.reauth("admin", token, csrf, map[string]string{"password": u.Password}); r.Status != 200 {
 		t.Fatalf("reauth: %d %s", r.Status, r.Body)
 	}
+	// Story 1.18 已有真实实现的 x-reauth operation（其余仍是按 openapi 元数据注册的占位路由）。
+	realOps := map[string]bool{"createUser": true, "deleteUser": true, "resetUserPassword": true, "setUserRoles": true,
+		"createRole": true, "updateRole": true, "deleteRole": true, "setRolePermissions": true}
+	audited := map[string]bool{}
+	for _, m := range s.router.Routes() {
+		audited[m.OperationID] = m.Audit
+	}
 	for _, o := range ops {
-		if r := call(o); r.Status != 403 || r.errCode(t) != "auth.forbidden" {
-			t.Errorf("%s 窗口内应越过再认证（仍被未实现的授权钩子拒绝 auth.forbidden）: %d %s", o.id, r.Status, r.Body)
+		r := call(o)
+		if r.Status == 403 {
+			t.Errorf("%s 窗口内且有权限，不应再 403: %s", o.id, r.Body)
+		}
+		if realOps[o.id] {
+			continue
+		}
+		// 占位路由：要求审计（x-audit）的在 audit 模块（1.21）装配前仍被审计钩子安全拒绝（500，不放宽）；其余应到达 handler。
+		if audited[o.id] {
+			if r.Status != 500 || strings.Contains(string(r.Body), "reached") {
+				t.Errorf("%s 要求审计但审计钩子未实现，应被安全拒绝（500）: %d %s", o.id, r.Status, r.Body)
+			}
+		} else if !strings.Contains(string(r.Body), "reached") {
+			t.Errorf("%s 占位路由应到达 handler: %d %s", o.id, r.Status, r.Body)
 		}
 	}
 	// 窗口边界：恰好 300 秒仍在窗口内；多 1 毫秒即过期。
 	s.clk.Advance(300 * time.Second)
-	if r := call(ops[0]); r.errCode(t) != "auth.forbidden" {
+	if r := call(ops[0]); r.Status == 403 {
 		t.Errorf("恰在窗口末尾应仍有效: %d %s", r.Status, r.Body)
 	}
 	s.clk.Advance(time.Millisecond)
@@ -213,11 +233,12 @@ func TestXReauthOperationsEnforcedInChain(t *testing.T) {
 		t.Errorf("非 x-reauth 路由不应要求再认证: %s", r.Body)
 	}
 
-	// Bearer API Token 请求不能满足再认证：即使对同一用户也一样（没有会话，必须是 Cookie 会话）。
+	// Bearer API Token 请求不能满足再认证：测试替身不是认证模块产出的主体，授权钩子对它 fail-closed（403）；
+	// Bearer 主体在 ReauthChecker 内同样永远不满足（见 handler 单测 TestBearerCannotSatisfyReauthOrRecentMFA）。任何 x-reauth 路由都不得被 Bearer 请求执行。
 	for _, o := range ops {
 		r := s.do(o.method, o.path, map[string]string{}, withHeader("Authorization", "Bearer le_ab12cd34_"+strings.Repeat("x", 20)))
-		if r.Status != 403 || r.errCode(t) != "auth.reauth_required" {
-			t.Errorf("%s: Bearer 请求不能满足再认证: %d %s", o.id, r.Status, r.Body)
+		if r.Status != 403 || strings.Contains(string(r.Body), "reached") {
+			t.Errorf("%s: Bearer 请求不能越过 x-reauth 路由: %d %s", o.id, r.Status, r.Body)
 		}
 	}
 	if r := s.do("POST", "/auth/reauth", map[string]string{"password": u.Password}, withHeader("Authorization", "Bearer le_ab12cd34_"+strings.Repeat("x", 20))); r.Status == 200 {
@@ -229,6 +250,7 @@ func TestXReauthOperationsEnforcedInChain(t *testing.T) {
 func TestReauthWindowConfigurable(t *testing.T) {
 	s := newStack(t, stackOpts{fakeClock: true, reauthRoutes: true, settings: map[string]string{"auth.reauth_window_s": "60"}})
 	u := s.seedUser("platform")
+	s.grantPlatformRole(u, "platform_admin")
 	_, token, csrf := s.login(u, freshIP())
 	r := s.reauth("admin", token, csrf, map[string]string{"password": u.Password})
 	j := r.JSON(t)

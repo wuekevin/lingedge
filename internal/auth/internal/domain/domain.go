@@ -57,6 +57,7 @@ const (
 	RevokeLogout           = "logout"
 	RevokeCredentialChange = "password_change"
 	RevokeRelogin          = "relogin" // 登录时旧会话被换新（会话固定防护）
+	RevokeAdmin            = "admin"   // 管理员吊销/重置口令/停用/删除账号（Story 1.18）
 )
 
 // ErrNotFound 表示记录不存在。
@@ -137,6 +138,8 @@ type SessionView struct {
 	TenantDefault *bool      `db:"tenant_is_default"`
 	TenantStatus  *string    `db:"tenant_status"`
 	MembershipOK  bool       `db:"member_ok"`
+	// PermVersion 是 users.permission_version（权限集版本号，权限缓存键的一部分；Story 1.18）。
+	PermVersion   uint64     `db:"permission_version"`
 	TenantDeleted *time.Time `db:"tenant_deleted_at"`
 }
 
@@ -176,7 +179,7 @@ type Access struct {
 }
 
 // Principal 是认证钩子产出的已认证主体：实现 tenantscope.Principal，并携带会话信息供 /auth/* handler 使用。
-// 权限集由 Story 1.18 装载；此前 HasPermission 恒为 false（fail-closed：不会因为缺少权限数据而放行任何东西）。
+// 权限集由授权钩子（Story 1.18）在判定前装载（SetPermissions）；装载之前 HasPermission 恒为 false（fail-closed：不会因为缺少权限数据而放行任何东西）。
 type Principal struct {
 	User      User
 	Session   SessionView
@@ -185,6 +188,8 @@ type Principal struct {
 	CSRFToken string // 由会话令牌派生（见 service.DeriveCSRF）；仅内存中使用
 	// Bearer 为 true 表示由 API Token 认证（无会话；免 CSRF）。
 	Bearer bool
+
+	perms map[string]struct{}
 }
 
 var _ tenantscope.Principal = (*Principal)(nil)
@@ -203,8 +208,24 @@ func (p *Principal) TenantID() uint64 {
 	return p.Tenant.ID
 }
 
-// HasPermission 实现 tenantscope.Principal：1.18 之前恒为 false。
-func (p *Principal) HasPermission(string) bool { return false }
+// SetPermissions 装载主体的权限集（平台主体：平台角色授予的权限；租户主体：其当前租户内角色授予的权限）。
+// 只由授权钩子在请求开始时调用一次；主体是请求级对象，不跨请求共享。
+func (p *Principal) SetPermissions(set map[string]struct{}) { p.perms = set }
+
+// Permissions 返回已装载权限集的副本（升序不保证）。
+func (p *Principal) Permissions() []string {
+	out := make([]string, 0, len(p.perms))
+	for k := range p.perms {
+		out = append(out, k)
+	}
+	return out
+}
+
+// HasPermission 实现 tenantscope.Principal：权限集未装载（或不含该权限）一律为 false。
+func (p *Principal) HasPermission(code string) bool {
+	_, ok := p.perms[code]
+	return ok
+}
 
 // Settings 是认证相关的系统设置（system_settings；UD-27：默认值是待基线的工程假设，可配置）。
 type Settings struct {
@@ -238,4 +259,72 @@ type TOTPState struct {
 	Enabled   bool    `db:"enabled"`
 	SecretEnc *string `db:"secret_enc"`
 	LastStep  *uint64 `db:"last_step"`
+}
+
+// AdminUser 是 /admin/users 视图所需的 users 行（平台用户管理，Story 1.18）。
+type AdminUser struct {
+	ID          uint64     `db:"id"`
+	UID         string     `db:"uid"`
+	UserType    string     `db:"user_type"`
+	Email       string     `db:"email"`
+	DisplayName string     `db:"display_name"`
+	Status      string     `db:"status"`
+	Locale      string     `db:"locale"`
+	Timezone    string     `db:"timezone"`
+	TOTPEnabled bool       `db:"totp_enabled"`
+	MustChange  bool       `db:"must_change_password"`
+	LastLoginAt *time.Time `db:"last_login_at"`
+	LastLoginIP []byte     `db:"last_login_ip"`
+	LockedUntil *time.Time `db:"locked_until"`
+	PermVersion uint64     `db:"permission_version"`
+	CreatedAt   time.Time  `db:"created_at"`
+	UpdatedAt   time.Time  `db:"updated_at"`
+}
+
+// NewUser 是待创建的平台用户（只含口令哈希）。
+type NewUser struct {
+	UID          string
+	Email        string
+	DisplayName  string
+	PasswordHash string
+	Locale       string
+	Now          time.Time
+}
+
+// Role 是 roles 行（模板角色：tenant_id 为 NULL）。
+type Role struct {
+	ID          uint64    `db:"id"`
+	UID         string    `db:"uid"`
+	Scope       string    `db:"scope"`
+	Code        string    `db:"code"`
+	Name        string    `db:"name"`
+	Description *string   `db:"description"`
+	IsBuiltin   bool      `db:"is_builtin"`
+	CreatedAt   time.Time `db:"created_at"`
+}
+
+// Permission 是权限点字典行。
+type Permission struct {
+	Code        string  `db:"code"`
+	Resource    string  `db:"resource"`
+	Action      string  `db:"action"`
+	Scope       string  `db:"scope"`
+	Module      string  `db:"module"`
+	MenuKey     *string `db:"menu_key"`
+	Description *string `db:"description"`
+}
+
+// 内置角色与权限常量。
+const (
+	RoleSuperAdmin = "platform_admin" // 平台超级管理员：最后一个不得被删除/停用/降权
+	ScopePlatform  = "platform"
+	ScopeTenantStr = "tenant"
+)
+
+// AffectedAccess 是一次权限变更波及的（用户, 范围）与其新的权限版本：用于精确清除旧版本的缓存键并广播。
+type AffectedAccess struct {
+	UserUID string `db:"uid"`
+	// ScopeID 是 user_roles.tenant_key：0 = 平台范围，否则为租户 id。
+	ScopeID uint64 `db:"tenant_key"`
+	Version uint64 `db:"permission_version"`
 }

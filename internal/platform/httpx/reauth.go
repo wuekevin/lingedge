@@ -13,12 +13,12 @@ type ReauthChecker interface {
 	CheckReauth(r *http.Request, meta RouteMeta, p tenantscope.Principal) error
 }
 
-// WithReauth 在授权链里统一执行再认证检查：对 meta.Reauth 为真的路由，先运行 checker，通过后才委托给 h 的授权钩子；
-// 其他路由原样委托。检查失败即中止（不会调用内层授权钩子，handler 更不会执行）。
+// WithReauth 在授权链里统一执行再认证检查：先运行 h 的授权钩子（权限判定），**通过之后**才对 meta.Reauth 为真的路由运行 checker；
+// 其他路由原样委托。任一环节失败即中止（handler 不会执行）。
 //
-// 顺序说明：此处「再认证先于授权」。在 1.18 之前授权钩子是安全拒绝默认，这个顺序让再认证窗口在现有链中真实生效且可被验证
-// （窗口外 403 auth.reauth_required；窗口内继续走授权，当前仍为 403 auth.forbidden）。1.18 交付真实授权钩子后，可把
-// 「权限判定 → 再认证」的顺序改为先权限后再认证（避免向无权限者提示再认证），只需把 checker 移入授权钩子内部。
+// 顺序说明（Story 1.18 修订 1.17 的遗留）：先权限后再认证——无权限者得到 403 auth.forbidden，不会被提示「去再认证」
+// 却在再认证之后仍然被拒（泄漏「该操作存在且需要再认证」、浪费一次口令/TOTP 校验与节流计数）。
+// 授权钩子为安全拒绝默认（未装配）时，再认证检查同样不会被放行：权限判定先失败。
 func WithReauth(h Hooks, c ReauthChecker) Hooks {
 	h = h.withDefaults()
 	h.Authorizer = reauthAuthorizer{inner: h.Authorizer, check: c}
@@ -31,13 +31,14 @@ type reauthAuthorizer struct {
 }
 
 func (a reauthAuthorizer) Authorize(r *http.Request, meta RouteMeta, p tenantscope.Principal) error {
+	if err := a.inner.Authorize(r, meta, p); err != nil {
+		return err
+	}
 	if meta.Reauth {
 		if a.check == nil { // 未装配检查组件：fail-closed
 			return DenyAuthorizer{}.Authorize(r, meta, p)
 		}
-		if err := a.check.CheckReauth(r, meta, p); err != nil {
-			return err
-		}
+		return a.check.CheckReauth(r, meta, p)
 	}
-	return a.inner.Authorize(r, meta, p)
+	return nil
 }

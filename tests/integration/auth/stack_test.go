@@ -27,8 +27,11 @@ import (
 	"github.com/wuekevin/lingedge/internal/platform/config"
 	"github.com/wuekevin/lingedge/internal/platform/httpx"
 	"github.com/wuekevin/lingedge/internal/platform/httpx/contracttest"
+	idemrepo "github.com/wuekevin/lingedge/internal/platform/idempotency/repository"
 	"github.com/wuekevin/lingedge/internal/platform/logx"
+	"github.com/wuekevin/lingedge/internal/platform/rbac"
 	"github.com/wuekevin/lingedge/internal/platform/redisx"
+	"github.com/wuekevin/lingedge/internal/platform/tenantscope"
 	"github.com/wuekevin/lingedge/internal/platform/uid"
 	"github.com/wuekevin/lingedge/pkg/secretbox"
 	"github.com/wuekevin/lingedge/tests/mysqltest"
@@ -61,6 +64,13 @@ type stack struct {
 	spec   *contracttest.Spec
 	box    *secretbox.Box
 	opt    stackOpts
+
+	spy *spyState
+}
+
+type spyState struct {
+	mu     sync.Mutex
+	access *rbac.Decision
 }
 
 type stackOpts struct {
@@ -72,6 +82,14 @@ type stackOpts struct {
 	settings map[string]string
 	// reauthRoutes 为 true 时，按 openapi 的 x-reauth 元数据注册「声明了 x-reauth: true 的 operation」的占位路由（这些 operation 的真实实现属后续 Story）。
 	reauthRoutes bool
+	// permTTL 是权限缓存 TTL（0 = 生产上限 60 秒）；TTL 兜底测试调小它。
+	permTTL time.Duration
+	// routes 在 Handler() 之前向路由器追加测试专用路由（经真实 Router.Register，走真实钩子链）。
+	routes func(r *httpx.Router)
+	// spyScope 为 true 时在 Scope 钩子前插入记录授权决策的探针（只观察 httpx.AccessFrom，不改变任何决策）。
+	spyScope bool
+	// permPoll 是权限失效广播的轮询兜底周期（0 = 默认 30 秒）。
+	permPoll time.Duration
 	// bearer 是 Bearer API Token 的认证器（Story 1.19 才有真实实现；这里是测试内的替身，只用于验证「Bearer 请求不能满足再认证/近期 MFA」）。
 	bearer httpx.Authenticator
 }
@@ -111,8 +129,17 @@ func newStack(t *testing.T, o ...stackOpts) *stack {
 		clk = s.clk
 	}
 	s.mod = s.newModule(lg, clk)
+	idem, err := idemrepo.New(s.e.app, idemrepo.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hooks := assemble(s.mod)
+	if opt.spyScope {
+		s.spy = &spyState{}
+		hooks.Scope = &spyScope{st: s.spy, inner: hooks.Scope}
+	}
 	s.router, err = httpx.NewRouter(httpx.Options{Logger: lg, IDs: uid.NewGenerator(clock.System()),
-		Hooks: assemble(s.mod)})
+		Hooks: hooks, Idempotency: idem})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,14 +154,21 @@ func newStack(t *testing.T, o ...stackOpts) *stack {
 		}
 	}
 	if opt.reauthRoutes {
+		real := map[string]bool{}
+		for _, r := range s.router.Routes() {
+			real[r.OperationID] = true
+		}
 		for _, m := range s.spec.Expected() {
-			if m.Reauth {
+			if m.Reauth && !real[m.OperationID] { // 已有真实实现的 operation（1.18 的 /admin/users|roles）不再用占位
 				m.Idempotent = false // 占位路由不接幂等存储；元数据其余部分取自 openapi
 				if err := s.router.Register(m, func(c *gin.Context) { httpx.OK(c, map[string]bool{"reached": true}) }); err != nil {
 					t.Fatal(err)
 				}
 			}
 		}
+	}
+	if opt.routes != nil {
+		opt.routes(s.router)
 	}
 	probe("probePlatform", "/probe/platform", httpx.ScopePlatform)
 	probe("probeTenant", "/probe/tenant", httpx.ScopeTenant)
@@ -149,7 +183,7 @@ func newStack(t *testing.T, o ...stackOpts) *stack {
 
 func (s *stack) newModule(lg *zap.Logger, clk clock.Clock) auth.Module {
 	s.t.Helper()
-	m, err := auth.New(context.Background(), auth.Options{Pool: s.e.app, Redis: s.rc, Clock: clk, IDs: uid.NewGenerator(clock.System()), Log: lg, Argon2: testArgon, Box: s.box, Bearer: s.opt.bearer})
+	m, err := auth.New(context.Background(), auth.Options{Pool: s.e.app, Redis: s.rc, Clock: clk, IDs: uid.NewGenerator(clock.System()), Log: lg, Argon2: testArgon, Box: s.box, Bearer: s.opt.bearer, PermCacheTTL: s.opt.permTTL, PermPollEvery: s.opt.permPoll})
 	if err != nil {
 		s.t.Fatal(err)
 	}
@@ -368,8 +402,12 @@ func nowClock() clock.Clock { return clock.System() }
 // restartServer 用 s2 的认证模块重建路由器与监听（模拟进程重启：进程内状态清空，数据库与 Redis 状态保留）。
 func (s *stack) restartServer(s2 *stack) *httptest.Server {
 	s.t.Helper()
+	idem, err := idemrepo.New(s.e.app, idemrepo.Options{})
+	if err != nil {
+		s.t.Fatal(err)
+	}
 	r, err := httpx.NewRouter(httpx.Options{Logger: zap.NewNop(), IDs: uid.NewGenerator(clock.System()),
-		Hooks: assemble(s2.mod)})
+		Hooks: assemble(s2.mod), Idempotency: idem})
 	if err != nil {
 		s.t.Fatal(err)
 	}
@@ -406,10 +444,8 @@ func weakHash(t testing.TB, pw string) string {
 	return fmt.Sprintf("$argon2id$v=%d$m=8192,t=1,p=1$%s$%s", argon2.Version, b64.EncodeToString(salt), b64.EncodeToString(key))
 }
 
-// assemble 是与 cmd/lingedge-server 的 assembleHooks 同构的钩子装配（认证 + 自助最小授权 + L4 再认证检查）。
-func assemble(m auth.Module) httpx.Hooks {
-	return httpx.WithReauth(httpx.WithSelfService(httpx.Hooks{Authenticator: m.Authenticator()}, m.SelfService), m.ReauthChecker())
-}
+// assemble 是真实钩子装配（auth.Module.Hooks，与 cmd/lingedge-server 的 assembleHooks 同一份）。
+func assemble(m auth.Module) httpx.Hooks { return m.Hooks() }
 
 // newBox 在临时目录写 0400 主密钥文件（运行期随机生成），返回真实 FileKeyProvider 支撑的 Box（与生产同一实现）。
 func newBox(t testing.TB) *secretbox.Box {
@@ -432,4 +468,28 @@ func newBox(t testing.TB) *secretbox.Box {
 		t.Fatal(err)
 	}
 	return b
+}
+
+// spyScope 是 Scope 钩子前的观察探针：记录授权钩子交来的授权决策，然后原样委托（不改变任何决策）。
+type spyScope struct {
+	st    *spyState
+	inner httpx.ScopeResolver
+}
+
+func (p *spyScope) ResolveScope(r *http.Request, meta httpx.RouteMeta, pr tenantscope.Principal) (tenantscope.Scope, error) {
+	if d, ok := httpx.AccessFrom(r.Context()); ok {
+		p.st.mu.Lock()
+		p.st.access = &d
+		p.st.mu.Unlock()
+	}
+	return p.inner.ResolveScope(r, meta, pr)
+}
+
+// takeAccess 取出并清除最近一次记录的授权决策。
+func (s *stack) takeAccess() *rbac.Decision {
+	s.spy.mu.Lock()
+	defer s.spy.mu.Unlock()
+	d := s.spy.access
+	s.spy.access = nil
+	return d
 }

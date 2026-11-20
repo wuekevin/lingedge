@@ -71,6 +71,7 @@ updated: 2026-11-16（依据架构评审修订，见 docs/bmad/architecture-revi
 | totp_enabled | TINYINT(1) | N | 0 | |
 | totp_secret_enc | TEXT | Y | — | TOTP 密钥信封密文（5 段，README §2.2）；AAD=`users|totp_secret_enc|<uid>`（Story 1.17）。setup 后、enable 前为「待确认」密文（`totp_enabled=0`） |
 | totp_last_step | BIGINT UNSIGNED | Y | — | 已用的 TOTP time-step（`unix/30`）；原子 compare-and-set 实现「同一验证码在窗口内重放被拒」。**000017 追加**（Story 1.17、CC-5） |
+| permission_version | BIGINT UNSIGNED | N | 0 | 权限集版本号：用户的角色授予变化、或其任一角色的权限变化时，同一事务内 +1；认证钩子随会话读取，权限缓存键含它（ADR-018 §8）。**000018 追加**（Story 1.18、CC-6） |
 | must_change_password | TINYINT(1) | N | 0 | 初始/重置后强制修改 |
 | password_changed_at | DATETIME(3) | Y | — | |
 | failed_login_count | INT UNSIGNED | N | 0 | 连续失败计数（节流以 Redis 为主，此处为兜底） |

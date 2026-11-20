@@ -25,6 +25,8 @@ type Module interface {
 	// ReauthChecker 返回 L4 再认证检查组件：对声明 x-reauth: true 的 operation，会话的 reauth_at 须在 auth.reauth_window_s 内，
 	// 否则 403 auth.reauth_required；Bearer API Token 请求永远不能满足。装配层用 httpx.WithReauth 接入授权链，1.18 的授权钩子可复用。
 	ReauthChecker() httpx.ReauthChecker
+	// Hooks 返回 REST 钩子的完整装配（认证 + RBAC 授权 + 再认证 + 过渡 Scope/审计 + 自助最小授权）：装配点与集成测试共用。
+	Hooks() httpx.Hooks
 	// Flush 等待已派发的后台写入（DB 兜底失败计数）完成；停机前与测试断言前调用。
 	Flush()
 }

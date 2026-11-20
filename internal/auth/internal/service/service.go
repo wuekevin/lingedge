@@ -59,6 +59,10 @@ type Options struct {
 	Clock clock.Clock
 	IDs   *uid.Generator
 	Log   *zap.Logger
+	// PermCacheTTL 是权限集缓存的 TTL；<=0 取上限 60 秒，超过上限按上限（ADR-025 §1：会话/权限缓存 ≤60 秒）。
+	PermCacheTTL time.Duration
+	// PermPollEvery 是权限失效广播的轮询兜底周期；<=0 取默认 30 秒（测试可调小以验证兜底）。
+	PermPollEvery time.Duration
 }
 
 // Service 是认证服务。
@@ -75,6 +79,10 @@ type Service struct {
 	log      *zap.Logger
 	settings *settingsCache
 	dummy    string // 哑哈希：不存在/不合格账号也做一次同参数的 argon2id 计算
+
+	permCache *redisx.Cache
+	permTTL   time.Duration
+	permPoll  time.Duration
 
 	bgSem chan struct{}
 	bgWG  sync.WaitGroup
@@ -96,11 +104,24 @@ func New(ctx context.Context, o Options) (*Service, error) {
 	if err != nil {
 		return nil, fmt.Errorf("auth/service: 计算哑哈希: %w", err)
 	}
-	return &Service{
+	ttl := o.PermCacheTTL
+	if ttl <= 0 || ttl > MaxPermCacheTTL {
+		ttl = MaxPermCacheTTL
+	}
+	poll := o.PermPollEvery
+	if poll <= 0 {
+		poll = DefaultPermPollEvery
+	}
+	svc := &Service{
+		permCache: redisx.NewCache(o.Redis), permTTL: ttl, permPoll: poll,
 		repo: o.Repo, withTx: o.WithTx, redis: o.Redis, limiter: redisx.NewLimiter(o.Redis, nil), ks: o.Redis.Keyspace(), hasher: o.Hasher, box: o.Box,
 		clk: o.Clock, ids: o.IDs, log: o.Log.Named("auth"), settings: newSettingsCache(o.Repo, o.Clock, o.Log), dummy: dummy,
 		bgSem: make(chan struct{}, 64),
-	}, nil
+	}
+	if err := svc.startPermSubscription(ctx); err != nil {
+		return nil, fmt.Errorf("auth/service: 订阅权限失效广播: %w", err)
+	}
+	return svc, nil
 }
 
 func mustRandomHex() string {

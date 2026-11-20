@@ -26,6 +26,11 @@ const (
 )
 
 const taskIDKey = "lingedge.idempotency.task_id"
+const replayBodyKey = "lingedge.idempotency.replay_body"
+
+// SetReplayBody 登记「幂等记录里保存的响应体」，取代真实响应体：响应里含一次性秘密（如服务端生成的临时口令，只回显一次）的 handler
+// 必须登记去除了秘密的响应体——否则幂等记录会把秘密明文写进 MySQL，且同键重放会再次回显它。首次响应仍是真实响应体。
+func SetReplayBody(c *gin.Context, body []byte) { c.Set(replayBodyKey, append([]byte(nil), body...)) }
 
 // SetTaskID 由创建 Task 的 handler 登记「本次响应关联的 tasks.id」，随首次响应一并存入 idempotency_keys.task_id（0 表示无）。
 func SetTaskID(c *gin.Context, id uint64) {
@@ -210,6 +215,9 @@ func runAndRecord(c *gin.Context, store idempotency.Store, id uint64) {
 	status := bw.Status()
 	if status >= 200 && status < 300 {
 		env := envelope{Headers: map[string][]string{}, Body: bw.buf.Bytes()}
+		if v, ok := c.Get(replayBodyKey); ok {
+			env.Body, _ = v.([]byte)
+		}
 		for _, name := range replayHeaders {
 			if vs, ok := orig.Header()[name]; ok {
 				env.Headers[name] = append([]string(nil), vs...)
