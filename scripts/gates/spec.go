@@ -126,6 +126,13 @@ var sqlImportDenied = []struct{ pkg, why string }{
 	{"github.com/go-sql-driver/mysql", "只有 internal/platform/db、internal/platform/migrate 与 repository 包可以 import MySQL 驱动；需要错误号时用 db.MySQLErrorNumber/db.IsDuplicate"},
 }
 
+// Redis 客户端 go-redis 只允许出现在封装层 internal/platform/redisx（Story 1.10、ADR-025 §3/§4）：键命名、必带 TTL、脱敏、
+// 降级与 Pub/Sub 兜底都在该包实现，其他位置直接使用客户端会绕过这些保证；数据面（cmd/lingedge-node、edge/）更是整体不得依赖 Redis。
+// 测试、tests/、scripts/ 另行豁免（故障注入测试需要旁路核对 Redis 内容）。
+const redisImportPkg = "github.com/redis/go-redis"
+
+var redisImportGlobsAllowed = []string{"internal/platform/redisx/**"}
+
 // 受限池构造函数的调用白名单（AC6）：路径正则（相对仓库根）。请求路径持有 maint/migrate 池即违规。
 const (
 	// maint 池：仅 retention.cleanup / partition.maintain（调度/Worker 模块与其装配入口）。

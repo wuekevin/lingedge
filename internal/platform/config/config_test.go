@@ -251,6 +251,8 @@ func TestValidationRules(t *testing.T) {
 		{"redis addr 空主机", "redis:\n  addr: ':6379'\n", "redis.addr", "<主机>:<端口>"},
 		{"redis db 越界", "redis:\n  db: 16\n", "redis.db", "0–15"},
 		{"redis db 负数", "redis:\n  db: -1\n", "redis.db", "0–15"},
+		{"redis tls 子项缺 tls", "redis:\n  tls_server_name: r.internal\n", "redis.tls", "tls: true"},
+		{"redis tls_ca_file 相对路径", "redis:\n  tls: true\n  tls_ca_file: ca.pem\n", "redis.tls_ca_file", "绝对路径"},
 		{"log level", "log:\n  level: trace\n", "log.level", "debug|info|warn|error"},
 		{"log level 大小写", "log:\n  level: INFO\n", "log.level", "debug|info|warn|error"},
 		{"log format", "log:\n  format: xml\n", "log.format", "json|console"},

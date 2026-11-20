@@ -123,6 +123,14 @@ func buildDepRules() []depRule {
 	gooseRule.deny = append(gooseRule.deny, denyEntry{gooseImportPkg, "只有 internal/platform/migrate 可以 import goose：迁移的分类标注、校验和、dirty、互斥与版本门槛都在该包实现，直接使用 goose 会绕过这些保证（ADR-016）；其他代码经 migrate.Runner 调用"})
 	rules = append(rules, gooseRule)
 
+	// 10. Redis 客户端只在封装层 internal/platform/redisx 内使用（Story 1.10、ADR-025）；测试、tests/、scripts/ 另行豁免。
+	redisRule := depRule{name: "redis-only-in-redisx", files: []string{"!$test", "!" + base + "/tests/**", "!" + base + "/scripts/**"}}
+	for _, g := range redisImportGlobsAllowed {
+		redisRule.files = append(redisRule.files, "!"+base+"/"+g)
+	}
+	redisRule.deny = append(redisRule.deny, denyEntry{redisImportPkg, "只有 internal/platform/redisx 可以 import Redis 客户端：键命名、必带 TTL、值脱敏、降级与 Pub/Sub 轮询兜底都在封装层实现，直接使用客户端会绕过这些保证；数据面（cmd/lingedge-node、edge/）整体不得依赖 Redis（ADR-025 §3）"})
+	rules = append(rules, redisRule)
+
 	sort.SliceStable(rules, func(i, j int) bool { return rules[i].name < rules[j].name })
 	return rules
 }

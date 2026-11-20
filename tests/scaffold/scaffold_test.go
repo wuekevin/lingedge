@@ -433,3 +433,45 @@ func TestBuildMatrixAndVerifier(t *testing.T) {
 		t.Errorf("dist 目录不存在应失败，输出 %q", out)
 	}
 }
+
+// Story 1.10 AC5（ADR-025 §3）：数据面二进制与 edge/ 的依赖图中不含 Redis 客户端，也不含 Server 的 Redis 封装层。
+// 用 go list -deps 取真实的传递依赖（含测试依赖之外的全部生产依赖），而不是只看直接 import。
+func TestDataPlaneHasNoRedisDependency(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go 不在 PATH")
+	}
+	forbidden := []string{"github.com/redis/go-redis", "github.com/wuekevin/lingedge/internal/platform/redisx"}
+	// 数据面：Node / DNS / Reporter 二进制与 Tools CLI（均不得依赖 Redis）；edge/ 目前无 Go 包，若出现则一并纳入。
+	targets := []string{"./cmd/lingedge-node", "./cmd/lingedge-dns", "./cmd/lingedge-reporter", "./cmd/lingedge", "./pkg/..."}
+	if _, err := os.Stat("../../edge"); err == nil {
+		if out, err := exec.Command("go", "list", "./edge/...").CombinedOutput(); err == nil && len(bytes.TrimSpace(out)) > 0 {
+			targets = append(targets, "./edge/...")
+		}
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tg := range targets {
+		cmd := exec.Command("go", "list", "-deps", tg)
+		cmd.Dir = root
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("go list -deps %s: %v\n%s", tg, err, out)
+		}
+		for _, dep := range strings.Fields(string(out)) {
+			for _, f := range forbidden {
+				if dep == f || strings.HasPrefix(dep, f+"/") {
+					t.Errorf("%s 的依赖图含 %s（ADR-025 §3：数据面零 Redis 依赖）", tg, dep)
+				}
+			}
+		}
+	}
+	// 对照：Server 二进制确实依赖封装层之外的 Redis（此处断言 redisx 本身依赖 go-redis），证明检测不是空转。
+	cmd := exec.Command("go", "list", "-deps", "./internal/platform/redisx")
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err != nil || !bytes.Contains(out, []byte("github.com/redis/go-redis/v9")) {
+		t.Fatalf("对照失败：redisx 应依赖 go-redis: %v", err)
+	}
+}

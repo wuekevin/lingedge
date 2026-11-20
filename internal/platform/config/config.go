@@ -87,6 +87,11 @@ type Redis struct {
 	DB           int    `yaml:"db"`
 	Password     Secret `yaml:"password"`
 	PasswordFile string `yaml:"password_file"`
+	// TLS 为 true 时以 TLS 连接 Redis（Story 1.10）；TLSCAFile（绝对路径，可选）追加信任的根证书；
+	// TLSServerName 覆盖证书校验用的服务器名（缺省取 addr 的主机）。证书校验不可关闭。
+	TLS           bool   `yaml:"tls"`
+	TLSCAFile     string `yaml:"tls_ca_file"`
+	TLSServerName string `yaml:"tls_server_name"`
 }
 
 // Log 是日志设置。
@@ -536,7 +541,10 @@ func (c *Config) validateProblems() []Problem {
 	if c.Release.CAFile != "" && !filepath.IsAbs(c.Release.CAFile) {
 		add("release.ca_file", "必须是绝对路径")
 	}
-	for _, f := range []struct{ path, val string }{{"database.password_file", d.PasswordFile}, {"redis.password_file", r.PasswordFile}} {
+	if (r.TLSCAFile != "" || r.TLSServerName != "") && !r.TLS {
+		add("redis.tls", "设置了 tls_ca_file/tls_server_name 时必须 tls: true")
+	}
+	for _, f := range []struct{ path, val string }{{"database.password_file", d.PasswordFile}, {"redis.password_file", r.PasswordFile}, {"redis.tls_ca_file", r.TLSCAFile}} {
 		if f.val != "" && !filepath.IsAbs(f.val) {
 			add(f.path, "必须是绝对路径")
 		}

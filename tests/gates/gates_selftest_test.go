@@ -218,8 +218,12 @@ func TestLintGatesBlockViolationsAndAllowLegitimate(t *testing.T) {
 		"internal/website/internal/service/goose_in_service.go": {"package service\n\nimport _ \"github.com/pressly/goose/v3\"\n", "depguard", "只有 internal/platform/migrate 可以 import goose"},
 		"internal/platform/db/goose_in_db.go":                   {"package db\n\nimport _ \"github.com/pressly/goose/v3\"\n", "depguard", "只有 internal/platform/migrate 可以 import goose"},
 		"cmd/lingedge-server/goose_in_cmd.go":                   {"package main\n\nimport _ \"github.com/pressly/goose/v3\"\n", "depguard", "只有 internal/platform/migrate 可以 import goose"},
-		"internal/website/internal/repository/sql_concat.go":    {"package repository\n\nimport \"fmt\"\n\nvar Concat = func(uid string) string {\n\treturn fmt.Sprintf(\"SELECT id FROM sites WHERE uid = '%s'\", uid)\n}\n", "forbidigo", "[no-sql-concat]"},
-		"internal/website/internal/repository/sql_join.go":      {"package repository\n\nimport \"strings\"\n\nvar Join = func(cols []string) string {\n\treturn \"SELECT \" + strings.Join(cols, \",\")\n}\n", "forbidigo", "[no-sql-concat]"},
+		// Redis 客户端只允许出现在 internal/platform/redisx（Story 1.10）；数据面整体不得依赖。（golangci 对同文案默认最多报 3 条，故样例限 3 个。）
+		"internal/monitoring/internal/service/redis_in_service.go": {"package service\n\nimport _ \"github.com/redis/go-redis/v9\"\n", "depguard", "只有 internal/platform/redisx 可以 import Redis 客户端"},
+		"internal/platform/db/redis_in_db.go":                      {"package db\n\nimport _ \"github.com/redis/go-redis/v9\"\n", "depguard", "只有 internal/platform/redisx 可以 import Redis 客户端"},
+		"cmd/lingedge-node/redis_in_node.go":                       {"package main\n\nimport _ \"github.com/redis/go-redis/v9\"\n", "depguard", "只有 internal/platform/redisx 可以 import Redis 客户端"},
+		"internal/website/internal/repository/sql_concat.go":       {"package repository\n\nimport \"fmt\"\n\nvar Concat = func(uid string) string {\n\treturn fmt.Sprintf(\"SELECT id FROM sites WHERE uid = '%s'\", uid)\n}\n", "forbidigo", "[no-sql-concat]"},
+		"internal/website/internal/repository/sql_join.go":         {"package repository\n\nimport \"strings\"\n\nvar Join = func(cols []string) string {\n\treturn \"SELECT \" + strings.Join(cols, \",\")\n}\n", "forbidigo", "[no-sql-concat]"},
 		// 受限池构造函数（AC6）：maint/migrate 池只能由白名单包构造；别名导入同样被识别。
 		"internal/auth/internal/service/maint_pool.go":        {"package service\n\nimport (\n\t\"context\"\n\n\t\"github.com/wuekevin/lingedge/internal/platform/db\"\n)\n\nvar OpenMaintBad = func(ctx context.Context) {\n\t_, _ = db.OpenMaint(ctx, db.Config{})\n}\n", "forbidigo", "[db-pool-maint]"},
 		"internal/auth/internal/handler/maint_pool_alias.go":  {"package handler\n\nimport (\n\t\"context\"\n\n\tdbx \"github.com/wuekevin/lingedge/internal/platform/db\"\n)\n\nvar OpenMaintAliasBad = func(ctx context.Context) {\n\t_, _ = dbx.OpenMaint(ctx, dbx.Config{})\n}\n", "forbidigo", "[db-pool-maint]"},
@@ -255,6 +259,8 @@ func TestLintGatesBlockViolationsAndAllowLegitimate(t *testing.T) {
 		// 数据库边界与受限入口的合法用法（Story 1.5）。
 		"internal/website/internal/repository/ok_sqlx.go":   "package repository\n\nimport (\n\t\"database/sql\"\n\t\"fmt\"\n\n\t_ \"github.com/go-sql-driver/mysql\"\n\t\"github.com/jmoiron/sqlx\"\n)\n\ntype Raw struct {\n\tX *sqlx.DB\n\tR sql.Result\n}\n\nvar Wrap = func(err error) error {\n\treturn fmt.Errorf(\"repository: %w\", err)\n}\n",
 		"internal/platform/task/repository/ok_sqlx.go":      "package repository\n\nimport \"github.com/jmoiron/sqlx\"\n\nvar _ *sqlx.Tx\n",
+		"internal/platform/redisx/ok_redis.go":              "package redisx\n\nimport \"github.com/redis/go-redis/v9\"\n\nvar _ *redis.Client\n",
+		"internal/auth/internal/service/ok_redis_test.go":   "package service\n\nimport \"github.com/redis/go-redis/v9\"\n\nvar _ *redis.Client\n",
 		"internal/platform/db/ok_extra.go":                  "package db\n\nimport \"github.com/jmoiron/sqlx\"\n\nvar _ *sqlx.DB\n",
 		"internal/website/internal/service/ok_sqlx_test.go": "package service\n\nimport \"github.com/jmoiron/sqlx\"\n\nvar _ *sqlx.DB\n",
 		"internal/website/internal/service/ok_sprintf.go":   "package service\n\nimport \"fmt\"\n\nvar Label = func(n int) string {\n\treturn fmt.Sprintf(\"site-%d\", n)\n}\n",

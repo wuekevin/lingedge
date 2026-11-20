@@ -42,6 +42,11 @@ redis:
   addr: 127.0.0.1:6379
   db: 0
   # 口令（如有）：见文件头说明（password_file 或 LINGEDGE_REDIS__PASSWORD）。
+  # Redis 仅作缓存/限流/唤醒，非唯一真相源；不可达时 Server 以降级模式运行（ADR-025）。
+  # 跨主机/不可信网络请启用 TLS（证书校验不可关闭）：
+  # tls: true
+  # tls_ca_file: /etc/lingedge/redis-ca.pem
+  # tls_server_name: redis.internal
 
 log:
   # debug | info | warn | error

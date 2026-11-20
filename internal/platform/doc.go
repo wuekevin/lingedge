@@ -17,5 +17,9 @@
 //   - migrate：迁移框架（goose v3 嵌入；分类标注与结构 lint、DDL 预检、逐表授权检查；`lingedge-server migrate plan|up|down|status|recover|lint`：
 //     版本门槛、迁移互斥、dirty/校验和、不可逆确认）；迁移文件在仓库根 migrations/（migrations.FS）。
 //
+// 已交付（Story 1.10）：
+//   - redisx：Redis 唯一封装层（键空间 le:<env>:…、必带 TTL、值脱敏、Secret 口令与 TLS、不可达时降级而不失败、后台自愈）与
+//     Limiter（Redis→进程内→DB 兜底）/Cache（miss 与故障直读真相源）/Pub/Sub（有损，订阅必须带轮询兜底）；降级矩阵见 docs/operations/redis-degradation.md。
+//
 // 其余基础设施（httpx、task 运行时、keyprovider、eventbus、audit 等）随后续 Story 增加；ports 子包见其自身说明。
 package platform

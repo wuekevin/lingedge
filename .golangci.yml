@@ -1340,6 +1340,16 @@ linters:
           deny:
             - pkg: "github.com/wuekevin/lingedge/internal"
               desc: "pkg/ 为所有二进制共享的无业务库，不得 import internal/*（architecture §5.2）"
+        redis-only-in-redisx:
+          list-mode: lax
+          files:
+            - "!$test"
+            - "!${base-path}/tests/**"
+            - "!${base-path}/scripts/**"
+            - "!${base-path}/internal/platform/redisx/**"
+          deny:
+            - pkg: "github.com/redis/go-redis"
+              desc: "只有 internal/platform/redisx 可以 import Redis 客户端：键命名、必带 TTL、值脱敏、降级与 Pub/Sub 轮询兜底都在封装层实现，直接使用客户端会绕过这些保证；数据面（cmd/lingedge-node、edge/）整体不得依赖 Redis（ADR-025 §3）"
         tools-no-server:
           list-mode: lax
           files:
