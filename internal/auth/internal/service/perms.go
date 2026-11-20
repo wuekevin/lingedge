@@ -69,7 +69,8 @@ func (s *Service) LoadPermissions(ctx context.Context, p *domain.Principal) (map
 	}
 	var raw []byte
 	key, kerr := s.permKey(p.User.UID, scopeID, p.Session.PermVersion)
-	if p.Bearer || p.Session.ID == 0 || kerr != nil {
+	// Bearer 主体没有会话，但其创建者的 permission_version 随令牌一起现读（见 AuthenticateAPIToken），所以同样可以用版本化的缓存键。
+	if (!p.Bearer && p.Session.ID == 0) || kerr != nil {
 		if kerr != nil {
 			s.log.Warn("权限缓存键构造失败，直读 MySQL", zap.Error(kerr))
 		}
@@ -92,6 +93,14 @@ func (s *Service) LoadPermissions(ctx context.Context, p *domain.Principal) (map
 	set := make(map[string]struct{}, len(e.P))
 	for _, c := range e.P {
 		set[c] = struct{}{}
+	}
+	if p.Bearer {
+		// Bearer 主体的有效权限 = 令牌 scopes ∩ 创建者**当前**权限（创建者被降权后令牌随之收缩；令牌 scopes 从不扩大权限）。
+		for c := range set {
+			if _, ok := p.TokenScopes[c]; !ok {
+				delete(set, c)
+			}
+		}
 	}
 	return set, nil
 }

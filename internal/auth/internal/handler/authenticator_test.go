@@ -11,7 +11,8 @@ import (
 	"github.com/wuekevin/lingedge/internal/platform/tenantscope"
 )
 
-// bearerStandIn 是 Bearer 认证器（Story 1.19）的测试内替身：返回一个 Bearer=true 的 domain.Principal，用来验证本钩子对 Bearer 请求的处理。
+// bearerStandIn 是 Bearer 认证器的单元测试替身：返回一个 Bearer=true 的 domain.Principal，只用来隔离验证「认证钩子对 Bearer 请求的策略」
+// （近期 MFA 拒绝、可调用的 operation 范围）；真实的令牌认证由 tests/integration/auth/apitoken_*_test.go 用真实 MySQL/Redis 验证。
 type bearerStandIn struct{}
 
 func (bearerStandIn) Authenticate(*http.Request, httpx.RouteMeta) (tenantscope.Principal, error) {
@@ -29,10 +30,17 @@ func TestBearerCannotSatisfyRecentMFA(t *testing.T) {
 			t.Errorf("%s: Bearer 应得到 auth.reauth_required: %v", op, err)
 		}
 	}
-	if p, err := a.Authenticate(req, httpx.RouteMeta{OperationID: "listSites"}); err != nil || p == nil {
-		t.Errorf("非敏感 operation 的 Bearer 请求应通过（免 CSRF）: %v", err)
+	if p, err := a.Authenticate(req, httpx.RouteMeta{OperationID: "listSites", Permissions: []string{"site:read"}}); err != nil || p == nil {
+		t.Errorf("业务路由（声明了 x-permissions）的 Bearer 请求应通过（免 CSRF）: %v", err)
 	}
-	for _, op := range []string{"changePassword", "createApiToken"} {
+	// Bearer 只能调用业务路由：自助 operation（无权限声明）与令牌管理要求 Cookie 会话。
+	for _, op := range []string{"getMe", "logout", "listSessions", "setupTotp", "enableTotp", "disableTotp", "reauth", "listMyLoginLogs", "listApiTokens", "getApiToken", "revokeApiToken"} {
+		_, err := a.Authenticate(req, httpx.RouteMeta{OperationID: op, Permissions: map[bool][]string{true: {"token:manage"}, false: nil}[IsTokenOperation(op)]})
+		if e, ok := apierr.As(err); !ok || e.Code != apierr.AuthForbidden {
+			t.Errorf("%s: Bearer 应得到 auth.forbidden: %v", op, err)
+		}
+	}
+	for _, op := range []string{"changePassword", "createApiToken", "rotateApiToken"} {
 		if !recentMFAOperations[op] {
 			t.Errorf("%s 必须在近期 MFA 清单内", op)
 		}

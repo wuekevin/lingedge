@@ -27,6 +27,10 @@ const (
 	DefaultReauthWindow = 300 * time.Second
 	// DefaultMFAWindow 是「近期 MFA」窗口：基线与 UD 均未规定 [ASSUMPTION]，工程假设 15 分钟；可配置，改默认值只是配置改动。
 	DefaultMFAWindow = 15 * time.Minute
+	// API Token（Story 1.19）：基线与 UD 均未规定有效期 [ASSUMPTION]；工程假设 默认 90 天（创建时不给 expires_at）、系统上限 365 天——
+	// 令牌不应默认永不过期。均为 system_settings 可配置项（UD-27 同口径），改默认值只是配置改动。
+	DefaultAPITokenTTL    = 90 * 24 * time.Hour
+	DefaultAPITokenMaxTTL = 365 * 24 * time.Hour
 
 	settingsCacheTTL = 15 * time.Second
 )
@@ -42,6 +46,8 @@ const (
 	KeyReauthWindow       = "auth.reauth_window_s"
 	KeyMFAWindow          = "auth.mfa_window_s"
 	KeyTOTPRequiredAdmin  = "login.totp_required_for_admin"
+	KeyAPITokenDefaultTTL = "auth.api_token_default_ttl_s"
+	KeyAPITokenMaxTTL     = "auth.api_token_max_ttl_s"
 )
 
 type settingsCache struct {
@@ -63,6 +69,7 @@ func defaultSettings() domain.Settings {
 		SessionIdleTTL: DefaultSessionIdleTTL, SessionAbsoluteTTL: DefaultSessionAbsoluteTTL,
 		ThrottleWindow: DefaultThrottleWindow, ThrottleAccountMax: DefaultThrottleAccountMax, ThrottleIPMax: DefaultThrottleIPMax,
 		RunMode: DefaultRunMode, ReauthWindow: DefaultReauthWindow, MFAWindow: DefaultMFAWindow,
+		APITokenDefaultTTL: DefaultAPITokenTTL, APITokenMaxTTL: DefaultAPITokenMaxTTL,
 	}
 }
 
@@ -109,6 +116,11 @@ func (c *settingsCache) get(ctx context.Context) domain.Settings {
 		} else {
 			c.log.Warn("系统设置取值无效，使用默认值", zap.String("key", KeyTOTPRequiredAdmin))
 		}
+	}
+	next.APITokenMaxTTL = secs(c.log, raw, KeyAPITokenMaxTTL, next.APITokenMaxTTL, time.Hour, 3650*24*time.Hour)
+	next.APITokenDefaultTTL = secs(c.log, raw, KeyAPITokenDefaultTTL, next.APITokenDefaultTTL, time.Hour, 3650*24*time.Hour)
+	if next.APITokenDefaultTTL > next.APITokenMaxTTL { // 默认有效期不得超过系统上限
+		next.APITokenDefaultTTL = next.APITokenMaxTTL
 	}
 	if next.SessionIdleTTL > next.SessionAbsoluteTTL { // 滑动过期不得长于绝对过期
 		next.SessionIdleTTL = next.SessionAbsoluteTTL

@@ -20891,6 +20891,11 @@ components:
           oneOf:
           - $ref: '#/components/schemas/Uid'
           - type: 'null'
+        rotated_from_uid:
+          description: 轮换来源令牌的 uid（本令牌由 rotate 产生时有值；旧令牌随即被吊销）
+          oneOf:
+          - $ref: '#/components/schemas/Uid'
+          - type: 'null'
         created_at:
           $ref: '#/components/schemas/Timestamp'
       required:

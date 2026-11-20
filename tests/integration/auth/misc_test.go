@@ -103,8 +103,8 @@ func TestRouteMetadataMatchesOpenAPI(t *testing.T) {
 			routes = append(routes, m)
 		}
 	}
-	if len(routes) != 13 {
-		t.Fatalf("应注册 13 条 /auth 路由，实际 %d", len(routes))
+	if len(routes) != 18 { // 13 条登录/会话/TOTP 等 + 5 条 API Token（Story 1.19）
+		t.Fatalf("应注册 18 条 /auth 路由，实际 %d", len(routes))
 	}
 	if probs := s.spec.CheckRoutes(routes); len(probs) > 0 {
 		t.Errorf("路由元数据与 openapi.yaml 不一致:\n%s", strings.Join(probs, "\n"))

@@ -13,12 +13,12 @@ import (
 	"github.com/wuekevin/lingedge/internal/platform/tenantscope"
 )
 
-// Authenticator 实现 httpx.Authenticator：Cookie 会话（realm 隔离、滑动+绝对过期、CSRF）与（由后续 Story 注入的）Bearer API Token。
+// Authenticator 实现 httpx.Authenticator：Cookie 会话（realm 隔离、滑动+绝对过期、CSRF）与 Bearer API Token（Story 1.19，bearer.go 的 bearerAuthenticator）。
 type Authenticator struct {
 	svc *service.Service
 	// origins 是除「与请求同源」之外额外允许的 Origin（精确匹配）。
 	origins map[string]bool
-	// bearer 是 API Token 认证（Story 1.19）；nil 时携带 Bearer 的请求一律 401（fail-closed）。
+	// bearer 是 API Token 认证（Story 1.19）；nil 时携带 Bearer 的请求一律 401（fail-closed；仅用于单元测试钩子策略）。
 	bearer httpx.Authenticator
 }
 
@@ -40,8 +40,8 @@ var mustChangeAllowed = map[string]bool{"getMe": true, "getCsrfToken": true, "lo
 var enrollmentAllowed = map[string]bool{"getMe": true, "getCsrfToken": true, "logout": true, "setupTotp": true, "enableTotp": true, "changePassword": true}
 
 // recentMFAOperations 是要求「近期 MFA」的敏感 operation（ADR-018 §5：改密码、创建 API Token…）。createApiToken 属 Story 1.19，
-// 路由注册后即由本钩子统一生效（Bearer 请求没有会话，无法满足近期 MFA）。
-var recentMFAOperations = map[string]bool{"changePassword": true, "createApiToken": true}
+// 路由注册后即由本钩子统一生效（Bearer 请求没有会话，无法满足近期 MFA）。rotateApiToken 同样产生新的凭据，同口径要求近期 MFA。
+var recentMFAOperations = map[string]bool{"changePassword": true, "createApiToken": true, "rotateApiToken": true}
 
 // realmsFor 决定一条路由接受哪些 realm 的会话（按优先顺序）。
 // platform 路由只认 admin；tenant 路由认 console，也认 admin（平台管理员经 X-Tenant-ID 代租户，授权由 1.18/1.20 判定）；either 两者皆可。
@@ -70,6 +70,10 @@ func (a *Authenticator) Authenticate(r *http.Request, meta httpx.RouteMeta) (ten
 			// Bearer 没有会话，无法满足「近期 MFA」（fail-closed）；再认证同理，由 httpx.WithReauth 的检查组件拒绝。
 			if recentMFAOperations[meta.OperationID] {
 				return nil, apierr.New(apierr.AuthReauthRequired, "recent MFA required", apierr.Detail{Field: "mfa_verified_at", Reason: "API tokens cannot satisfy recent MFA; use a cookie session"})
+			}
+			// 令牌只能调用业务路由（x-permissions 非空且不是令牌管理）：自助 operation 与令牌管理要求 Cookie 会话。
+			if !bearerAllowed(meta) {
+				return nil, apierr.New(apierr.AuthForbidden, "forbidden", apierr.Detail{Field: "Authorization", Reason: "API tokens cannot call this operation; use a cookie session"})
 			}
 			return p, nil
 		}

@@ -27,7 +27,7 @@ updated: 2026-11-16（依据架构评审修订，见 docs/bmad/architecture-revi
 - 索引：`uk_system_settings_key(setting_key)`、`idx_system_settings_group(group_name)`。
 - 约束：`ck_system_settings_one_value`：`(value_json IS NULL) <> (value_enc IS NULL)`。
 - 保留：永久。变更写审计。
-- **已定义的键**（节选，其余随功能追加；键名为跨文档契约）：`system.run_mode`、`brand.*`、`login.*`、`retention.*`、`deploy.lineage`（BIGINT，初值 1；DB 恢复后由 `lingedge-server lineage bump` 提升，ADR-002 §12）、`ssrf.allow_cidrs`（平台 SSRF 白名单 CIDR 数组，写需 `setting:write` + 再认证，进入各集群 `global` 块的 `ssrf_allow_cidrs`，ADR-004 §6）、`auth.reauth_window_s`（L4 再认证窗口，默认 300，UD-29 采纳，ADR-018）、`auth.mfa_window_s`（近期 MFA 窗口，默认 900 `[ASSUMPTION]`：基线与 UD 均未规定，Story 1.17）、`login.totp_required_for_admin`（JSON 布尔，强制管理员启用 TOTP，缺省 false）、`auth.session_idle_ttl_s` / `auth.session_absolute_ttl_s`（会话滑动/绝对过期，秒；代码默认 7200 / 43200 `[ASSUMPTION]`，UD-27 待基线，Story 1.16）、`login.throttle_window_s` / `login.throttle_account_max` / `login.throttle_ip_max`（登录节流窗口与「账号 / 来源 IP」两个维度的失败阈值；代码默认 900 秒 / 10 / 30 `[ASSUMPTION]`，UD-27，Story 1.16）、`placement.default_cluster_uids`（租户建站时由平台默认绑定的集群，租户不可选，ADR-009 §5）、`grpc.tls.san_extra`（Server 叶证书额外 SAN）、`website.revalidate_secret`（`value_enc`，P2）。
+- **已定义的键**（节选，其余随功能追加；键名为跨文档契约）：`system.run_mode`、`brand.*`、`login.*`、`retention.*`、`deploy.lineage`（BIGINT，初值 1；DB 恢复后由 `lingedge-server lineage bump` 提升，ADR-002 §12）、`ssrf.allow_cidrs`（平台 SSRF 白名单 CIDR 数组，写需 `setting:write` + 再认证，进入各集群 `global` 块的 `ssrf_allow_cidrs`，ADR-004 §6）、`auth.reauth_window_s`（L4 再认证窗口，默认 300，UD-29 采纳，ADR-018）、`auth.mfa_window_s`（近期 MFA 窗口，默认 900 `[ASSUMPTION]`：基线与 UD 均未规定，Story 1.17）、`auth.api_token_default_ttl_s` / `auth.api_token_max_ttl_s`（API Token 默认有效期 / 系统上限，秒；代码默认 7776000（90 天）/ 31536000（365 天）`[ASSUMPTION]`，UD-27 同口径，Story 1.19）、`login.totp_required_for_admin`（JSON 布尔，强制管理员启用 TOTP，缺省 false）、`auth.session_idle_ttl_s` / `auth.session_absolute_ttl_s`（会话滑动/绝对过期，秒；代码默认 7200 / 43200 `[ASSUMPTION]`，UD-27 待基线，Story 1.16）、`login.throttle_window_s` / `login.throttle_account_max` / `login.throttle_ip_max`（登录节流窗口与「账号 / 来源 IP」两个维度的失败阈值；代码默认 900 秒 / 10 / 30 `[ASSUMPTION]`，UD-27，Story 1.16）、`placement.default_cluster_uids`（租户建站时由平台默认绑定的集群，租户不可选，ADR-009 §5）、`grpc.tls.san_extra`（Server 叶证书额外 SAN）、`website.revalidate_secret`（`value_enc`，P2）。
 
 ### 1.2 `system_installations`　**M1**
 
@@ -210,6 +210,7 @@ C2。`role_id` FK→roles CASCADE；`permission_id` FK→permissions CASCADE。�
 
 - 唯一：`uk_api_tokens_prefix(token_prefix)`、`uk_api_tokens_hash(token_hash)`。索引：`idx_api_tokens_tenant(tenant_id, user_id)`。
 - 保留：吊销后 90 天物理删除 `[ASSUMPTION]`。
+- **Story 1.19 用法**（表结构未变）：`token_hash` = SHA-256(完整令牌) 十六进制，`token_prefix` = 前缀 8 位（`[a-z2-7]`）；`tenant_id` NULL = 平台令牌（创建者须是平台用户），非 NULL = 该租户内的令牌（创建者须是该租户的有效成员）；`scopes_json` 为排序去重的权限串数组；`allowed_cidrs_json` 为规范化 CIDR 数组（NULL = 不限来源）；`expires_at` 恒非空（默认有效期见 ADR-018 修订记录 2026-11-21）；`last_used_*` 节流异步写；吊销写 `revoked_at`（行保留至保留期满）；轮换新行 `rotated_from_id` 指向旧行（旧行同事务吊销）。
 
 ### 2.9 `login_logs`　**补充 · M1**
 

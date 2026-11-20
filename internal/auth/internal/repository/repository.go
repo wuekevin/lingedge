@@ -269,7 +269,7 @@ func (r *Repo) ReadSettings(ctx context.Context) (map[string]json.RawMessage, er
 	}
 	if err := r.ex(ctx).Select(ctx, &rows, db.Q(`SELECT setting_key, value_json FROM system_settings
 		WHERE setting_key IN ('auth.session_idle_ttl_s', 'auth.session_absolute_ttl_s', 'login.throttle_window_s', 'login.throttle_account_max', 'login.throttle_ip_max', 'system.run_mode',
-		'auth.reauth_window_s', 'auth.mfa_window_s', 'login.totp_required_for_admin')`)); err != nil {
+		'auth.reauth_window_s', 'auth.mfa_window_s', 'login.totp_required_for_admin', 'auth.api_token_default_ttl_s', 'auth.api_token_max_ttl_s')`)); err != nil {
 		return nil, err
 	}
 	out := make(map[string]json.RawMessage, len(rows))

@@ -20,7 +20,7 @@ type assembly struct {
 //
 // 现状（诚实声明）：
 //
-//	Authenticator  已实现（Story 1.16/1.17）：Cookie 会话（realm 隔离/滑动+绝对过期/CSRF）；Bearer API Token 待 1.19（携带 Bearer 一律 401）。
+//	Authenticator  已实现（Story 1.16/1.17）：Cookie 会话（realm 隔离/滑动+绝对过期/CSRF）；Bearer API Token（Story 1.19）：不使用 Cookie 与 CSRF，主体权限 = 令牌 scopes ∩ 创建者当前权限，只能调用业务路由。
 //	Authorizer     已实现（Story 1.18）：RBAC——权限集 ∩ 路由声明（须全部具备）、平台/租户主体 × x-tenant-scope × X-Tenant-ID 授权矩阵；
 //	               权限集缓存键含 permission_version（Redis TTL≤60s + Pub/Sub 失效 + 轮询兜底，Redis 不可用直读 MySQL）。
 //	Reauth         已实现（Story 1.17，1.18 调整顺序）：x-reauth 路由先权限后再认证，窗口外 403 auth.reauth_required。

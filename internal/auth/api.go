@@ -8,7 +8,7 @@ import (
 )
 
 // Options 是 New 的参数。字段含义见 handler.Options：Pool（必须是 app 池）、Redis、Clock、IDs、Log、Argon2（config.Auth.Argon2，由基准测定）、
-// Box（信封加密，TOTP 密钥）、ExtraOrigins（额外允许的 Origin，通常为空）、Bearer（API Token 认证，Story 1.19 注入）、MaxConcurrentHashes、ManifestOnly（仅导出路由清单）。
+// Box（信封加密，TOTP 密钥）、ExtraOrigins（额外允许的 Origin，通常为空）、MaxConcurrentHashes、ManifestOnly（仅导出路由清单）。
 type Options = handler.Options
 
 // Module 是认证模块（Story 1.16）的对外契约：真实的会话认证钩子 + /auth/* 路由 + 自助 operation 判定。

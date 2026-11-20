@@ -30,8 +30,6 @@ type Options struct {
 	Argon2 config.Argon2
 	// ExtraOrigins 是除「与请求同源」外额外允许发起 Cookie 会话写请求的 Origin（精确匹配）；通常为空。
 	ExtraOrigins []string
-	// Bearer 是 API Token 认证（Story 1.19 注入）；nil 时携带 Bearer 的请求一律 401。
-	Bearer httpx.Authenticator
 	// Box 是信封加密（TOTP 密钥经它加密存储；Story 1.17）；非 ManifestOnly 时必填。
 	Box *secretbox.Box
 	// MaxConcurrentHashes 限制并发的 argon2id 计算数（每次占用 m KiB 内存）；<=0 取 max(2, CPU 数)。
@@ -73,7 +71,7 @@ func NewModule(ctx context.Context, o Options) (*Module, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Module{svc: svc, handlers: New(svc), authn: NewAuthenticator(svc, o.ExtraOrigins, o.Bearer), authz: NewAuthorizer(svc), log: o.Log.Named("auth")}, nil
+	return &Module{svc: svc, handlers: New(svc), authn: NewAuthenticator(svc, o.ExtraOrigins, bearerAuthenticator{svc: svc}), authz: NewAuthorizer(svc), log: o.Log.Named("auth")}, nil
 }
 
 // Authenticator 返回 httpx 认证钩子的真实实现（装配点：cmd/lingedge-server 的 assembleHooks）；ManifestOnly 时为 nil。
@@ -125,7 +123,7 @@ func (m *Module) AdminRoute(operationID string) bool { return IsAdminOperation(o
 
 // Hooks 是 REST 四个钩子的唯一装配（cmd/lingedge-server 与集成测试共用，避免装配漂移）：
 //
-//	Authenticator  Cookie 会话（Bearer 待 1.19）。
+//	Authenticator  Cookie 会话 + Bearer API Token（Story 1.19：主体权限 = 令牌 scopes ∩ 创建者当前权限）。
 //	Authorizer     RBAC（Story 1.18）：权限集 ∩ 路由声明；平台/租户主体 × x-tenant-scope × X-Tenant-ID 的授权矩阵（rbac.Decide），
 //	               放行时登记授权决策；x-reauth 在权限通过之后由 httpx.WithReauth 执行（先权限后再认证）。
 //	Scope          过渡实现 httpx.WithAccessScope：只把「不需要解析 X-Tenant-ID」的授权决策落成 Scope；acting-as 与其他一切委托给安全拒绝默认（完整实现 Story 1.20）。

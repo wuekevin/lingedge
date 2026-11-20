@@ -1,7 +1,6 @@
 package authit
 
 import (
-	"net/http"
 	"os"
 	"sort"
 	"strings"
@@ -9,24 +8,7 @@ import (
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
-
-	"github.com/wuekevin/lingedge/internal/platform/httpx"
-	"github.com/wuekevin/lingedge/internal/platform/tenantscope"
 )
-
-// stubBearer 是 Bearer API Token 认证器的测试内替身（真实的 API Token 认证属 Story 1.19）：它接受任何 Bearer 凭据并返回一个平台主体。
-// 用途仅限于验证「Bearer 请求没有会话，因此不能满足再认证/近期 MFA」——不是生产代码，不进任何二进制。
-type stubBearer struct{}
-
-type stubPrincipal struct{}
-
-func (stubPrincipal) ActorID() uint64           { return 1 }
-func (stubPrincipal) IsPlatform() bool          { return true }
-func (stubPrincipal) TenantID() uint64          { return 0 }
-func (stubPrincipal) HasPermission(string) bool { return true }
-func (stubBearer) Authenticate(*http.Request, httpx.RouteMeta) (tenantscope.Principal, error) {
-	return stubPrincipal{}, nil
-}
 
 func (s *stack) reauth(realm, token, csrf string, body map[string]string, opts ...reqOpt) resp {
 	s.t.Helper()
@@ -144,7 +126,7 @@ func TestReauthFailuresThrottle(t *testing.T) {
 // ---- AC6：x-reauth operation 在授权链里统一执行 ----
 
 func TestXReauthOperationsEnforcedInChain(t *testing.T) {
-	s := newStack(t, stackOpts{fakeClock: true, reauthRoutes: true, bearer: stubBearer{}})
+	s := newStack(t, stackOpts{fakeClock: true, reauthRoutes: true})
 	// 集合与 1.3 固定清单逐项相等（契约实际为 11 个；修订日志里的「10 个」已在 scripts/contract/data/x-reauth.txt 注明以契约为准）。
 	pinnedRaw, err := os.ReadFile("../../../scripts/contract/data/x-reauth.txt")
 	if err != nil {
@@ -233,15 +215,30 @@ func TestXReauthOperationsEnforcedInChain(t *testing.T) {
 		t.Errorf("非 x-reauth 路由不应要求再认证: %s", r.Body)
 	}
 
-	// Bearer API Token 请求不能满足再认证：测试替身不是认证模块产出的主体，授权钩子对它 fail-closed（403）；
-	// Bearer 主体在 ReauthChecker 内同样永远不满足（见 handler 单测 TestBearerCannotSatisfyReauthOrRecentMFA）。任何 x-reauth 路由都不得被 Bearer 请求执行。
-	for _, o := range ops {
-		r := s.do(o.method, o.path, map[string]string{}, withHeader("Authorization", "Bearer le_ab12cd34_"+strings.Repeat("x", 20)))
-		if r.Status != 403 || strings.Contains(string(r.Body), "reached") {
-			t.Errorf("%s: Bearer 请求不能越过 x-reauth 路由: %d %s", o.id, r.Status, r.Body)
+	// Bearer API Token 请求不能满足再认证（真实令牌，Story 1.19）：令牌带着这些路由所需的全部 scopes，授权钩子放行，
+	// 但令牌没有会话，ReauthChecker 永远不满足 → 403 auth.reauth_required；handler 不执行。即使会话刚刚再认证过也一样。
+	need := map[string]bool{}
+	for _, m := range s.router.Routes() {
+		if m.Reauth {
+			for _, p := range m.Permissions {
+				need[p] = true
+			}
 		}
 	}
-	if r := s.do("POST", "/auth/reauth", map[string]string{"password": u.Password}, withHeader("Authorization", "Bearer le_ab12cd34_"+strings.Repeat("x", 20))); r.Status == 200 {
+	var scopes []string
+	for p := range need {
+		scopes = append(scopes, p)
+	}
+	sort.Strings(scopes)
+	ss := session{u: u, token: token, csrf: csrf}
+	bearer := s.issue(ss, map[string]any{"name": "reauth-probe", "scopes": scopes}).Token
+	for _, o := range ops {
+		r := s.do(o.method, o.path, map[string]string{}, withHeader("Authorization", "Bearer "+bearer))
+		if r.Status != 403 || r.errCode(t) != "auth.reauth_required" || strings.Contains(string(r.Body), "reached") {
+			t.Errorf("%s: Bearer 请求不能越过 x-reauth 路由（应 403 auth.reauth_required）: %d %s", o.id, r.Status, r.Body)
+		}
+	}
+	if r := s.do("POST", "/auth/reauth", map[string]string{"password": u.Password}, withHeader("Authorization", "Bearer "+bearer)); r.Status == 200 {
 		t.Errorf("Bearer 请求不得通过 /auth/reauth: %d", r.Status)
 	}
 }

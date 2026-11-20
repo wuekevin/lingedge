@@ -209,7 +209,7 @@ func securityMiddleware(origins map[string]bool) gin.HandlerFunc {
 
 func setMetaMiddleware(meta RouteMeta) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.Request = c.Request.WithContext(withMeta(c.Request.Context(), meta))
+		c.Request = c.Request.WithContext(withClientIP(withMeta(c.Request.Context(), meta), c.ClientIP()))
 		c.Next()
 	}
 }

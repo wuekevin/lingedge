@@ -75,8 +75,9 @@ verify-build:
 test:
 	$(GO) test ./...
 
+# 竞态检测下集成测试明显变慢（tests/integration/auth 单包约 10 分钟，已逼近 go test 默认的 10 分钟包超时），故显式放宽包超时。
 race:
-	CGO_ENABLED=1 $(GO) test -race ./...
+	CGO_ENABLED=1 $(GO) test -race -timeout 30m ./...
 
 fmt:
 	gofmt -l -w .

@@ -11,7 +11,7 @@ import (
 	"github.com/wuekevin/lingedge/internal/platform/tenantscope"
 )
 
-// adminAuditor 是 /admin 管理路由的审计钩子过渡实现（Story 1.18）：**不是 audit_logs**。
+// adminAuditor 是 /admin 管理路由与 /auth/api-tokens 令牌管理路由（Story 1.19）的审计钩子过渡实现（Story 1.18）：**不是 audit_logs**。
 //
 // audit 模块（Story 1.21）尚未实现，写操作的 audit_logs 无法写入，也不假装已写：本钩子对「本模块的 /admin 管理 operation」只写一条不含
 // 敏感信息的结构化日志（operation、操作者 id、HTTP 状态、request_id；明确标注 audit_logs_written=false），放行请求；
@@ -25,7 +25,7 @@ type adminAuditor struct {
 var _ httpx.Auditor = adminAuditor{}
 
 func (a adminAuditor) Begin(r *http.Request, meta httpx.RouteMeta) (func(httpx.AuditOutcome), error) {
-	if !meta.Audit || !IsAdminOperation(meta.OperationID) {
+	if !meta.Audit || (!IsAdminOperation(meta.OperationID) && !IsTokenOperation(meta.OperationID)) {
 		return a.inner.Begin(r, meta)
 	}
 	var actor uint64

@@ -66,12 +66,12 @@ func TestCSRF(t *testing.T) {
 	}
 
 	// Bearer：不使用 Cookie，不适用 CSRF——请求不会因缺少 CSRF 令牌而得到 403，而是按令牌认证的结果处理。
-	// API Token 认证属 Story 1.19：在它交付前携带 Bearer 一律 401（fail-closed），所以这里断言「401 而不是 403」。
+	// 这里携带的是格式合法但并不存在的令牌（Story 1.19 的真实 Bearer 认证）：一律 401，所以断言「401 而不是 403」；有效令牌的行为见 apitoken_*_test.go。
 	// 即使同时带着有效的会话 Cookie，Bearer 请求也不走 Cookie 路径。
 	tok, _ = newSession()
 	r = s.do("POST", "/auth/logout", nil, withHeader("Authorization", "Bearer le_abcdefgh_"+strings.Repeat("x", 32)))
 	if r.Status != 401 {
-		t.Errorf("Bearer 请求应由令牌认证处理（1.19 前一律 401），不得是 CSRF 403: %d %s", r.Status, r.Body)
+		t.Errorf("Bearer 请求应由令牌认证处理（无效令牌 401），不得是 CSRF 403: %d %s", r.Status, r.Body)
 	}
 	r = s.authed("admin", tok, "", "POST", "/auth/logout", nil, withHeader("Authorization", "Bearer le_abcdefgh_"+strings.Repeat("x", 32)))
 	if r.Status != 401 {

@@ -9,3 +9,5 @@ login_logs
 tenant_members
 user_roles
 roles
+# Story 1.19：Bearer 认证在 Scope 钩子之前以 token_hash 为键读取，令牌管理 API 以创建者自己的 user_id 为边界（与 sessions 同类）。
+api_tokens

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/base32"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -279,5 +280,62 @@ func TestLogScanAdminPasswordScenarios(t *testing.T) {
 	}
 	if !strings.Contains(out, "***") {
 		t.Fatal("输出里没有任何脱敏标记，测试可能没有真正产生日志")
+	}
+}
+
+// runtimeAPIToken 生成与生产同形的 API Token（le_<8 位前缀>_<43 位 base64url>，Story 1.19）：前缀是 5 字节随机的小写 base32，
+// 随机部分是 32 字节随机的 base64url。要求随机部分同时含 '-' 与 '_'（覆盖该字符集的边界；不满足则重抽）。令牌在运行期生成（G-6：仓库内无固定令牌）。
+func runtimeAPIToken(t *testing.T) (token, prefix, secret string) {
+	t.Helper()
+	enc := base32.NewEncoding("abcdefghijklmnopqrstuvwxyz234567").WithPadding(base32.NoPadding)
+	for range 200 {
+		pb, sb := make([]byte, 5), make([]byte, 32)
+		if _, err := rand.Read(pb); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := rand.Read(sb); err != nil {
+			t.Fatal(err)
+		}
+		secret = base64.RawURLEncoding.EncodeToString(sb)
+		if strings.ContainsAny(secret, "-") && strings.ContainsAny(secret, "_") {
+			prefix = enc.EncodeToString(pb)
+			return "le_" + prefix + "_" + secret, prefix, secret
+		}
+	}
+	t.Fatal("无法生成覆盖 '-' 与 '_' 的令牌")
+	return
+}
+
+// G-5（Story 1.19）：API Token 明文不入日志——消息、敏感/不敏感字段、错误链、嵌套对象、Authorization 头、panic 里的令牌必须全部被遮蔽；
+// 而「只记前缀」的日志（约定的合规写法）不应被遮蔽成无法排查（前缀不是秘密）。
+func TestLogScanAPITokenRuntimeShape(t *testing.T) {
+	for range 20 {
+		tok, prefix, secret := runtimeAPIToken(t)
+		l, buf := newLogger(t)
+		l.Info("令牌创建失败 "+tok, zap.String("note", "used "+tok+" for call"))
+		l.Warn("字段键名敏感", zap.String("api_token", tok), zap.String("token", tok), zap.String("authorization", "Bearer "+tok))
+		l.Warn("字段键名不敏感，靠值格式", zap.String("detail", tok), zap.String("x", "prefix "+prefix+" full "+tok))
+		l.Error("错误链", zap.Error(fmt.Errorf("lookup %s: %w", tok, errors.New("denied for "+tok))))
+		l.Info("嵌套", zap.Any("req", map[string]any{"headers": map[string]any{"Authorization": "Bearer " + tok}, "body": map[string]any{"list": []string{tok}}}))
+		func() {
+			defer func() { _ = recover() }()
+			l.Info("panic 路径前") // 保持日志非空
+			panic("boom " + tok)
+		}()
+		// 约定的合规写法：只记前缀。
+		l.Info("API Token 已创建", zap.String("prefix", prefix), zap.String("uid", "01JABCDEFGHJKMNPQRSTVWXYZ0"))
+		l.Warn("API Token 认证被拒绝", zap.String("prefix", prefix), zap.String("reason", "revoked"))
+		out := buf.String()
+		for _, s := range []string{tok, secret} {
+			if strings.Contains(out, s) {
+				t.Fatalf("日志泄露了 API Token（G-5）: %q…\n%s", s[:12], out)
+			}
+		}
+		if !strings.Contains(out, "***") {
+			t.Fatal("输出里没有任何脱敏标记，测试可能没有真正产生日志")
+		}
+		if !strings.Contains(out, `"prefix":"`+prefix+`"`) {
+			t.Fatalf("只记前缀的日志不应被遮蔽（排障需要）: %s", out)
+		}
 	}
 }

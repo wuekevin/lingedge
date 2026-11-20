@@ -86,6 +86,10 @@ type Service struct {
 
 	bgSem chan struct{}
 	bgWG  sync.WaitGroup
+
+	// touched 记录各 API Token 上次写 last_used_at 的时间（节流用，Story 1.19）。
+	touchMu sync.Mutex
+	touched map[uint64]time.Time
 }
 
 // New 创建 Service；会计算一次哑哈希（启动时的一次性开销）。
@@ -116,7 +120,7 @@ func New(ctx context.Context, o Options) (*Service, error) {
 		permCache: redisx.NewCache(o.Redis), permTTL: ttl, permPoll: poll,
 		repo: o.Repo, withTx: o.WithTx, redis: o.Redis, limiter: redisx.NewLimiter(o.Redis, nil), ks: o.Redis.Keyspace(), hasher: o.Hasher, box: o.Box,
 		clk: o.Clock, ids: o.IDs, log: o.Log.Named("auth"), settings: newSettingsCache(o.Repo, o.Clock, o.Log), dummy: dummy,
-		bgSem: make(chan struct{}, 64),
+		bgSem: make(chan struct{}, 64), touched: map[uint64]time.Time{},
 	}
 	if err := svc.startPermSubscription(ctx); err != nil {
 		return nil, fmt.Errorf("auth/service: 订阅权限失效广播: %w", err)

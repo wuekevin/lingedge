@@ -50,6 +50,8 @@ const (
 	EventLogout       = "logout"
 	EventLocked       = "locked"
 	EventTOTPFailed   = "totp_failed"
+	// EventTokenAuthFailed：API Token 认证失败（令牌本身有效匹配但已过期/吊销/来源不符等；Story 1.19）。
+	EventTokenAuthFailed = "token_auth_failed"
 )
 
 // 会话吊销原因（sessions.revoke_reason）。
@@ -186,8 +188,12 @@ type Principal struct {
 	Realm     Realm
 	Tenant    *Tenant
 	CSRFToken string // 由会话令牌派生（见 service.DeriveCSRF）；仅内存中使用
-	// Bearer 为 true 表示由 API Token 认证（无会话；免 CSRF）。
+	// Bearer 为 true 表示由 API Token 认证（无会话；免 CSRF）。此时 Session 只有创建者的 UserID/UserUID/PermVersion（ID 恒为 0）。
 	Bearer bool
+	// TokenID/TokenPrefix 仅 Bearer 主体有值（日志只记前缀）；TokenScopes 是令牌的作用域：Bearer 主体的有效权限 = TokenScopes ∩ 创建者**当前**权限。
+	TokenID     uint64
+	TokenPrefix string
+	TokenScopes map[string]struct{}
 
 	perms map[string]struct{}
 }
@@ -241,6 +247,9 @@ type Settings struct {
 	MFAWindow time.Duration
 	// TOTPRequiredForAdmin 是「强制管理员启用 TOTP」（login.totp_required_for_admin）。
 	TOTPRequiredForAdmin bool
+	// APITokenDefaultTTL 是创建 API Token 未给 expires_at 时的默认有效期；APITokenMaxTTL 是系统上限（Story 1.19，均为可配置的工程假设，UD-27）。
+	APITokenDefaultTTL time.Duration
+	APITokenMaxTTL     time.Duration
 }
 
 // MFAChallenge 是 login_mfa_challenges 行（登录第一步通过后发放的一次性 mfa_token 挑战）。

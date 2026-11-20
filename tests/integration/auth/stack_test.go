@@ -90,8 +90,8 @@ type stackOpts struct {
 	spyScope bool
 	// permPoll 是权限失效广播的轮询兜底周期（0 = 默认 30 秒）。
 	permPoll time.Duration
-	// bearer 是 Bearer API Token 的认证器（Story 1.19 才有真实实现；这里是测试内的替身，只用于验证「Bearer 请求不能满足再认证/近期 MFA」）。
-	bearer httpx.Authenticator
+	// trustedProxies 是路由器的可信反代（空 = 默认只信任本机 127.0.0.1/::1）；来源 IP 白名单测试用它验证「伪造 X-Forwarded-For 不能绕过」。
+	trustedProxies []string
 }
 
 func newStack(t *testing.T, o ...stackOpts) *stack {
@@ -139,7 +139,7 @@ func newStack(t *testing.T, o ...stackOpts) *stack {
 		hooks.Scope = &spyScope{st: s.spy, inner: hooks.Scope}
 	}
 	s.router, err = httpx.NewRouter(httpx.Options{Logger: lg, IDs: uid.NewGenerator(clock.System()),
-		Hooks: hooks, Idempotency: idem})
+		Hooks: hooks, Idempotency: idem, TrustedProxies: opt.trustedProxies})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +183,7 @@ func newStack(t *testing.T, o ...stackOpts) *stack {
 
 func (s *stack) newModule(lg *zap.Logger, clk clock.Clock) auth.Module {
 	s.t.Helper()
-	m, err := auth.New(context.Background(), auth.Options{Pool: s.e.app, Redis: s.rc, Clock: clk, IDs: uid.NewGenerator(clock.System()), Log: lg, Argon2: testArgon, Box: s.box, Bearer: s.opt.bearer, PermCacheTTL: s.opt.permTTL, PermPollEvery: s.opt.permPoll})
+	m, err := auth.New(context.Background(), auth.Options{Pool: s.e.app, Redis: s.rc, Clock: clk, IDs: uid.NewGenerator(clock.System()), Log: lg, Argon2: testArgon, Box: s.box, PermCacheTTL: s.opt.permTTL, PermPollEvery: s.opt.permPoll})
 	if err != nil {
 		s.t.Fatal(err)
 	}

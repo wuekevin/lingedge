@@ -522,7 +522,9 @@ func TestIdentityTablesMatchDocs(t *testing.T) {
 	}
 	all := text.String()
 	plat := platformTables()
-	forbidden := map[string]bool{"sites": true, "tasks": true, "certificates": true, "origins": true, "rules": true, "audit_logs": true, "api_tokens": true}
+	// api_tokens 在 Story 1.19 移出禁入名单：Bearer 认证发生在 Scope 钩子之前、以 token_hash 为键（与 sessions 同类）；令牌管理 API 以创建者自己的
+	// user_id（及其租户）为边界——不是「按租户列举」的业务表。同类的租户业务表（站点/规则/证书/任务/审计）仍禁入。
+	forbidden := map[string]bool{"sites": true, "tasks": true, "certificates": true, "origins": true, "rules": true, "audit_logs": true}
 	for tbl := range identityTables() {
 		if !regexp.MustCompile("(?m)^#{3,4} [0-9.]+ `" + regexp.QuoteMeta(tbl) + "`").MatchString(all) {
 			t.Errorf("身份表清单含 %q，但 docs/database 中没有该表的定义标题", tbl)

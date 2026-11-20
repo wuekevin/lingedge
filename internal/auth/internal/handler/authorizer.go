@@ -32,6 +32,9 @@ func (a *Authorizer) Authorize(r *http.Request, meta httpx.RouteMeta, p tenantsc
 	if !ok || dp == nil {
 		return apierr.New(apierr.AuthForbidden, "forbidden")
 	}
+	if IsTokenOperation(meta.OperationID) {
+		return a.authorizeOwnToken(r, meta, dp)
+	}
 	route, ok := meta.TenantScope.RouteScope()
 	if !ok {
 		return apierr.New(apierr.AuthForbidden, "forbidden") // 公开路由不经授权；其他取值是装配错误
@@ -70,4 +73,46 @@ func targetTenant(r *http.Request) (string, bool, error) {
 		return "", false, apierr.Validation(apierr.Detail{Field: "X-Tenant-ID", Reason: "must be a single tenant uid"})
 	}
 	return vals[0], true, nil
+}
+
+// authorizeOwnToken 授权令牌管理 operation（/auth/api-tokens*）：它们只作用于调用者自己名下的令牌（user_id 来自会话），不是「跨租户资源」，
+// 所以不走 rbac.Decide 的 acting-as 矩阵（否则平台用户创建平台令牌会被判为「写操作须指定租户」）。规则：
+//   - 只有 Cookie 会话的主体（Bearer 不能管理令牌；认证钩子已拒绝，这里再 fail-closed 一次）；
+//   - 须具备路由声明的权限（token:manage，scope=both：平台角色与租户角色均可持有）；
+//   - 不接受代租户：平台主体带 X-Tenant-ID → 400；租户主体带他人租户 → 404（不泄漏存在性），带自己的租户 → 允许；
+//   - 放行时登记授权决策（平台主体 = platform，租户主体 = own_tenant），Scope 钩子据此从主体自身推导 Scope。
+func (a *Authorizer) authorizeOwnToken(r *http.Request, meta httpx.RouteMeta, dp *domain.Principal) error {
+	if dp.Bearer || dp.Session.ID == 0 {
+		return apierr.New(apierr.AuthForbidden, "forbidden")
+	}
+	target, present, err := targetTenant(r)
+	if err != nil {
+		return err
+	}
+	mode := rbac.ModePlatform
+	if dp.IsPlatform() {
+		if present {
+			return apierr.Validation(apierr.Detail{Field: "X-Tenant-ID", Reason: "API tokens are managed by their owner; acting-as is not supported"})
+		}
+	} else {
+		if dp.Tenant == nil {
+			return apierr.New(apierr.AuthForbidden, "forbidden")
+		}
+		if present && target != dp.Tenant.UID {
+			return httpx.MapScopeError(tenantscope.ErrTenantMismatch)
+		}
+		mode = rbac.ModeOwnTenant
+	}
+	perms, err := a.svc.LoadPermissions(r.Context(), dp)
+	if err != nil {
+		return err
+	}
+	dp.SetPermissions(perms)
+	for _, need := range meta.Permissions {
+		if !dp.HasPermission(need) {
+			return apierr.Wrap(rbac.ErrMissingPermission, apierr.AuthForbidden, "forbidden")
+		}
+	}
+	httpx.RecordAccess(r, rbac.Decision{Mode: mode})
+	return nil
 }
