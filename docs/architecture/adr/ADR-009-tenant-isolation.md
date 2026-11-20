@@ -76,3 +76,13 @@
 - §1/§2/§6 的落地形态：`Scope` 与构造入口在 `internal/platform/tenantscope`（字段未导出，包外无法构造非零 Scope；`internal/platform/scope` 仅为类型别名），查询构建器在 `internal/platform/db/tenantdb`，SQL 文本只接受编译期常量（`db.Q`）或构建器产物；静态防线为 depguard（sqlx/database/sql/驱动仅限 `internal/platform/db` 与 repository 包）、forbidigo（Repository 内禁 SQL 拼接；受限池与 Scope 构造入口的调用白名单，来源 `scripts/gates/spec.go`）与 `make repo-check`（Repository 导出方法/接口方法的 Scope 首参；平台级表须登记在 `scripts/gates/data/platform-tables.txt`）。
 - 「租户表清单来自 docs/database 元数据生成」未采用：文档对 T / T? / 平台级的标注是叙述性的，无法可靠解析；改为「默认全部要求 Scope、平台级表显式登记」的反向清单（漏登记只会多报）。
 - 白名单变更须先改本 ADR 与 ADR-016，再改 `spec.go` 并 `make gen-lint`。
+
+## 修订记录 2026-11-21（Story 1.20，实现细化，非推翻）
+
+- §1/§5（Scope 钩子）：完整的租户 Scope 钩子 `httpx.WithTenantScope`（`internal/platform/httpx/scopehook.go`）替换 Story 1.18 的过渡钩子。Scope 只由三样东西生成：已认证主体、路由元数据 `x-tenant-scope`、`X-Tenant-ID`——且 `X-Tenant-ID` 只在授权钩子（RBAC，`rbac.Decide`）已判定「可代该租户操作」（同时具备 `tenant:impersonate` 与路由权限）之后才被解析；没有授权决策、决策与主体/路由不一致、租户目录未装配，一律安全拒绝。acting-as 的目标租户经**租户目录**（`httpx.TenantResolver`，租户模块 `internal/tenant` 实现，每次现读不缓存）解析，**不存在、已软删除、状态非 `active`（suspended/closed/pending）一律 `404 resource.not_found`**，响应与「他租户资源」逐字节一致；目录故障按 500 处理（fail-closed）。
+- §5（审计）：acting-as 成功时 Scope 钩子把 `httpx.ActingAs{ActorID, TenantID, TenantUID, OperationID}` 放进请求上下文（`httpx.ActingAsFrom`），审计模块（Story 1.21）直接消费即可写 `audit_logs.actor_user_id + tenant_id + acting_as`。**audit_logs 仍未实现（待 Story 1.21）**：Story 1.20 只写结构化日志（Scope 钩子与过渡审计钩子都带操作者与目标租户，`audit_logs_written=false`），不假装已写。
+- §4（越权语义）：租户 Console 会话访问 `platform` 路由 → 401（realm 隔离，ADR-018 §1）；租户 API Token 访问 `platform` 路由 → 403（`rbac.Decide`，NFR-14）；二者都在路由层（认证/授权钩子）拒绝，不进入 handler。租户主体指定他租户（含不存在、不可用）的 `X-Tenant-ID` → 404（先于权限判定，不泄漏存在性）。
+- §7（路由元数据检查）：`make tenantscope-check`——真实路由集合里每条 `tenant | either` 路由必须经 Scope 钩子（探针钩子 + 真实路由表，负向样本自测），见 `docs/testing/tenant-isolation-matrix.md` §4。
+- §8（铸造白名单收窄）：`tenantscope.FromPrincipal/FromTask/PlatformForJob/NewContext` 的调用白名单由 `internal/platform/` 整体 + `internal/tenant/` + `internal/scheduler/` + `cmd/*` 收窄为 `internal/platform/{httpx,taskrt,server}/`（`scripts/gates/spec.go`，`make gen-lint`）；租户模块、调度器模块、cmd 都不构造 Scope。
+- §11（隔离矩阵）：`tests/security/tenant_isolation` 已落地（骨架由 openapi 自动生成；覆盖登记；R-T1 响应字段断言器 `internal/platform/leakguard`），规则与扩充方法见 `docs/testing/tenant-isolation-matrix.md`。矩阵暴露并修复一处 R-T1 缺口：任务中心的租户视图原先只剔除 `cluster*`/`node*` 前缀的键，`egress_node*`、`targets` 等未剔除，现与断言器同一规则。
+- 租户模块：`/tenants`、`/tenants/current`、`/tenants/{id}`、`/tenants/{id}/members`、`/tenants/{id}/quotas`（配额只存取，强制执行属 Story 6.9）；种子「默认租户」（`000004`）是 MVP 运营入口（D-13）。`createTenant`（POST /tenants）是 P5，不在 M1 实现。

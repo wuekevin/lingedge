@@ -144,12 +144,17 @@ const (
 )
 
 // Scope 构造入口（tenantscope.FromPrincipal/FromTask/PlatformForJob/NewContext）的调用白名单（AC2、ADR-009 §1、§8）。
-// 已知边界：internal/platform/ 整体在白名单内（中间件与任务运行时将落在其下，Story 1.12/1.14/1.20 落地后应收窄到具体子包）；
-// PlatformForJob 的「登记」目前是路径级的，调用点清单随 1.14/1.15 登记：
+// Story 1.20 收窄到实际铸造 Scope 的三个子包（此前是 internal/platform/ 整体加 internal/tenant/、internal/scheduler/、cmd/*）：
+//   - internal/platform/httpx/   请求路径：Scope 中间件（NewContext）、完整 Scope 钩子 WithTenantScope、自助 operation 的 WithSelfService（FromPrincipal）；
+//   - internal/platform/taskrt/  任务运行时：以任务记录的 tenant_id 构造（FromTask/PlatformForJob）及其测试装配 tasktest；
+//   - internal/platform/server/  Worker/Scheduler 进程装配：跨租户的平台进程持有平台 Scope（PlatformForJob，调用点带 [tenantscope-mint] 注释）。
+//
+// 租户模块（internal/tenant）、调度器模块（internal/scheduler）与 cmd/* 都不构造 Scope：它们只能经 tenantscope.FromContext 取得中间件放入 context 的 Scope，
+// 平台 Scope 经 server.Deps 传入。PlatformForJob 的「登记」仍是路径级的，调用点清单随 1.14/1.15 登记；新增调用点须评审。
 // Handler/Service/Repository 只能经 FromContext 取得中间件放入 context 的 Scope，不能自己造。
 const (
 	scopeMintMarker = "[tenantscope-mint]"
-	scopeMintPaths  = `^(?:internal/platform/|internal/tenant/|internal/scheduler/|cmd/lingedge-(?:server|worker|scheduler)/)`
+	scopeMintPaths  = `^internal/platform/(?:httpx|taskrt|server)/`
 )
 
 // Gin 引擎只能由 internal/platform/httpx 构造（Story 1.12 AC2、NFR-4）：路由只能经 Router.Register(RouteMeta, handler) 注册，

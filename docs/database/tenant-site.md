@@ -32,6 +32,7 @@ updated: 2026-11-16（依据架构评审修订，见 docs/bmad/architecture-revi
 - 唯一：`uk_tenants_slug(slug)`、`uk_tenants_default(default_flag)`。索引：`idx_tenants_status(status)`、`idx_tenants_reseller(reseller_id)`。
 - CHECK：status 取值；slug 正则 `REGEXP_LIKE(slug,'^[a-z0-9][a-z0-9-]{0,62}$')`。
 - 保留：软删除后保留；物理清理需其所有子数据先清理，待用户确认（OQ-6）。
+- **Story 1.20**：种子迁移 `000004` 已写入默认租户（`uid=01M7QP5V346STC0AT56NME5NR3`、`slug=default`、`is_default=1`、`status=active`，MVP 运营入口 D-13），无需新迁移；`settings_json` 是平台写入、租户可见的自由 JSON——写入时拒绝含节点/集群内部标识的键（R-T1，`leakguard.ForbiddenKey`）；集群放置由平台 `system_settings.placement.default_cluster_uids` 决定，不在 `tenants` 上，租户不选、不可见。租户目录（Scope 钩子解析 `X-Tenant-ID`）只把 `status='active'` 且未软删除的租户视为可用。
 
 ### 1.2 `tenant_members`　**M1**
 
@@ -46,6 +47,7 @@ updated: 2026-11-16（依据架构评审修订，见 docs/bmad/architecture-revi
 | joined_at | DATETIME(3) | Y | — | |
 
 - 唯一：`uk_tenant_members(tenant_id, user_id)`；索引 `idx_tenant_members_user(user_id)`。CHECK：status 取值。
+- **Story 1.20**：`POST /tenants/{id}/members` 把**已存在的租户用户**（`user_type=tenant`）加入租户并授予租户内模板角色（`user_roles.tenant_id`，`roles.scope='tenant'`）；已是 `active` 成员 → 409；`invited/removed` 的成员关系被置回 `active`（复用行）；同事务递增 `users.permission_version`（权限缓存键含版本，授予立即生效）。租户用户账号本身的创建（自助注册/邀请）属 P5，本 Story 不创建用户。
 
 ### 1.3 `tenant_quotas`　**M1**（模型）/ 强制 P5
 
@@ -60,6 +62,7 @@ updated: 2026-11-16（依据架构评审修订，见 docs/bmad/architecture-revi
 | updated_at | DATETIME(3) | N | CURRENT_TIMESTAMP(3) ON UPDATE | |
 
 - 唯一：`uk_tenant_quotas(tenant_id, quota_key)`。CHECK：`limit_value IS NULL OR limit_value >= 0`。
+- **Story 1.20（只存取）**：配额键字典（`GET/PUT /tenants/{id}/quotas` 校验）固定为 `api_tokens`、`cache_tasks_per_day`、`certificates`、`domains_per_site`、`l4_applications`、`members`、`rules_per_site`、`sites`（`internal/tenant/internal/domain.QuotaKeys`；新增键须同步本表与代码）。未写入的键读作 `limit_value=null`、`source=default`（默认租户无限制——不需要种子行）；`PUT` 写入 `source=manual`，`null` 表示不限；一次 `PUT` 全部成功或全部不写。**强制执行与用量统计属 Story 6.9**：1.20 不在任何路径上强制配额（`members` 配额为 0 仍可加成员，有测试断言），响应里不提供 `used`。
 
 ## 2. 站点
 

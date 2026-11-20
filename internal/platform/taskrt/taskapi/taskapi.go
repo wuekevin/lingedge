@@ -11,6 +11,7 @@ import (
 
 	"github.com/wuekevin/lingedge/internal/platform/apierr"
 	"github.com/wuekevin/lingedge/internal/platform/httpx"
+	"github.com/wuekevin/lingedge/internal/platform/leakguard"
 	"github.com/wuekevin/lingedge/internal/platform/taskrt"
 	"github.com/wuekevin/lingedge/internal/platform/tenantscope"
 	"github.com/wuekevin/lingedge/internal/platform/uid"
@@ -154,7 +155,8 @@ func stripPlatformKeys(v any) any {
 	case map[string]any:
 		out := make(map[string]any, len(x))
 		for k, val := range x {
-			if l := strings.ToLower(k); strings.HasPrefix(l, "cluster") || strings.HasPrefix(l, "node") {
+			// R-T1：cluster*/node* 前缀（大小写不敏感，1.14 既有规则）与 leakguard 的内部标识键名（egress_node*、targets、nodes/clusters、驼峰形态；Story 1.20 补）都剔除。
+			if l := strings.ToLower(k); strings.HasPrefix(l, "cluster") || strings.HasPrefix(l, "node") || leakguard.ForbiddenKey(k) {
 				continue
 			}
 			out[k] = stripPlatformKeys(val)

@@ -241,6 +241,11 @@ func TestLintGatesBlockViolationsAndAllowLegitimate(t *testing.T) {
 		"internal/auth/internal/handler/mint_scope.go":       {"package handler\n\nimport \"github.com/wuekevin/lingedge/internal/platform/tenantscope\"\n\nvar Mint = func() {\n\t_, _ = tenantscope.FromTask(1, 1)\n}\n", "forbidigo", "[tenantscope-mint]"},
 		"internal/website/internal/service/mint_ctx.go":      {"package service\n\nimport (\n\t\"context\"\n\n\t\"github.com/wuekevin/lingedge/internal/platform/tenantscope\"\n)\n\nvar Mint = func(ctx context.Context) context.Context {\n\treturn tenantscope.NewContext(ctx, tenantscope.PlatformForJob(1))\n}\n", "forbidigo", "[tenantscope-mint]"},
 		"internal/website/internal/repository/mint_alias.go": {"package repository\n\nimport ts \"github.com/wuekevin/lingedge/internal/platform/tenantscope\"\n\nvar Mint = ts.PlatformForJob\n", "forbidigo", "[tenantscope-mint]"},
+		// Story 1.20 收窄：租户模块、cmd、platform 的其他子包也不得铸造 Scope（此前在白名单内）。
+		"internal/tenant/internal/handler/mint_scope.go":    {"package handler\n\nimport \"github.com/wuekevin/lingedge/internal/platform/tenantscope\"\n\nvar Mint = func(p tenantscope.Principal) {\n\t_, _ = tenantscope.FromPrincipal(p, tenantscope.RouteTenant, tenantscope.NoTarget())\n}\n", "forbidigo", "[tenantscope-mint]"},
+		"cmd/lingedge-server/mint_scope.go":                 {"package main\n\nimport \"github.com/wuekevin/lingedge/internal/platform/tenantscope\"\n\nvar _ = tenantscope.PlatformForJob\n", "forbidigo", "[tenantscope-mint]"},
+		"internal/platform/task/mint_scope.go":              {"package task\n\nimport \"github.com/wuekevin/lingedge/internal/platform/tenantscope\"\n\nvar Mint = func() {\n\t_, _ = tenantscope.FromTask(1, 0)\n}\n", "forbidigo", "[tenantscope-mint]"},
+		"internal/scheduler/internal/service/mint_scope.go": {"package service\n\nimport \"github.com/wuekevin/lingedge/internal/platform/tenantscope\"\n\nvar _ = tenantscope.PlatformForJob\n", "forbidigo", "[tenantscope-mint]"},
 	}
 	// 必须通过（合法依赖与白名单用法）。
 	legit := map[string]string{
@@ -278,9 +283,10 @@ func TestLintGatesBlockViolationsAndAllowLegitimate(t *testing.T) {
 		"internal/platform/migrate/ok_goose.go":             "package migrate\n\nimport (\n\t\"database/sql\"\n\n\t\"github.com/jmoiron/sqlx\"\n\t\"github.com/pressly/goose/v3\"\n)\n\ntype Raw struct {\n\tD *sql.DB\n\tX *sqlx.DB\n\tP *goose.Provider\n}\n",
 		"internal/platform/migrate/ok_migrate.go":           "package migrate\n\nimport (\n\t\"context\"\n\n\t\"github.com/wuekevin/lingedge/internal/platform/db\"\n)\n\nvar OpenMigrateOK = func(ctx context.Context) {\n\t_, _ = db.OpenMigrate(ctx, db.Config{})\n}\n",
 		"internal/auth/internal/service/ok_app_pool.go":     "package service\n\nimport (\n\t\"context\"\n\n\t\"github.com/wuekevin/lingedge/internal/platform/db\"\n)\n\nvar OpenAppOK = func(ctx context.Context) {\n\t_, _ = db.OpenApp(ctx, db.Config{})\n}\n",
-		"internal/tenant/internal/handler/ok_mint.go":       "package handler\n\nimport \"github.com/wuekevin/lingedge/internal/platform/tenantscope\"\n\nvar Mint = func(p tenantscope.Principal) {\n\t_, _ = tenantscope.FromPrincipal(p, tenantscope.RouteTenant, tenantscope.NoTarget())\n}\n",
-		"internal/platform/task/ok_scope.go":                "package task\n\nimport \"github.com/wuekevin/lingedge/internal/platform/tenantscope\"\n\nvar Mint = func() {\n\t_, _ = tenantscope.FromTask(1, 0)\n\t_ = tenantscope.PlatformForJob(1)\n}\n",
-		"cmd/lingedge-server/ok_scope.go":                   "package main\n\nimport \"github.com/wuekevin/lingedge/internal/platform/tenantscope\"\n\nvar _ = tenantscope.PlatformForJob\n",
+		// Scope 铸造白名单（Story 1.20 收窄）：只有 internal/platform/{httpx,taskrt,server}/ 可以构造 Scope。
+		"internal/platform/httpx/ok_scope_hook.go":          "package httpx\n\nimport \"github.com/wuekevin/lingedge/internal/platform/tenantscope\"\n\nvar Mint = func(p tenantscope.Principal) {\n\t_, _ = tenantscope.FromPrincipal(p, tenantscope.RouteTenant, tenantscope.NoTarget())\n}\n",
+		"internal/platform/taskrt/ok_scope.go":              "package taskrt\n\nimport \"github.com/wuekevin/lingedge/internal/platform/tenantscope\"\n\nvar Mint = func() {\n\t_, _ = tenantscope.FromTask(1, 0)\n\t_ = tenantscope.PlatformForJob(1)\n}\n",
+		"internal/platform/server/ok_scope.go":              "package server\n\nimport \"github.com/wuekevin/lingedge/internal/platform/tenantscope\"\n\nvar _ = tenantscope.PlatformForJob\n",
 		"internal/website/internal/handler/ok_scope_ctx.go": "package handler\n\nimport (\n\t\"context\"\n\n\t\"github.com/wuekevin/lingedge/internal/platform/tenantscope\"\n)\n\nvar Get = func(ctx context.Context) bool {\n\t_, ok := tenantscope.FromContext(ctx)\n\treturn ok\n}\n",
 		// Gin：httpx 包内可构造引擎；handler 只使用 gin.Context/HandlerFunc 类型；测试代码不受限。
 		"internal/platform/httpx/ok_gin_engine.go":          "package httpx\n\nimport \"github.com/gin-gonic/gin\"\n\nvar NewEngine = func() *gin.Engine {\n\treturn gin.New()\n}\n",

@@ -27,13 +27,14 @@ func TestRoutesSubcommandExportsManifest(t *testing.T) {
 		"login", "logout", "getMe", "getCsrfToken", "changePassword", "listSessions", "revokeSession", "listMyLoginLogs",
 		"listUsers", "createUser", "getUser", "updateUser", "deleteUser", "setUserRoles", "unlockUser", "resetUserPassword", "revokeUserSessions",
 		"listRoles", "createRole", "getRole", "updateRole", "deleteRole", "setRolePermissions", "listPermissions",
-		"listApiTokens", "createApiToken", "getApiToken", "revokeApiToken", "rotateApiToken"} {
+		"listApiTokens", "createApiToken", "getApiToken", "revokeApiToken", "rotateApiToken",
+		"listTenants", "getCurrentTenant", "getTenant", "updateTenant", "listTenantMembers", "addTenantMember", "getTenantQuotas", "putTenantQuotas"} {
 		if !got[id] {
 			t.Errorf("清单缺少路由 %s", id)
 		}
 	}
-	if len(m) != 38 {
-		t.Errorf("当前应恰有 38 条路由（任务中心 4 + 认证 13 + 用户/角色/权限管理 16 + API Token 5），实际 %d", len(m))
+	if len(m) != 46 {
+		t.Errorf("当前应恰有 46 条路由（任务中心 4 + 认证 13 + 用户/角色/权限管理 16 + API Token 5 + 租户 8；createTenant 属 P5 不在此），实际 %d", len(m))
 	}
 	for _, e := range m {
 		if e["operation_id"] == "" {

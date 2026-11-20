@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 11-16-2026 23:18
-last_updated: 11-21-2026 06:30
+last_updated: 11-21-2026 12:00
 project: LingEdge（凌界云）
 project_key: NOKEY
 tracking_system: file-system
@@ -55,7 +55,7 @@ development_status:
   1-17-认证-ii-totp-恢复码-近期-mfa: review   # 开发完成、本机门禁全绿（真实 MySQL 临时实例 + 真实 redis-server 临时实例：pquerna/otp v1.5.0 TOTP、密钥信封加密（AAD=表|列|uid）、10 个高熵恢复码仅存 SHA-256 且单次有效、两步登录（login→totp_required+mfa_token→/auth/totp/verify，取代 1.16 的临时 fail-closed）、已用 time-step 持久化防重放（±1 通过/±2 拒绝）、mfa_token 一次性/5 次/5 分钟、失败计入节流并写 login_logs、近期 MFA、强制管理员 TOTP、禁用需口令+验证码、L4 再认证（POST /auth/reauth，窗口 300s，11 个 x-reauth operation 在授权链统一生效，Bearer 不可满足）、Redis 关闭下仍工作、全库/日志/Redis 明文扫描；追加迁移 000016/000017 + CC-5；server 停机接入 auth Flush；G-5 发现并修复恢复码脱敏缺口）；审计 audit_logs 待 1.21 补写；等待环境验证见下方 1-17 块
   1-18-rbac-权限串-角色-用户管理-api: review   # 开发完成、本机门禁全绿（真实 MySQL/Redis 临时实例：代码权限注册表 ⇄ 种子 ⇄ OpenAPI x-permissions 一致性门禁 make perms-check（含 11 个负向样本，并入 contract-check）、RBAC 授权钩子（路由权限须全部具备，先权限后再认证）、/admin/users|roles|permissions 16 个 operation（无 501 占位，响应经 kin-openapi 校验）、创建/重置口令强制改密且服务端生成口令只回显一次（不入日志/库/幂等记录）、最后一个超级管理员保护含并发（事务内锁 platform_admin 角色行，去锁即失败的变异验证）、防提权、租户角色仅 tenant/both 权限、permission_version 缓存（键含版本、Redis TTL≤60s、Pub/Sub 失效 + 轮询兜底、Redis 从未可用/运行中被杀直读 MySQL、恢复后回填）、Admin 代租户授权矩阵（rbac 单测 37 行 + 192 组合不变量 + HTTP 50 例）；追加迁移 000018 + CC-6（OpenAPI 仅加法）；Scope 钩子仅过渡实现（acting-as 仍安全拒绝，完整实现归 1.20）；审计待 1.21 补写 audit_logs（本 Story 未写，仅结构化日志 audit_logs_written=false）；等待环境验证见下方 1-18 块
   1-19-api-token-作用域-吊销-轮换: review   # 开发完成、本机门禁全绿（真实 MySQL/Redis 临时实例：/auth/api-tokens* 5 个 operation（无 501 占位，响应经 kin-openapi 校验）、令牌 le_<8位前缀>_<随机> 仅存 SHA-256+前缀且明文仅创建响应一次（全库/Redis/日志/幂等记录扫描无明文）、scopes ⊆ 创建者当前权限与近期 MFA、真实 Bearer 认证替换占位（不使用 Cookie/CSRF；有效权限 = scopes ∩ 创建者当前权限，创建者降权/禁用后令牌随之收缩；过期/吊销/来源 IP 不符等一律同一 401；租户令牌访问平台资源 403；他租户 404；令牌只能调用业务路由，令牌管理只能用 Cookie 会话）、CIDR（IPv4/IPv6/映射地址，伪造 X-Forwarded-For 不能绕过，httpx.ClientIPFrom）、吊销即时（缓存命中/残留键/Redis 被杀/从未可用）、轮换链（旧令牌立即吊销）、last_used 节流异步写、G-5 补用例；无迁移变更，仅 CC-7（OpenAPI 加法）；identity-tables 登记 api_tokens 并调整 gates 自测禁入名单；acting-as 仍由过渡 Scope 钩子安全拒绝（完整实现归 1.20）；审计待 1.21 补写 audit_logs（本 Story 未写，仅结构化日志 audit_logs_written=false）；等待环境验证见下方 1-19 块
-  1-20-租户模块-scope-中间件与隔离测试框架: backlog
+  1-20-租户模块-scope-中间件与隔离测试框架: review   # 开发完成、本机门禁全绿（真实 MySQL/Redis 临时实例的真实进程内装配，无 Mock：完整 Scope 钩子 httpx.WithTenantScope 替换过渡钩子（Scope 仅由已认证主体 + 路由元数据 + X-Tenant-ID 生成，X-Tenant-ID 仅在授权钩子判定 acting-as 后才解析；目标租户须存在且 active，否则 404 与他租户资源逐字节一致；API Token 经 Bearer 进入同一 Scope 生成，含 1.19 遗留的目标租户存在性校验；平台令牌 acting-as 同样受 tenant:impersonate 约束）；租户模块 /tenants* 8 个 operation（无 501 占位，响应经 kin-openapi 校验；配额只存取、强制在 6.9；种子默认租户即 MVP 运营入口 D-13；createTenant 属 P5 未实现）；acting-as 审计上下文 httpx.ActingAsFrom 供 1.21 直接消费 + 结构化日志，audit_logs 未写（待 1.21，测试断言表为空）；scopeMintPaths 收窄到 internal/platform/{httpx,taskrt,server}/ 并带自测；make tenantscope-check（真实路由表 + 探针钩子 + 负向样本，并入 contract-check）；tests/security/tenant_isolation 隔离矩阵（骨架由 openapi x-tenant-scope 自动生成，新增租户资源未登记即失败，docs/testing/tenant-isolation-matrix.md）；R-T1 响应字段断言器 internal/platform/leakguard（并修复任务中心租户视图对 egress_node*/targets 的剔除缺口）；CC-8 仅加法（getCurrentTenant 补 400/404），无迁移变更；等待环境验证见下方 1-20 块
   1-21-审计模块与审计-登录日志-api: backlog
   1-22-系统设置-运行模式开关与能力注册表: backlog
   1-23-签名与-ca-密钥初始化-信任域②③: backlog
@@ -441,8 +441,8 @@ sprint_plan:
       - key: "1-20-租户模块-scope-中间件与隔离测试框架"
         id: "1.20"
         depends_on: ["1.5", "1.18"]
-        env: "本机 MySQL"
-        waiting_env_verification: false
+        env: "本机 MySQL + Redis；MySQL 8.0.16 与 Linux 验收机、多 Server 实例、真实 Redis 部署形态需 ENV-LNX"
+        waiting_env_verification: true
       - key: "1-21-审计模块与审计-登录日志-api"
         id: "1.21"
         depends_on: ["1.12", "1.15", "1.20"]
@@ -631,6 +631,14 @@ environment_verification:   # 『等待环境验证』登记（验证人/日期�
     condition: "本机通过仅代表 macOS + 8.0.46 临时 mysqld + Redis 8.10.1 临时实例、单进程单库、httptest 监听 127.0.0.1 下的行为：MySQL 8.0.16 上 api_tokens 的 (tenant_id <=> ?)/CAST(? AS JSON)/FOR UPDATE、真实 Nginx 反代下来源 IP（X-Forwarded-For/可信代理，allowed_cidrs 依赖它；生产装配沿用 TrustedProxies 默认值 127.0.0.1/::1，配置项尚未暴露）、多 Server 实例下 last_used 节流与缓存键清除、真实 Redis 部署形态，均不得由本机通过代替。"
     done_locally: "make lint security gate-selftest race vuln contract-check build verify-build migrate-test 全绿：见 docs/bmad/stories/1-19-*.md 的 Tasks & Acceptance（令牌形态与明文仅一次含全库/Redis/日志扫描、scopes 子集与输入校验、近期 MFA、Bearer 作用域/自助 operation 拒绝/401 一致、租户令牌隔离与 NFR-14、吊销即时含 Redis 缓存命中/残留/被杀/从未可用、轮换链、创建者降权/禁用收缩、CIDR 含 IPv6 与 XFF 伪造、过期与系统上限、last_used 节流、G-5）。"
     pending: "① MySQL 8.0.16 与 Linux 验收机重跑 tests/integration/auth、tests/integration/server、make migrate-test；② 真实 Nginx 反代下来源 IP 取值与可信代理配置（必要时另开 Story 暴露 TrustedProxies 配置项）；③ 多 Server 实例；④ 真实 Redis 部署形态；⑤ 产品/安全确认：默认有效期 90 天/上限 365 天 [ASSUMPTION]、轮换无宽限期、令牌仅限本人名下且管理只能用 Cookie 会话；⑥ 1.20 Scope 钩子落地后 acting-as 令牌整链；1.21 补写 audit_logs（本 Story 未写，待 1.21 补写）并替换 adminAuditor；⑦ 评审确认 api_tokens 移出 gates 自测的禁入身份表名单；⑧ tenant_quotas 的 api_tokens 配额未接线。"
+    verified_by: ""
+    verified_on: ""
+  1-20-租户模块-scope-中间件与隔离测试框架:
+    status: partial
+    required_env: "ENV-LNX（Linux 验收机，多 Server 实例）；MySQL 8.0.16；真实 Redis 部署形态"
+    condition: "本机通过仅代表 macOS + 8.0.46 临时 mysqld + Redis 临时实例、单进程单库、httptest 监听 127.0.0.1 下的行为：MySQL 8.0.16 上成员列表的 JSON_ARRAYAGG 子查询、user_roles 的 INSERT … ON DUPLICATE KEY UPDATE（虚拟生成列 tenant_key 唯一键）、tenants.settings_json 的 IF(?, CAST(? AS JSON), …) 更新、SELECT … FOR UPDATE 的表现；多 Server 实例下 acting-as 目标租户的现读语义与权限缓存失效；真实 Redis 部署形态下令牌/权限缓存链路，均不得由本机通过代替。"
+    done_locally: "make lint security gate-selftest race vuln contract-check build verify-build migrate-test 全绿：见 docs/bmad/stories/1-20-*.md 的 Tasks & Acceptance（Scope 钩子单测、租户模块集成测试、隔离矩阵与覆盖登记正反样本、tenantscope-check 与变异验证、acting-as 审计上下文、R-T1 断言器正反样本与矩阵发现的任务视图缺口、令牌租户边界含目标租户存在性、kin-openapi 响应契约、G-5 日志脱敏）。"
+    pending: "① MySQL 8.0.16 与 Linux 验收机重跑 tests/security/tenant_isolation、tests/integration/tenant、tests/integration/auth、tests/integration/server、make migrate-test；② 多 Server 实例；③ 真实 Redis 部署形态；④ 产品/安全确认：acting-as 仅允许 active 租户、租户 Console 会话访问 platform 路由 401（realm 隔离）、令牌可调用 GET /tenants/current、tenants.settings 拒绝内部标识键；⑤ 1.21 交付后：消费 httpx.ActingAsFrom 写 audit_logs（本 Story 未写，待 1.21）、替换过渡审计钩子、把矩阵里的 cancelTask 由 FailClosed 转为 Driven；⑥ 每个后续租户资源 Story 扩充隔离矩阵（新增 tenant|either 路由未登记即失败）。"
     verified_by: ""
     verified_on: ""
   1-24-server-setup-mode-与-web-安装向导后端-含-setup-token:

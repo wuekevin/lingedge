@@ -7,6 +7,9 @@ import (
 	"github.com/wuekevin/lingedge/internal/platform/httpx"
 )
 
+// HooksOptions 是 Module.Hooks 的装配参数（租户目录与其他模块的过渡审计登记）。
+type HooksOptions = handler.HooksOptions
+
 // Options 是 New 的参数。字段含义见 handler.Options：Pool（必须是 app 池）、Redis、Clock、IDs、Log、Argon2（config.Auth.Argon2，由基准测定）、
 // Box（信封加密，TOTP 密钥）、ExtraOrigins（额外允许的 Origin，通常为空）、MaxConcurrentHashes、ManifestOnly（仅导出路由清单）。
 type Options = handler.Options
@@ -25,8 +28,9 @@ type Module interface {
 	// ReauthChecker 返回 L4 再认证检查组件：对声明 x-reauth: true 的 operation，会话的 reauth_at 须在 auth.reauth_window_s 内，
 	// 否则 403 auth.reauth_required；Bearer API Token 请求永远不能满足。装配层用 httpx.WithReauth 接入授权链，1.18 的授权钩子可复用。
 	ReauthChecker() httpx.ReauthChecker
-	// Hooks 返回 REST 钩子的完整装配（认证 + RBAC 授权 + 再认证 + 过渡 Scope/审计 + 自助最小授权）：装配点与集成测试共用。
-	Hooks() httpx.Hooks
+	// Hooks 返回 REST 钩子的完整装配（认证 + RBAC 授权 + 再认证 + 完整租户 Scope 钩子 + 过渡审计 + 自助最小授权）：装配点与集成测试共用。
+	// o.Tenants 是租户目录（租户模块）：未装配时 acting-as 保持安全拒绝。
+	Hooks(o HooksOptions) httpx.Hooks
 	// Flush 等待已派发的后台写入（DB 兜底失败计数）完成；停机前与测试断言前调用。
 	Flush()
 }

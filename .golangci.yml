@@ -1466,7 +1466,7 @@ linters:
         linters:
           - forbidigo
         text: "\\[db-pool-migrate\\]"
-      - path: "^(?:internal/platform/|internal/tenant/|internal/scheduler/|cmd/lingedge-(?:server|worker|scheduler)/)"
+      - path: "^internal/platform/(?:httpx|taskrt|server)/"
         linters:
           - forbidigo
         text: "\\[tenantscope-mint\\]"

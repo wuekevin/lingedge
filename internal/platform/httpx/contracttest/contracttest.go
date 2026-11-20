@@ -44,6 +44,16 @@ func Load(path string) (*Spec, error) {
 	if err != nil {
 		return nil, err
 	}
+	s, err := LoadFromBytes(data)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return s, nil
+}
+
+// LoadFromBytes 解析并校验内存中的 OpenAPI 3.1 文档（合成文档的自测用）。
+func LoadFromBytes(data []byte) (*Spec, error) {
+	path := "openapi"
 	loader := openapi3.NewLoader()
 	loader.IsExternalRefsAllowed = false
 	doc, err := loader.LoadFromData(data)

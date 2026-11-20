@@ -81,3 +81,27 @@ func (foreign) ActorID() uint64           { return 1 }
 func (foreign) IsPlatform() bool          { return true }
 func (foreign) TenantID() uint64          { return 0 }
 func (foreign) HasPermission(string) bool { return true }
+
+// Bearer 可调用范围（Story 1.19/1.20）：有 x-permissions 的业务路由；其他模块「无权限要求、只返回自身租户上下文」的路由（GET /tenants/current）；
+// 本模块的自助 operation（含 getMe）与令牌管理一律要求 Cookie 会话。
+func TestBearerAllowedPolicy(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		meta httpx.RouteMeta
+		want bool
+	}{
+		{"业务路由（有权限声明）", httpx.RouteMeta{OperationID: "listTasks", Permissions: []string{"task:read"}}, true},
+		{"租户上下文（其他模块、无权限要求）", httpx.RouteMeta{OperationID: "getCurrentTenant", Permissions: []string{}}, true},
+		{"自助 operation：getMe", MetaMe, false},
+		{"自助 operation：changePassword", MetaChangePassword, false},
+		{"自助 operation：listSessions", MetaListSessions, false},
+		{"自助 operation：logout", MetaLogout, false},
+		{"令牌管理：createApiToken", MetaCreateAPIToken, false},
+		{"令牌管理：listApiTokens", MetaListAPITokens, false},
+		{"管理路由（有权限声明）", MetaListUsers, true},
+	} {
+		if got := bearerAllowed(c.meta); got != c.want {
+			t.Errorf("%s: bearerAllowed=%v，期望 %v", c.name, got, c.want)
+		}
+	}
+}

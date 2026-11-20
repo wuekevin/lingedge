@@ -337,7 +337,7 @@ func TestBearerScopeEnforcementAndPolicy(t *testing.T) {
 	}
 }
 
-// ---- AC4：租户令牌：不能访问平台资源（NFR-14）；超出作用域 403、他租户资源 404（FR-25）；acting-as 保持 fail-closed（Scope 属 1.20） ----
+// ---- AC4：租户令牌：不能访问平台资源（NFR-14）；超出作用域 403、他租户资源 404（FR-25）；本装配未接租户目录时 acting-as 保持 fail-closed（完整 acting-as 整链见 tests/security/tenant_isolation） ----
 
 func TestTenantTokenIsolation(t *testing.T) {
 	s := newTokStack(t)
@@ -408,11 +408,11 @@ func TestTenantTokenIsolation(t *testing.T) {
 		t.Errorf("租户主体带自己的租户 OK: %d %s", r.Status, r.Body)
 	}
 
-	// 平台令牌 + acting-as：授权矩阵可通过（持有 tenant:impersonate 与路由权限），但完整 Scope 钩子属 Story 1.20，保持 fail-closed（403，handler 不执行）。
+	// 平台令牌 + acting-as：授权矩阵可通过（持有 tenant:impersonate 与路由权限），但本装配（auth.HooksOptions{}）没有租户目录：Scope 钩子无法验证目标租户，保持 fail-closed（403，handler 不执行）。有租户目录的完整整链（目标租户存在/可用才放行，Story 1.19 遗留）见 tests/security/tenant_isolation。
 	imp := s.issue(adm, tokBody("代租户", "site:read", "tenant:impersonate"))
 	r := s.bearer(imp.Token, "GET", "/probe/sites", nil, withHeader("X-Tenant-ID", tenantUID(ownerA)))
 	if r.Status != 403 || strings.Contains(string(r.Body), "reached") {
-		t.Errorf("acting-as 在 1.20 前必须安全拒绝: %d %s", r.Status, r.Body)
+		t.Errorf("未装配租户目录时 acting-as 必须安全拒绝: %d %s", r.Status, r.Body)
 	}
 	if r := s.bearer(imp.Token, "GET", "/probe/sites", nil); r.Status != 400 {
 		t.Errorf("平台令牌访问 tenant 路由须指定租户（400）: %d %s", r.Status, r.Body)

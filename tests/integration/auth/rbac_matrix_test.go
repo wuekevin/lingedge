@@ -15,7 +15,8 @@ import (
 // 有无/哪种 X-Tenant-ID × 有无 tenant:impersonate × 有无路由权限。
 // 决策表本身的穷举（192 种组合不变量）在 internal/platform/rbac 的单测里；这里证明它被真实装配进钩子链，并且：
 //   - 授权钩子放行 acting-as 时把决策（ModeActingAs）交给 Scope 钩子；
-//   - 但 acting-as 需要解析/校验 X-Tenant-ID 指向的租户——那是 Story 1.20 的 Scope 钩子，当前仍是安全拒绝：请求 403、handler 不执行（不放行未实现部分）。
+//   - 但 acting-as 需要解析/校验 X-Tenant-ID 指向的租户（Story 1.20 的 Scope 钩子 + 租户目录）；本矩阵的装配不接租户目录（auth.HooksOptions{}），
+//     因此保持安全拒绝：请求 403、handler 不执行（「未装配租户目录 → fail-closed」的不变量）。有租户目录的 acting-as 见 tests/security/tenant_isolation。
 func TestAuthorizationMatrixHTTP(t *testing.T) {
 	probe := func(r *httpx.Router, id, method, path string, scope httpx.TenantScope, perms []string) {
 		m := httpx.RouteMeta{OperationID: id, Method: method, Path: path, Auth: httpx.AuthRequired, Permissions: perms, TenantScope: scope, Phase: "M1"}
@@ -92,7 +93,7 @@ func TestAuthorizationMatrixHTTP(t *testing.T) {
 	pAdmin, pAud, pOp := plat("平台·超管", admin), plat("平台·审计员", auditor), plat("平台·运维", operator)
 	pSite, pImp, pWriter := plat("平台·仅 site:read", siteReader), plat("平台·仅 impersonate", impOnly), plat("平台·仅 site:write", siteWriterNoImp)
 	tOwner, tViewer, tNone := ten("租户·owner", ownerTok, ownerCSRF), ten("租户·viewer", viewerTok, viewerCSRF), ten("租户·无角色", noneTok, noneCSRF)
-	someTenant := ids.MustNew() // 任意合法 uid（Scope 钩子 1.20 才校验其存在性）
+	someTenant := ids.MustNew() // 任意合法 uid（本装配不接租户目录，不校验其存在性；校验见 tests/security/tenant_isolation）
 
 	const (
 		platPath, eitherPath, tenantPath, openPath = "/probe/mx/platform", "/probe/mx/either", "/probe/mx/tenant", "/probe/mx/open"
@@ -121,7 +122,7 @@ func TestAuthorizationMatrixHTTP(t *testing.T) {
 		{pSite, "GET", eitherPath, "", 200, rbac.ModeCrossTenantRead, platformScope},
 		{pImp, "GET", eitherPath, "", 403, "", wantScope{}},                          // 只有 impersonate、没有路由权限
 		{pWriter, "GET", eitherPath, "", 403, "", wantScope{}},                       // 有 site:write 但路由要 site:read
-		{pAdmin, "GET", eitherPath, someTenant, 403, rbac.ModeActingAs, wantScope{}}, // 授权通过 → acting-as；Scope 钩子（1.20）未实现 → 安全拒绝
+		{pAdmin, "GET", eitherPath, someTenant, 403, rbac.ModeActingAs, wantScope{}}, // 授权通过 → acting-as；本装配未接租户目录 → Scope 钩子安全拒绝
 		{pOp, "GET", eitherPath, someTenant, 403, rbac.ModeActingAs, wantScope{}},    // 运维：impersonate + 路由权限
 		{pAud, "GET", eitherPath, someTenant, 403, "", wantScope{}},                  // 缺 impersonate
 		{pSite, "GET", eitherPath, someTenant, 403, "", wantScope{}},                 // 缺 impersonate

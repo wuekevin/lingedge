@@ -1,6 +1,7 @@
 package httpx
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/url"
@@ -268,6 +269,8 @@ func scopeMiddleware(h ScopeResolver, meta RouteMeta) gin.HandlerFunc {
 			Fail(c, apierr.New(apierr.AuthUnauthenticated, "authentication required"))
 			return
 		}
+		carrier := &scopeCarrier{}
+		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), scopeCarrierKey{}, carrier))
 		s, err := h.ResolveScope(c.Request, meta, p)
 		if err == nil && s.IsZero() {
 			err = apierr.New(apierr.AuthForbidden, "forbidden")
@@ -276,7 +279,11 @@ func scopeMiddleware(h ScopeResolver, meta RouteMeta) gin.HandlerFunc {
 			Fail(c, MapScopeError(err))
 			return
 		}
-		c.Request = c.Request.WithContext(tenantscope.NewContext(c.Request.Context(), s))
+		ctx := tenantscope.NewContext(c.Request.Context(), s)
+		if carrier.set { // acting-as 审计上下文（供审计钩子，Story 1.21）
+			ctx = context.WithValue(ctx, actingAsKey{}, carrier.a)
+		}
+		c.Request = c.Request.WithContext(ctx)
 		c.Next()
 	}
 }

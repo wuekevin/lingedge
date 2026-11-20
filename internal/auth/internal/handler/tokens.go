@@ -237,8 +237,22 @@ func (b bearerAuthenticator) Authenticate(r *http.Request, _ httpx.RouteMeta) (t
 	return p, nil
 }
 
-// bearerAllowed 决定 API Token 能调用哪些 operation：只有声明了 x-permissions 的业务路由（由「令牌 scopes ∩ 创建者当前权限」授权）。
-// 自助 operation（登出、改密、会话、TOTP、再认证、登录日志…）与令牌管理本身都要求 Cookie 会话——令牌不能用来接管账号或繁殖令牌。
+// bearerAllowed 决定 API Token 能调用哪些 operation：声明了 x-permissions 的业务路由（由「令牌 scopes ∩ 创建者当前权限」授权），
+// 以及其他模块的「无权限要求、只返回调用者自身租户上下文」的路由（Story 1.20：GET /tenants/current，令牌所属租户即 Scope）。
+// 本模块的自助 operation（登出、改密、会话、TOTP、再认证、登录日志…）与令牌管理本身都要求 Cookie 会话——令牌不能用来接管账号或繁殖令牌。
 func bearerAllowed(meta httpx.RouteMeta) bool {
-	return len(meta.Permissions) > 0 && !IsTokenOperation(meta.OperationID)
+	if IsTokenOperation(meta.OperationID) {
+		return false
+	}
+	return len(meta.Permissions) > 0 || !isAuthOperation(meta.OperationID)
+}
+
+// isAuthOperation 报告 operationID 是否是本模块（/auth/*）注册的 operation。
+func isAuthOperation(operationID string) bool {
+	for _, m := range Metas() {
+		if m.OperationID == operationID {
+			return true
+		}
+	}
+	return false
 }

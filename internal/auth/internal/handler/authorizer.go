@@ -17,7 +17,7 @@ import (
 // 按 rbac.Decide 的授权矩阵判定，放行时用 httpx.RecordAccess 把授权决策交给后续的 Scope 钩子。
 //
 // 边界：本钩子只回答「这个主体能不能以这种方式访问这条路由」，不解析 X-Tenant-ID 指向的租户是否存在/可用——那是 Scope 钩子
-// （Story 1.20）的职责；因此 acting-as 即使在这里被授权，Scope 钩子在 1.20 之前仍是安全拒绝（见 httpx.WithAccessScope）。
+// （Story 1.20，httpx.WithTenantScope + 租户目录）的职责：acting-as 在这里被授权后，目标租户不存在/不可用 → 404，租户目录未装配 → 安全拒绝（403）。
 // x-reauth 不在这里判定：它由 httpx.WithReauth 在本钩子通过之后执行（先权限后再认证）。
 type Authorizer struct{ svc *service.Service }
 

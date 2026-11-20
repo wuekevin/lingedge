@@ -41,13 +41,13 @@ endef
 
 .PHONY: help build verify-build test race lint fmt vet check-scaffold clean \
         gen-lint arch-check golangci shell-check repo-check gate-selftest vuln verify-gates \
-        contract-bin contract-selftest openapi-breaking migrations-check migrations-seal freeze-check perms-check contract-check \
+        contract-bin contract-selftest openapi-breaking migrations-check migrations-seal freeze-check perms-check tenantscope-check contract-check \
         print-ldflags migrate migrate-test proto proto-check openapi-check frontend e2e edge-test security release
 
 help:
 	@echo "目标: build verify-build test race lint migrate migrate-test proto proto-check openapi-check frontend e2e edge-test security release"
 	@echo "辅助: fmt vet check-scaffold clean gen-lint arch-check golangci shell-check gate-selftest vuln verify-gates"
-	@echo "契约(Story 1.3): contract-check（= contract-selftest openapi-check proto-check migrations-check freeze-check perms-check[Story 1.18]）migrations-seal"
+	@echo "契约(Story 1.3): contract-check（= contract-selftest openapi-check proto-check migrations-check freeze-check perms-check[Story 1.18] tenantscope-check[Story 1.20]）migrations-seal"
 	@echo "迁移(Story 1.6): migrate（MIGRATE_ARGS=plan|up|down|status|recover|lint ...）migrate-test"
 	@echo "未实现的目标会输出 NOT_IMPLEMENTED(story X.Y) 并以非零退出。"
 
@@ -202,7 +202,13 @@ freeze-check: contract-bin
 perms-check:
 	$(GATES) perms
 
-contract-check: contract-selftest openapi-check proto-check migrations-check freeze-check perms-check
+# 租户 Scope 覆盖（Story 1.20 AC4、ADR-009 §7）：真实路由集合里 x-tenant-scope 为 tenant|either 的路由必须经 tenantscope（Scope 钩子），否则失败；
+# 检查器自身的负向样本（旁路路由/自带宽松钩子/空路由集）在 internal/platform/httpx/contracttest（随 make race 与此目标一同运行）。
+tenantscope-check:
+	$(GO) test -count=1 -run 'TestCheckScopeCoverage' ./internal/platform/httpx/contracttest/
+	$(GO) test -count=1 -run 'TestTenantScopeCoverage' ./cmd/lingedge-server/
+
+contract-check: contract-selftest openapi-check proto-check migrations-check freeze-check perms-check tenantscope-check
 
 frontend:
 	$(call not_implemented,1.36)
@@ -216,6 +222,8 @@ edge-test:
 # 本目标当前只覆盖 Story 1.2 的静态门禁：G-6 固定口令、G-11 测试替身隔离、G-12 命令注入（Story 1.14 追加任务类型白名单 tasktype）、NFR-29 品牌。
 # Story 1.11 追加 G-5（日志脱敏扫描：向真实 logx 注入私钥/Token/主密钥/明文，断言输出无泄露，含负向自测）。
 # 威胁模型 §9 的其余门禁（G-1…G-4、G-7…G-10、G-13）尚未接入，由对应 Story 逐项追加到本目标；
+# Story 1.20 追加 G-2（多租户隔离矩阵 tests/security/tenant_isolation：真实临时 MySQL/Redis 上的真实进程内装配；缺 MySQL/Redis 时测试以「等待环境验证」跳过——
+# 跳过不代表通过，LINGEDGE_REQUIRE_MYSQL=1 / LINGEDGE_REQUIRE_REDIS=1 可把缺失视为失败）。
 # 因此本目标通过只表示上述已列项通过，不代表整套安全门禁通过。
 security:
 	$(GATES) testdouble
@@ -224,7 +232,7 @@ security:
 	$(GATES) shell
 	$(GATES) tasktype
 	$(GO) test -count=1 ./tests/security/...
-	@echo "make security: 已覆盖 G-5/G-6/G-11/G-12（含任务类型白名单 tasktype）/品牌；未接入（随对应 Story 追加）: G-1 G-2 G-3 G-4 G-7 G-8 G-9 G-10 G-13" >&2
+	@echo "make security: 已覆盖 G-2（租户隔离矩阵）/G-5/G-6/G-11/G-12（含任务类型白名单 tasktype）/品牌；未接入（随对应 Story 追加）: G-1 G-3 G-4 G-7 G-8 G-9 G-10 G-13" >&2
 
 release:
 	$(call not_implemented,1.34)

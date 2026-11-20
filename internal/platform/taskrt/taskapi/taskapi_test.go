@@ -95,3 +95,36 @@ func TestViewHidesPlatformIdentifiersFromTenants(t *testing.T) {
 		t.Errorf("平台视角应保留 cluster_uid 但仍脱敏口令: %s", pv)
 	}
 }
+
+// Story 1.20（R-T1，BLK-02）：租户视角还须剔除 egress_node*、targets、驼峰形态的内部标识，聚合计数 summary 保留；平台视角原样保留。
+func TestViewHidesEgressNodeAndTargetsFromTenants(t *testing.T) {
+	tenantScope, err := tenantscope.FromTask(7, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := taskrt.Task{
+		UID: "01J8Z3Q9V6X2N4M5K7R8T0WABC", Type: taskrt.TypeCachePurgeURL, Status: taskrt.StatusSuccess, RequestID: "01J8Z3Q9V6X2N4M5K7R8T0WABD",
+		Payload: json.RawMessage(`{"egress_node_ip":"203.0.113.9","egress_node":"e","targets":["edge-1"],"clusters":[1],"nodeId":"n","summary":{"healthy":3,"total":4,"offline":1}}`),
+	}
+	s := string(mustJSON(t, taskapi.View(task, tenantScope)))
+	for _, bad := range []string{"egress_node", "targets", `"clusters"`, "nodeId", "203.0.113.9", "edge-1"} {
+		if strings.Contains(s, bad) {
+			t.Errorf("租户视角不应含 %s: %s", bad, s)
+		}
+	}
+	if !strings.Contains(s, `"summary":{"healthy":3,"offline":1,"total":4}`) {
+		t.Errorf("聚合计数应保留: %s", s)
+	}
+	if pv := string(mustJSON(t, taskapi.View(task, tenantscope.PlatformForJob(1)))); !strings.Contains(pv, "egress_node_ip") || !strings.Contains(pv, "targets") {
+		t.Errorf("平台视角应原样保留: %s", pv)
+	}
+}
+
+func mustJSON(t *testing.T, v any) []byte {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}

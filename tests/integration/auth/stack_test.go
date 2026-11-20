@@ -445,7 +445,7 @@ func weakHash(t testing.TB, pw string) string {
 }
 
 // assemble 是真实钩子装配（auth.Module.Hooks，与 cmd/lingedge-server 的 assembleHooks 同一份）。
-func assemble(m auth.Module) httpx.Hooks { return m.Hooks() }
+func assemble(m auth.Module) httpx.Hooks { return m.Hooks(auth.HooksOptions{}) }
 
 // newBox 在临时目录写 0400 主密钥文件（运行期随机生成），返回真实 FileKeyProvider 支撑的 Box（与生产同一实现）。
 func newBox(t testing.TB) *secretbox.Box {

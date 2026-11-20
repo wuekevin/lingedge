@@ -121,17 +121,29 @@ func (m *Module) Flush() {
 // AdminRoute 报告 operationID 是否是本模块的 /admin 管理路由。
 func (m *Module) AdminRoute(operationID string) bool { return IsAdminOperation(operationID) }
 
+// HooksOptions 是 Hooks 的装配参数。
+type HooksOptions struct {
+	// Tenants 是租户目录（租户模块的 Resolver）：Scope 钩子据此把 X-Tenant-ID 解析为真实且可用的租户，admin 代租户（acting-as）才会被放行；
+	// 为 nil（未装配）时 acting-as 保持安全拒绝（403）——不存在「没有验证目标租户也放行」的路径。
+	Tenants httpx.TenantResolver
+	// AuditedOperation 报告 operationID 是否是其他模块（租户模块）的、要求审计的写 operation，且已有过渡的结构化日志留痕：
+	// 过渡审计钩子对它们同样放行（audit_logs 待 Story 1.21）；其余要求审计的 operation 仍被 DenyAuditor 拒绝。nil = 只放行本模块的管理 operation。
+	AuditedOperation func(operationID string) bool
+}
+
 // Hooks 是 REST 四个钩子的唯一装配（cmd/lingedge-server 与集成测试共用，避免装配漂移）：
 //
 //	Authenticator  Cookie 会话 + Bearer API Token（Story 1.19：主体权限 = 令牌 scopes ∩ 创建者当前权限）。
 //	Authorizer     RBAC（Story 1.18）：权限集 ∩ 路由声明；平台/租户主体 × x-tenant-scope × X-Tenant-ID 的授权矩阵（rbac.Decide），
 //	               放行时登记授权决策；x-reauth 在权限通过之后由 httpx.WithReauth 执行（先权限后再认证）。
-//	Scope          过渡实现 httpx.WithAccessScope：只把「不需要解析 X-Tenant-ID」的授权决策落成 Scope；acting-as 与其他一切委托给安全拒绝默认（完整实现 Story 1.20）。
-//	Auditor        安全拒绝默认；仅本模块的 /admin 管理 operation 走结构化日志过渡（不是 audit_logs，待 Story 1.21）。
+//	Scope          完整的租户 Scope 钩子 httpx.WithTenantScope（Story 1.20）：Scope 只由已认证主体 + 路由元数据 + X-Tenant-ID（经授权钩子放行后）生成；
+//	               acting-as 解析目标租户（不存在/不可用 → 404）并登记审计上下文 httpx.ActingAsFrom。
+//	Auditor        安全拒绝默认；仅本模块的 /admin 管理 operation 与 /auth/api-tokens*、HooksOptions.AuditedOperation 登记的写 operation 走结构化日志过渡
+//	               （不是 audit_logs，待 Story 1.21）；acting-as 请求的日志同时带操作者与目标租户。
 //	WithSelfService  /auth/* 自助 operation 的最小授权语义（1.16；1.18–1.21 交付后评估是否保留）。
-func (m *Module) Hooks() httpx.Hooks {
-	base := httpx.Hooks{Authenticator: m.Authenticator(), Authorizer: m.authzHook(), Auditor: adminAuditor{inner: httpx.DenyAuditor{}, log: m.log}}
-	base = httpx.WithAccessScope(base)
+func (m *Module) Hooks(o HooksOptions) httpx.Hooks {
+	base := httpx.Hooks{Authenticator: m.Authenticator(), Authorizer: m.authzHook(), Auditor: adminAuditor{inner: httpx.DenyAuditor{}, log: m.log, extra: o.AuditedOperation}}
+	base = httpx.WithTenantScope(base, o.Tenants, m.log)
 	return httpx.WithReauth(httpx.WithSelfService(base, m.SelfService), m.ReauthChecker())
 }
 
