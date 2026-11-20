@@ -68,9 +68,11 @@ func TestM1CEmbeddedMigrationsAreLintCleanAndWellFormed(t *testing.T) {
 	for _, f := range findings {
 		t.Errorf("lint: %s", f)
 	}
-	if len(set.Migrations) != 13 {
-		t.Fatalf("M1 冻结范围应恰为 13 个迁移文件，实际 %d", len(set.Migrations))
+	// M1 冻结范围是前 13 个（000001–000013）；其后只允许经 contract-changes 追加的迁移（000014 = CC-3，见 TestCC3AppReadsSchemaMigrationsOnly）。
+	if len(set.Migrations) < 13 {
+		t.Fatalf("M1 冻结范围应有 13 个迁移文件，实际 %d", len(set.Migrations))
 	}
+	set = &migrate.Set{Migrations: set.Migrations[:13]}
 	createRe := regexp.MustCompile(`(?im)^\s*CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+(\w+)`)
 	var createdC, createdAll []string
 	for i, m := range set.Migrations {

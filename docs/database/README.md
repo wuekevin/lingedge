@@ -485,6 +485,8 @@ END;
 | 000012 | `config_revisions` | config_blocks、config_revisions、config_revision_blocks、site_versions、publish_queue、deployments（`queue_id`→publish_queue）、deployment_targets、deployment_target_steps、node_cluster_state + 触发器；随后 `ALTER publish_queue ADD FK deployment_id`、`ALTER clusters ADD FK confirmed_revision_id`、`ALTER sites ADD FK last_deployment_id` | expand |
 | 000013 | `observability` | metric_rollups、rollup_windows、access_log_chunks | expand |
 
+> **M1 冻结（`migrations-m1`）之后的追加迁移**（不属上表的 61 表骨架，序号接续；每个都须有 `docs/bmad/contract-changes/` 变更说明）：`000014 app_read_schema_migrations`（CC-3）——仅 `GRANT SELECT ON schema_migrations TO lingedge_app`，使就绪检查能读迁移版本；`schema_migrations` 是迁移框架自有的版本表（不由迁移建表），lint 对它只允许 app 的 SELECT 授权。
+
 > P2 起：`provider_credentials`、`acme_*`、`alert_*`、`notification_*`、`website_*`（含 `website_preview_links`）、`user_verification_tokens`；P3：DNS/调度/探测；P4：WAF/L4；P5：billing/plugins（`plugins` 建表迁移末尾追加 `provider_credentials.plugin_id` FK）。
 
 ### 8.2 迁移 lint 与门禁（`make migrate-test`）

@@ -624,6 +624,14 @@ func lintGrants(m *Migration, up []stmtInfo, checker *Checker) []Finding {
 		}
 		sort.Strings(g.privs)
 		got := strings.Join(g.privs, ",")
+		if g.user == AppUser && g.table == VersionTable {
+			// 框架自有的版本表（不由任何迁移创建）：app 只可被授予 SELECT，用于就绪检查读取迁移版本（Story 1.13、CC-3）。
+			// 写权限永不授予：版本表由 migrate 账号独占维护。
+			if got != "SELECT" {
+				add(g.line, rule, "表 %s 是迁移框架的版本表，对 %s 的授权必须恰为 SELECT（实际：%s）", g.table, AppUser, strings.ReplaceAll(got, ",", ", "))
+			}
+			continue
+		}
 		if g.user == AppUser {
 			want := "DELETE,INSERT,SELECT,UPDATE"
 			desc := "SELECT, INSERT, UPDATE, DELETE"

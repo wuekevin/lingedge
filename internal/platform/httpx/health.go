@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/wuekevin/lingedge/internal/platform/clock"
+	"github.com/wuekevin/lingedge/internal/platform/db"
 	"github.com/wuekevin/lingedge/internal/platform/migrate"
 	"github.com/wuekevin/lingedge/internal/platform/redisx"
 	"github.com/wuekevin/lingedge/internal/platform/requestid"
@@ -45,8 +46,9 @@ type MigrationState struct {
 
 // MigrationProbe 探测库内迁移版本与二进制内嵌迁移是否一致。
 //
-// 注意：lingedge_app 账号对 schema_migrations 无 SELECT 授权（迁移框架的版本表由 migrate 账号维护），因此真实实现
-// （MigrationProbeFromRunner）基于 migrate.Runner（migrate 连接池），由进程装配（Story 1.13）决定在何处持有该池与缓存周期。
+// 真实实现有二：MigrationProbeFromApp（Story 1.13、CC-3，进程装配使用）经 app 连接池只读 schema_migrations（迁移 000014 为 lingedge_app
+// 授予了该表唯一的 SELECT，不持有 migrate 凭据，符合三账号最小权限）；MigrationProbeFromRunner 基于 migrate.Runner（migrate 连接池，
+// 含 dirty/校验和完整性检查），仅供持有迁移凭据的工具/测试使用，Server 进程不使用它。
 type MigrationProbe interface {
 	MigrationState(ctx context.Context) (MigrationState, error)
 }
@@ -69,6 +71,54 @@ func (p runnerProbe) MigrationState(ctx context.Context) (MigrationState, error)
 		s.Problem = "migration in progress"
 	}
 	return s, nil
+}
+
+// MigrationProbeFromApp 用 app 连接池读取 schema_migrations（只读），与内嵌迁移集合比较：
+// 库内最高版本 == 内嵌最高版本、无待应用迁移、库内没有二进制不认识的版本，才算一致。
+//
+// 能力边界（诚实声明）：app 账号看不到 schema_migrations_runs，因此探针无法发现 dirty/校验和不一致；这些由 `lingedge-server migrate status`
+// 持有迁移凭据时检查。迁移执行中途失败时版本表里没有该版本（goose 在同一事务内写入版本行），表现为 Applied < Latest，仍会报告不就绪。
+// 库尚未升级到 000014（app 无授权）时读取失败 → 调用方按失败处理（fail-closed，/healthz/ready 报 unknown 并 503）。
+func MigrationProbeFromApp(pool db.Pool, set *migrate.Set) MigrationProbe {
+	known := make(map[int64]bool, len(set.Migrations))
+	var latest int64
+	for _, m := range set.Migrations {
+		known[m.Version] = true
+		if m.Version > latest {
+			latest = m.Version
+		}
+	}
+	return appProbe{pool: pool, known: known, latest: latest}
+}
+
+type appProbe struct {
+	pool   db.Pool
+	known  map[int64]bool
+	latest int64
+}
+
+func (p appProbe) MigrationState(ctx context.Context) (MigrationState, error) {
+	var applied []int64
+	if err := p.pool.Executor(ctx).Select(ctx, &applied, db.Q("SELECT version_id FROM schema_migrations WHERE is_applied = 1 AND version_id > 0")); err != nil {
+		return MigrationState{}, err
+	}
+	st := MigrationState{Latest: p.latest}
+	have := make(map[int64]bool, len(applied))
+	for _, v := range applied {
+		have[v] = true
+		if v > st.Applied {
+			st.Applied = v
+		}
+		if !p.known[v] && st.Problem == "" {
+			st.Problem = "database has a migration unknown to this binary"
+		}
+	}
+	for v := range p.known {
+		if !have[v] {
+			st.Pending++
+		}
+	}
+	return st, nil
 }
 
 // RedisStatus 是 Redis 状态来源（*redisx.Client 满足）。

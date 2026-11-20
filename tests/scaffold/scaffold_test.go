@@ -168,8 +168,8 @@ func TestCmdEntriesAreVersionOnly(t *testing.T) {
 		}
 		want := "os,github.com/wuekevin/lingedge/pkg/version"
 		if c == "lingedge-server" {
-			// Story 1.6：`lingedge-server migrate` 子命令的入口（迁移框架与嵌入的迁移文件）；其余子命令随 1.13 装配。
-			want = "os,github.com/wuekevin/lingedge/internal/platform/migrate,github.com/wuekevin/lingedge/migrations,github.com/wuekevin/lingedge/pkg/version"
+			// Story 1.6/1.13：子命令分发（migrate 的迁移框架与嵌入的迁移文件；其余子命令与运行逻辑在同目录其他文件与 internal/platform/server）。
+			want = "fmt,io,os,strings,github.com/wuekevin/lingedge/internal/platform/migrate,github.com/wuekevin/lingedge/migrations,github.com/wuekevin/lingedge/pkg/version"
 		}
 		if strings.Join(imports, ",") != want {
 			t.Errorf("%s: main 的依赖应恰为 %s，实际 %v", c, want, imports)
@@ -220,7 +220,11 @@ func TestCmdsPrintRealVersion(t *testing.T) {
 			if err := bad.Run(); !errors.As(err, &ee) || ee.ExitCode() != 2 {
 				t.Errorf("无参数应以退出码 2 退出（无伪业务行为），实际 %v", err)
 			}
-			if !strings.Contains(stderr.String(), "尚未交付") {
+			wantMsg := "尚未交付"
+			if c == "lingedge-server" {
+				wantMsg = "用法" // Story 1.13：lingedge-server 已有真实入口，无参数打印用法
+			}
+			if !strings.Contains(stderr.String(), wantMsg) {
 				t.Errorf("无参数 stderr = %q", stderr.String())
 			}
 		})

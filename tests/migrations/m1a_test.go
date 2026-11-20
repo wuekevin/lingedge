@@ -1034,6 +1034,8 @@ func TestM1ADDLTrapsAreCoveredByStaticPrecheckAndRealMySQL(t *testing.T) {
 		if err != nil || len(findings) != 0 {
 			t.Fatalf("%v %v", err, findings)
 		}
+		// 逐条直连执行（不经框架）：只取 M1 冻结范围；000014 授权框架版本表，需要框架先建表（见 TestCC3…）。
+		set = &migrate.Set{Migrations: set.Migrations[:13]}
 		if n, where := firstFailure(t, newEnv(t), set); n != 0 {
 			t.Fatalf("真实迁移逐条执行应 0 错误: %d %s", n, where)
 		}

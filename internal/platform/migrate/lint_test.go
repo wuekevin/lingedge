@@ -116,6 +116,16 @@ func TestLintGrantRules(t *testing.T) {
 	t.Run("只允许授权给 app/maint", func(t *testing.T) {
 		wantRule(t, hdr("expand")+createT+grantT+"GRANT SELECT ON t TO some_other;\n", "grant-app")
 	})
+	t.Run("框架版本表 schema_migrations：app 仅可 SELECT（Story 1.13、CC-3）", func(t *testing.T) {
+		wantClean(t, hdr("expand")+"GRANT SELECT ON schema_migrations TO lingedge_app;\n")
+		wantRule(t, hdr("expand")+"GRANT SELECT, INSERT ON schema_migrations TO lingedge_app;\n", "grant-app")
+		wantRule(t, hdr("expand")+"GRANT SELECT, INSERT, UPDATE, DELETE ON schema_migrations TO lingedge_app;\n", "grant-app")
+		wantRule(t, hdr("expand")+"GRANT ALL PRIVILEGES ON schema_migrations TO lingedge_app;\n", "grant-app")
+		wantRule(t, hdr("expand")+"GRANT SELECT ON schema_migrations TO lingedge_app WITH GRANT OPTION;\n", "grant-app")
+		wantRule(t, hdr("expand")+"GRANT SELECT ON schema_migrations TO lingedge_maint;\n", "grant-maint")
+		// 例外只对版本表有效：其他未创建的表仍报「尚未创建」。
+		wantRule(t, hdr("expand")+"GRANT SELECT ON some_unknown TO lingedge_app;\n", "grant-app")
+	})
 	t.Run("授权须在建表之后", func(t *testing.T) {
 		wantRule(t, hdr("expand")+grantT+createT, "grant-app")
 	})
