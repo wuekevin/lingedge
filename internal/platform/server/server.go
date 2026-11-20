@@ -10,7 +10,9 @@
 //
 //	api        真实：REST 路由器（httpx 固定中间件链 + /healthz + /healthz/ready）与 HTTP 监听；业务路由由 Options.Register 注册（Story 1.16 起追加）。
 //	grpc       仅生命周期骨架：不监听任何端口（Node mTLS :9443 / Enroll :9444 由 Story 3.13 实现）。
-//	scheduler  仅生命周期骨架：不调度任何任务（Story 1.15 实现，含租约与内部周期任务）。
+//	scheduler  真实（Story 1.15）：job_locks 租约选主（scheduler.leader）+ cron 注册表；仅 leader 触发。内置内部周期作业 tasks.reap / idempotency.cleanup /
+//	           sessions.cleanup / partition.maintain（不属 TaskType，AA-8），后续 Story 经 Options.Cron 登记自己的周期任务（任务型以确定性幂等键入队）。
+//	           partition.maintain 需要 maint 账号（Options.OpenMaint + database.maint.*）；未配置则每次触发都明确跳过并告警，不假装成功。
 //	worker     真实（Story 1.14）：任务运行时——按 Options.Tasks 登记的任务类型从 tasks 表领取（SKIP LOCKED + 租约 + 围栏）、续约、写回并回收过期租约，
 //	           Redis 唤醒仅加速（轮询兜底）；未登记任何类型时空闲（不领取）。停机时停止领取，排空在途任务，超时则归还。
 //
@@ -34,11 +36,15 @@ import (
 	"github.com/wuekevin/lingedge/internal/platform/config"
 	"github.com/wuekevin/lingedge/internal/platform/db"
 	"github.com/wuekevin/lingedge/internal/platform/httpx"
+	"github.com/wuekevin/lingedge/internal/platform/idempotency"
 	idemrepo "github.com/wuekevin/lingedge/internal/platform/idempotency/repository"
 	"github.com/wuekevin/lingedge/internal/platform/logx"
 	"github.com/wuekevin/lingedge/internal/platform/migrate"
 	"github.com/wuekevin/lingedge/internal/platform/redisx"
 	"github.com/wuekevin/lingedge/internal/platform/requestid"
+	"github.com/wuekevin/lingedge/internal/platform/schedrt"
+	"github.com/wuekevin/lingedge/internal/platform/schedrt/builtin"
+	schedrepo "github.com/wuekevin/lingedge/internal/platform/schedrt/repository"
 	"github.com/wuekevin/lingedge/internal/platform/sdnotify"
 	"github.com/wuekevin/lingedge/internal/platform/taskrt"
 	taskrepo "github.com/wuekevin/lingedge/internal/platform/taskrt/repository"
@@ -65,6 +71,17 @@ type Options struct {
 	Tasks *taskrt.Registry
 	// Hooks 是认证/授权/Scope/审计钩子；零值（各项 nil）= 安全拒绝默认实现（1.16–1.21 前保持不变）。
 	Hooks httpx.Hooks
+
+	// Cron 是周期任务的登记点（Story 1.15）：后续 Story 在此向 cron 注册表登记自己的周期任务（Registry.Task：确定性幂等键入队 OpenAPI TaskType）
+	// 或内部作业（Registry.Internal）。内置的四个内部作业已由 scheduler 角色自行登记，不需要在这里重复。nil = 只有内置作业。
+	Cron func(*schedrt.Registry, Deps) error
+	// OpenMaint 以 maint 账号（lingedge_maint）打开独立连接池，仅供 partition.maintain 使用（首次触发时才调用；失败只让该次作业失败并告警）。
+	// 构造 maint 池的调用点受门禁 [db-pool-maint] 限制（只有 cmd/lingedge-server 等白名单位置可以调用 db.OpenMaint），因此由装配层注入。
+	// nil 或配置未提供 maint 账号 = 分区维护作业明确跳过并告警。
+	OpenMaint func(ctx context.Context, d config.Database) (*db.MaintPool, error)
+	// LeaseTTL 与 Tick 是 Scheduler 选主租约与探测间隔（零值取 schedrt 缺省；集成测试缩短它们以便观察接管）。
+	SchedulerLeaseTTL time.Duration
+	SchedulerTick     time.Duration
 
 	ShutdownTimeout time.Duration
 	// OnReady 在全部监听就绪且 READY=1 已发出后调用（集成测试据此取得实际监听地址）；可为 nil。
@@ -272,6 +289,12 @@ func Run(ctx context.Context, o Options) error {
 				return fail(err)
 			}
 			comps = append(comps, wc)
+		case RoleScheduler:
+			sc, err := newSchedulerComponent(o, app, taskStore, idem, enq, deps, metrics, log)
+			if err != nil {
+				return fail(err)
+			}
+			comps = append(comps, sc)
 		default:
 			comps = append(comps, newSkeleton(r, log))
 		}
@@ -355,8 +378,7 @@ func isLoopbackHost(h string) bool {
 
 // skeletonOwner 登记各骨架角色由哪个 Story 实现（文档与日志都引用它，避免「假装有功能」）。
 var skeletonOwner = map[Role]string{
-	RoleGRPC:      "Story 3.13（gRPC 骨架：Node mTLS :9443 / Enroll :9444）",
-	RoleScheduler: "Story 1.15（Scheduler 角色与内部周期任务）",
+	RoleGRPC: "Story 3.13（gRPC 骨架：Node mTLS :9443 / Enroll :9444）",
 }
 
 // skeleton 是尚无真实实现的角色的生命周期骨架：不监听、不调度、不消费，仅占位并随进程停止。
@@ -428,4 +450,51 @@ func (c *workerComponent) Shutdown(ctx context.Context) error {
 	case <-ctx.Done():
 		return fmt.Errorf("任务运行时未在停机预算内退出: %w", ctx.Err())
 	}
+}
+
+func newSchedulerComponent(o Options, app *db.AppPool, tasks taskrt.Store, idem idempotency.Store, enq *taskrt.Enqueuer, deps Deps, metrics *httpx.Metrics, log *zap.Logger) (*schedulerComponent, error) {
+	ids := uid.NewGenerator(o.Clock)
+	locks, err := schedrepo.NewLocks(app)
+	if err != nil {
+		return nil, err
+	}
+	sessions, err := schedrepo.NewSessions(app)
+	if err != nil {
+		return nil, err
+	}
+	sc := tenantscope.PlatformForJob(0) // [tenantscope-mint] Scheduler 是跨租户的平台进程：入队与清理都以平台 Scope 进行
+	d := builtin.Deps{Scope: sc, Clock: o.Clock, Logger: log, Tasks: tasks, Idempotency: idem, Sessions: sessions}
+	var maint *lazyPartitions
+	if open := maintOpener(o, o.Config.Database); open != nil {
+		maint = &lazyPartitions{open: open}
+		d.Partitions = maint
+	} else {
+		log.Warn("未配置 maint 账号（database.maint.*）或装配层未提供 OpenMaint：partition.maintain 每次触发都将明确跳过并告警，分区不会滚动预建（写入不受影响，数据落入 pmax 兜底分区）",
+			zap.Bool("alert", true))
+	}
+	reg := schedrt.NewRegistry()
+	if err := builtin.Register(reg, d); err != nil {
+		return nil, err
+	}
+	if o.Cron != nil {
+		if err := o.Cron(reg, deps); err != nil {
+			return nil, fmt.Errorf("登记周期任务失败: %w", err)
+		}
+	}
+	r, err := schedrt.NewRunner(schedrt.Config{
+		Locks: locks, Registry: reg, Enqueuer: enq, Scope: sc, Logger: log, Clock: o.Clock,
+		Instance: taskrt.NewOwner(ids), LeaseTTL: o.SchedulerLeaseTTL, Tick: o.SchedulerTick,
+	})
+	if err != nil {
+		return nil, err
+	}
+	metrics.RegisterGauge("lingedge_scheduler_is_leader", "本实例是否持有 scheduler.leader（1=是）", func() float64 {
+		if r.IsLeader() {
+			return 1
+		}
+		return 0
+	})
+	metrics.RegisterGauge("lingedge_scheduler_job_failures", "周期作业累计失败次数", func() float64 { return float64(r.Failures()) })
+	metrics.RegisterGauge("lingedge_scheduler_job_skips", "周期作业累计明确跳过次数（如缺少 maint 账号）", func() float64 { return float64(r.Skips()) })
+	return &schedulerComponent{r: r, log: log, maint: maint, done: make(chan struct{})}, nil
 }

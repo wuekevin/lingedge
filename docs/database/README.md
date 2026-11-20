@@ -541,7 +541,7 @@ END;
 
 **与文档的有意差异**：① `audit_logs`、`idx_*` 索引名统一为 `idx_<表>_<列…>`（§2.2 命名规则；原 platform-identity.md 里 `idx_audit_tenant` 等简写不再沿用）；② 租户索引约定落地时发现文档自身的两处张力并以显式豁免解决：`tenant_members` 需要「按用户反查所属租户」的 `idx_tenant_members_user(user_id)`（同时支撑外键），已登记豁免；后续 `site_domains.active_hostname` 等跨租户唯一索引同理（§2.6）；③ 迁移账号尚未登记 `lingedge_app`/`lingedge_maint` 时 GRANT 会失败（ERROR 1410）：两个账号须由安装向导（Story 1.24）在 `migrate up` 之前创建。
 
-**已知依赖**：`audit_logs` 初始分区只到 2027-12，之后的写入落入 `pmax`，由 Worker 的内部周期作业 `partition.maintain`（Story 1.15）按月 REORGANIZE 出新分区、保留期 `DROP PARTITION`；该作业在 2028-01 之前必须就位（`pmax` 非空的告警/`doctor` 检查随 1.15/1.42）。`tasks` 的 `(type, idempotency_key)` 唯一键不含租户：任务幂等键须由服务端构造且内含租户/站点范围（Story 1.14 约定），不得直接使用调用方提供的 `Idempotency-Key`（那一层由 `idempotency_keys.principal_key` 隔离主体）。
+**已知依赖**：`audit_logs` 初始分区只到 2027-12，之后的写入落入 `pmax`，由 Worker 的内部周期作业 `partition.maintain`（Story 1.15）按月 REORGANIZE 出新分区、保留期 `DROP PARTITION`；该作业在 2028-01 之前必须就位（`pmax` 非空的告警/`doctor` 检查随 1.42）。**Story 1.15 已落地**：作业在 `internal/platform/schedrt/builtin`，每日 03:17 UTC 以 `database.maint.*` 配置的 `lingedge_maint` 对实际存在且被授权的分区表预建（按月表 +3 个月、按日表 +14 天，单次 ≤120 个）并保留 `pmax`；maint 未配置则明确跳过并告警。`tasks` 的 `(type, idempotency_key)` 唯一键不含租户：任务幂等键须由服务端构造且内含租户/站点范围（Story 1.14 约定），不得直接使用调用方提供的 `Idempotency-Key`（那一层由 `idempotency_keys.principal_key` 隔离主体）。
 
 **验证**：见 §9.1 末行与 Story 1.7 开发记录（真实 MySQL 8.0.46 空库 up、重放幂等、21 表授权最小权限负向、约束/外键/CHECK 负向、租户索引 EXPLAIN、DDL 陷阱变异覆盖）。
 

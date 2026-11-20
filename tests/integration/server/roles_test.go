@@ -67,7 +67,8 @@ func (r *runningServer) stop(t *testing.T) {
 	}
 }
 
-// AC1：roles 矩阵——各角色子集只装配其角色：api 才监听 HTTP；metrics 恒在；grpc/scheduler/worker 仅生命周期骨架（日志标明由哪个 Story 实现）。
+// AC1：roles 矩阵——各角色子集只装配其角色：api 才监听 HTTP；metrics 恒在；grpc 仅生命周期骨架（日志标明由哪个 Story 实现）；
+// worker（Story 1.14）与 scheduler（Story 1.15）是真实运行时。
 func TestRolesMatrix(t *testing.T) {
 	e := newEnv(t, all)
 	httpAddr := "127.0.0.1:" + strconv.Itoa(e.ports.http)
@@ -78,12 +79,12 @@ func TestRolesMatrix(t *testing.T) {
 	}{
 		{"api", true, nil},
 		{"worker", false, nil},
-		{"scheduler", false, []string{"scheduler"}},
+		{"scheduler", false, nil},
 		{"grpc", false, []string{"grpc"}},
 		{"api,worker", true, nil},
-		{"scheduler,worker", false, []string{"scheduler"}},
-		{"", true, []string{"grpc", "scheduler"}}, // 默认全开
-		{"api,grpc,scheduler,worker", true, []string{"grpc", "scheduler"}},
+		{"scheduler,worker", false, nil},
+		{"", true, []string{"grpc"}}, // 默认全开
+		{"api,grpc,scheduler,worker", true, []string{"grpc"}},
 	}
 	for _, c := range cases {
 		name := c.roles
@@ -130,6 +131,14 @@ func TestRolesMatrix(t *testing.T) {
 			}
 			if hasWorker {
 				eventually(t, "worker 空闲日志", 5*time.Second, func() bool { return strings.Contains(r.logs.String(), "未登记任何任务类型") })
+			}
+			// scheduler 角色自 Story 1.15 起是真实运行时：装配日志标明，且启动后成为 leader（job_locks 的 scheduler.leader 行）。
+			hasSched := strings.Contains(c.roles, "scheduler") || c.roles == ""
+			if got := strings.Contains(r.logs.String(), "角色已装配（Scheduler 运行时）"); got != hasSched {
+				t.Errorf("scheduler 运行时装配 = %v，期望 %v\n%s", got, hasSched, r.logs.String())
+			}
+			if hasSched {
+				eventually(t, "scheduler 成为 leader", 10*time.Second, func() bool { return strings.Contains(r.logs.String(), "成为 Scheduler leader") })
 			}
 			r.stop(t)
 			if !dialRefused(r.info.MetricsAddr) {

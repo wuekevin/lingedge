@@ -638,3 +638,51 @@ func TestExampleConfigLoadsAndContainsNoSecrets(t *testing.T) {
 		t.Errorf("示例配置经脱敏引擎应保持不变（说明其中没有任何凭据形态的内容）")
 	}
 }
+
+// Story 1.15：维护账号（database.maint）——可选；半配置拒绝；口令不得写在 YAML；经环境变量/文件提供；任何输出都不泄露口令。
+func TestDatabaseMaintConfig(t *testing.T) {
+	// 未配置：合法，Configured=false（partition.maintain 将明确跳过并告警）。
+	if cfg := mustParse(t, dbYAML("")); cfg.Database.Maint.Configured() {
+		t.Fatal("未配置时不应视为已配置")
+	}
+	// 用户名在 YAML，口令经环境变量：已配置。
+	cfg := mustParse(t, dbYAML("  maint:\n    user: lingedge_maint\n"), kv("LINGEDGE_DATABASE__MAINT__PASSWORD", "m"+"aint-pw-1"))
+	if !cfg.Database.Maint.Configured() || cfg.Database.Maint.User != "lingedge_maint" {
+		t.Fatalf("应已配置: %+v", cfg.Database.Maint)
+	}
+	if strings.Contains(fmt.Sprintf("%v %+v %#v", cfg.Database.Maint, cfg.Database.Maint, cfg.Database.Maint), "maint-pw-1") {
+		t.Fatal("维护账号口令泄露到格式化输出")
+	}
+	// 口令文件通道。
+	f := writeSecretFile(t, "file-pw-2\n", 0o400)
+	cfg = mustParse(t, dbYAML("  maint:\n    user: lingedge_maint\n    "+"password"+"_file: "+f+"\n"))
+	if !cfg.Database.Maint.Configured() {
+		t.Fatal("口令文件应使其已配置")
+	}
+	// 半配置与非法取值被拒绝。
+	for name, c := range map[string]struct {
+		yaml string
+		env  []string
+		path string
+	}{
+		"仅用户名":      {dbYAML("  maint:\n    user: lingedge_maint\n"), nil, "database.maint.password"},
+		"仅口令":       {dbYAML(""), []string{kv("LINGEDGE_DATABASE__MAINT__PASSWORD", "x1")}, "database.maint.user"},
+		"口令写在 YAML": {dbYAML("  maint:\n    user: lingedge_maint\n    password: nope\n"), nil, "database.maint.password"},
+		"用户名非法":     {dbYAML("  maint:\n    user: 'a b'\n"), []string{kv("LINGEDGE_DATABASE__MAINT__PASSWORD", "x1")}, "database.maint.user"},
+		"文件相对路径":    {dbYAML("  maint:\n    user: lingedge_maint\n    password_file: rel.txt\n"), nil, "database.maint.password_file"},
+	} {
+		_, err := Parse([]byte(c.yaml), Options{Environ: c.env})
+		if err == nil {
+			t.Errorf("%s: 应被拒绝", name)
+			continue
+		}
+		if !hasProblem(problems(t, err), c.path, "") {
+			t.Errorf("%s: 应报告 %s: %v", name, c.path, err)
+		}
+	}
+	// 口令来源互斥。
+	_, err := Parse([]byte(dbYAML("  maint:\n    user: lingedge_maint\n    "+"password"+"_file: "+f+"\n")), Options{Environ: []string{kv("LINGEDGE_DATABASE__MAINT__PASSWORD", "x1")}})
+	if err == nil || !hasProblem(problems(t, err), "database.maint", "只能设置其一") {
+		t.Errorf("password 与 password_file 应互斥: %v", err)
+	}
+}

@@ -37,6 +37,11 @@ database:
   name: lingedge
   user: lingedge_app
   # 口令：见文件头说明（password_file 或 LINGEDGE_DATABASE__PASSWORD）。
+  # 维护账号（可选，Story 1.15）：Scheduler 的 partition.maintain 用它对分区表做 REORGANIZE PARTITION（滚动预建未来分区，database/README §5.1）。
+  # 不配置则该作业明确跳过并持续告警（audit_logs 等将写入 pmax 兜底分区，不影响写入但分区不再滚动）。
+  # 口令同样只能经环境变量 LINGEDGE_DATABASE__MAINT__PASSWORD 或 maint 下的口令文件键提供（见文件头说明）。
+  # maint:
+  #   user: lingedge_maint
 
 redis:
   addr: 127.0.0.1:6379

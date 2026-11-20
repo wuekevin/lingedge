@@ -80,7 +80,21 @@ type Database struct {
 	User         string `yaml:"user"`
 	Password     Secret `yaml:"password"`
 	PasswordFile string `yaml:"password_file"`
+	// Maint 是 lingedge_maint 账号（分区维护 partition.maintain 专用，database/README §5.1；Story 1.15）。
+	// 可选：未配置（user 为空）时 Scheduler 的分区维护作业明确跳过并告警，绝不假装成功；连接目标（host/port/name）与 app 相同。
+	Maint DatabaseMaint `yaml:"maint"`
 }
+
+// DatabaseMaint 是维护账号的凭据。口令与 app 一样只能经环境变量（LINGEDGE_DATABASE__MAINT__PASSWORD）或 password_file 提供。
+// 口令落点（AA-7）尚未定稿，本节是 Story 1.15 的暂行形态：定稿后若变更须走 contract-changes。
+type DatabaseMaint struct {
+	User         string `yaml:"user"`
+	Password     Secret `yaml:"password"`
+	PasswordFile string `yaml:"password_file"`
+}
+
+// Configured 报告维护账号是否已完整配置（用户名与口令都在）。
+func (m DatabaseMaint) Configured() bool { return m.User != "" && m.Password.IsSet() }
 
 // Redis 是 Redis 连接（非唯一真相源，ADR-025）。
 type Redis struct {
@@ -176,6 +190,9 @@ func Parse(data []byte, o Options) (*Config, error) {
 	// 口令不得写在配置文件里（NFR-6、AA-7）：此刻 Password 若非空，只可能来自 YAML（Defaults 不含口令，环境变量尚未应用）。
 	if cfg.Database.Password.IsSet() {
 		probs = append(probs, Problem{Path: "database.password", Reason: "不得写在配置文件中；请改用环境变量 LINGEDGE_DATABASE__PASSWORD 或 database.password_file"})
+	}
+	if cfg.Database.Maint.Password.IsSet() {
+		probs = append(probs, Problem{Path: "database.maint.password", Reason: "不得写在配置文件中；请改用环境变量 LINGEDGE_DATABASE__MAINT__PASSWORD 或 database.maint.password_file"})
 	}
 	if cfg.Redis.Password.IsSet() {
 		probs = append(probs, Problem{Path: "redis.password", Reason: "不得写在配置文件中；请改用环境变量 LINGEDGE_REDIS__PASSWORD 或 redis.password_file"})
@@ -356,6 +373,9 @@ func checkSecretSources(c *Config) []Problem {
 	if c.Database.Password.IsSet() && c.Database.PasswordFile != "" {
 		out = append(out, Problem{Path: "database", Reason: "password 与 password_file 只能设置其一"})
 	}
+	if c.Database.Maint.Password.IsSet() && c.Database.Maint.PasswordFile != "" {
+		out = append(out, Problem{Path: "database.maint", Reason: "password 与 password_file 只能设置其一"})
+	}
 	if c.Redis.Password.IsSet() && c.Redis.PasswordFile != "" {
 		out = append(out, Problem{Path: "redis", Reason: "password 与 password_file 只能设置其一"})
 	}
@@ -370,6 +390,7 @@ func resolveSecretFiles(c *Config) []Problem {
 		dst  *Secret
 	}{
 		{"database.password_file", &c.Database.PasswordFile, &c.Database.Password},
+		{"database.maint.password_file", &c.Database.Maint.PasswordFile, &c.Database.Maint.Password},
 		{"redis.password_file", &c.Redis.PasswordFile, &c.Redis.Password},
 	} {
 		if *t.file == "" || !filepath.IsAbs(*t.file) { // 相对路径由 validateProblems 报告，此处不重复
@@ -511,6 +532,21 @@ func (c *Config) validateProblems() []Problem {
 	}
 	if d.User != "" && !reDBUser.MatchString(d.User) {
 		add("database.user", "必须是 1–32 位的字母/数字/_/./-")
+	}
+
+	// database.maint：用户名与口令要么都不配（分区维护将被跳过并告警），要么都配（半配置是笔误，拒绝）。
+	if m := d.Maint; m.User != "" || m.Password.IsSet() || m.PasswordFile != "" {
+		if m.User == "" {
+			add("database.maint.user", "配置了维护账号口令但缺少用户名")
+		} else if !reDBUser.MatchString(m.User) {
+			add("database.maint.user", "必须是 1–32 位的字母/数字/_/./-")
+		}
+		if !m.Password.IsSet() && m.PasswordFile == "" {
+			add("database.maint.password", "配置了维护账号用户名但缺少口令：经环境变量 LINGEDGE_DATABASE__MAINT__PASSWORD 或 database.maint.password_file 提供")
+		}
+		if m.PasswordFile != "" && !filepath.IsAbs(m.PasswordFile) {
+			add("database.maint.password_file", "必须是绝对路径")
+		}
 	}
 
 	// redis

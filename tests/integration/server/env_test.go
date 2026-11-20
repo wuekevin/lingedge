@@ -38,6 +38,7 @@ type env struct {
 	adm     *sql.DB
 	dbName  string
 	appPW   string
+	maintPW string
 	migUser string
 	migPW   string
 	app     *db.AppPool
@@ -89,7 +90,8 @@ func newEnv(t *testing.T, through int) *env {
 	inst := mysqltest.Start(t)
 	e := &env{inst: inst, redis: redistest.Start(t), dbName: inst.NewDatabase(t)}
 	e.appPW, e.migPW = mysqltest.RandomSecret(t), mysqltest.RandomSecret(t)
-	maintPW := mysqltest.RandomSecret(t)
+	e.maintPW = mysqltest.RandomSecret(t)
+	maintPW := e.maintPW
 	e.migUser = mysqltest.RandomName("mig")
 	for _, a := range []struct{ u, p string }{{migrate.AppUser, e.appPW}, {migrate.MaintUser, maintPW}, {e.migUser, e.migPW}} {
 		inst.Exec(t, fmt.Sprintf("CREATE USER IF NOT EXISTS '%s'@'%%' IDENTIFIED BY '%s'", a.u, a.p))

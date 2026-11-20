@@ -84,7 +84,7 @@ func serveMain(args []string, stderr io.Writer, environ []string) int {
 	}
 	err = server.Run(ctx, server.Options{
 		Config: cfg, Roles: rs, Logger: logger,
-		Register: registerRoutes, Hooks: assembleHooks(), Tasks: tasks, ShutdownTimeout: *timeout,
+		Register: registerRoutes, Hooks: assembleHooks(), Tasks: tasks, Cron: registerCron, OpenMaint: openMaint, ShutdownTimeout: *timeout,
 	})
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "%s: %v\n", name, err)

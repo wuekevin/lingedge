@@ -78,6 +78,6 @@ type Store interface {
 	Complete(ctx context.Context, id uint64, status int, body []byte, taskID uint64) error
 	// Abandon 释放仍未完成的占位。
 	Abandon(ctx context.Context, id uint64) error
-	// DeleteExpired 删除已过期记录（最多 limit 条），返回删除条数；由保留期清理作业调用——调用点属 Story 1.15（Scheduler 的内部周期作业；1.14 只提供任务运行时，不实现 scheduler）。
+	// DeleteExpired 删除已过期记录（最多 limit 条），返回删除条数；由 Scheduler 的内部周期作业 idempotency.cleanup 调用（Story 1.15，internal/platform/schedrt/builtin）。
 	DeleteExpired(ctx context.Context, limit int) (int64, error)
 }

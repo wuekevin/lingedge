@@ -84,6 +84,15 @@ func AppConfigFrom(d config.Database) Config {
 	return Config{Host: d.Host, Port: d.Port, Name: d.Name, User: d.User, Password: d.Password}
 }
 
+// MaintConfigFrom 由服务端配置生成 maint 池配置；维护账号未配置（用户名或口令缺失）时 ok=false。
+// 连接目标（host/port/name）与 app 相同，仅账号与口令不同。
+func MaintConfigFrom(d config.Database) (cfg Config, ok bool) {
+	if !d.Maint.Configured() {
+		return Config{}, false
+	}
+	return Config{Host: d.Host, Port: d.Port, Name: d.Name, User: d.Maint.User, Password: d.Maint.Password}, true
+}
+
 var (
 	reName = regexp.MustCompile(`^[A-Za-z0-9_$]{1,64}$`)
 	reUser = regexp.MustCompile(`^[A-Za-z0-9_.\-]{1,32}$`)

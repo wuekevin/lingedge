@@ -13,9 +13,7 @@ import "github.com/wuekevin/lingedge/internal/platform/httpx"
 //	Scope          Story 1.20（租户 Scope 解析、acting-as）
 //	Auditor        Story 1.21（审计，与业务同事务）
 //
-// 周期作业登记（Story 1.14 的口径）：幂等键保留期清理（idempotency.Store.DeleteExpired，1.12/1.13 遗留）的**调用点**属 Story 1.15
-// （Scheduler 角色的内部周期作业，与 tasks.reap 同类；内部周期作业不属 OpenAPI TaskType，AA-8）。1.14 只提供任务运行时，不实现 scheduler，
-// 因此这里不登记、不伪造该调用；TaskType 的处理函数登记见 tasks.go 的 assembleTaskRegistry。
+// 周期作业的登记点见 cron.go（Story 1.15）。
 func assembleHooks() httpx.Hooks {
 	return httpx.Hooks{}
 }

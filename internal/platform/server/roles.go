@@ -9,7 +9,7 @@ import (
 type Role string
 
 // 四个角色。api=REST（含 /healthz）；grpc=Node mTLS :9443 与 Enroll :9444（实现于 Story 3.13）；
-// scheduler=周期任务触发（实现于 Story 1.15）；worker=消费 tasks 表（实现于 Story 1.14）。
+// scheduler=周期任务触发（Story 1.15：租约选主 + cron 注册表 + 内部周期作业）；worker=消费 tasks 表（实现于 Story 1.14）。
 const (
 	RoleAPI       Role = "api"
 	RoleGRPC      Role = "grpc"
