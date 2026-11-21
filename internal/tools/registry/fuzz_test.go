@@ -50,7 +50,9 @@ func FuzzParseJournal(f *testing.F) {
 // FuzzParseState：任意字节都不得 panic；成功解析的状态必须能再序列化、再解析且等价（往返稳定）。
 func FuzzParseState(f *testing.F) {
 	f.Add([]byte(`{"schema_version":1,"components":{"server":{"version":"1.2.3","state":"running","unit":"lingedge-server.service","run_user":"lingedge","ports":[8080],"release_dir":"/opt/lingedge/server/releases/1.2.3","config_dir":"","data_dir":"","installed_at":"2026-11-21T12:00:00.000Z"}}}`))
-	f.Add([]byte(`{"schema_version":2}`))
+	f.Add([]byte(`{"schema_version":3}`))
+	f.Add([]byte(`{"schema_version":2,"components":{}}`))
+	f.Add([]byte(`{"schema_version":2,"components":{},"host":{"baota":{"detected":true,"confidence":"medium","evidence":[{"kind":"panel_dir","path":"/www/server/panel"},{"kind":"port_file","path":"/www/server/panel/data/port.pl"}],"web_servers":[],"databases":[],"php":[],"sites":[],"firewalls":[],"waf":[],"plugins":[],"services":[],"notes":[]}}}`))
 	f.Add([]byte(`{"schema_version":1,"components":{}}`))
 	f.Add([]byte(`null`))
 	f.Fuzz(func(t *testing.T, data []byte) {

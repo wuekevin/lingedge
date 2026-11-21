@@ -1,0 +1,8 @@
+Name:	mysqld
+Umask:	0022
+State:	S (sleeping)
+Tgid:	980
+Pid:	980
+PPid:	1
+Uid:	111	111	111	111
+Gid:	111	111	111	111

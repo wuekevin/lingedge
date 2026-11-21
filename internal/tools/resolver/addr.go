@@ -63,3 +63,20 @@ func normProto(p string) string {
 	}
 	return p
 }
+
+// AddrConflict 报告两个绑定地址（同协议同端口的前提下）是否冲突，并给出类别 exact | wildcard。
+// 它是 overlap 的导出封装，供 Story 1.31 的 probe.Assess 复用同一套语义（不另造一套）；无法解析的地址按全通配处理（最保守）。
+func AddrConflict(a, b string) (conflict bool, kind string) {
+	x, ok := parseBind(a)
+	if !ok {
+		x = bindAddr{any: true}
+	}
+	y, ok := parseBind(b)
+	if !ok {
+		y = bindAddr{any: true}
+	}
+	return overlap(x, y)
+}
+
+// NormProto 把 tcp6/udp6 归一为 tcp/udp。
+func NormProto(p string) string { return normProto(p) }

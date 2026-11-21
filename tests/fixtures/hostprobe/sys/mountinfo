@@ -1,0 +1,16 @@
+22 28 0:21 / /proc rw,nosuid,nodev,noexec,relatime shared:13 - proc proc rw
+23 28 0:22 / /sys rw,nosuid,nodev,noexec,relatime shared:2 - sysfs sysfs rw
+24 28 0:5 / /dev rw,nosuid,relatime shared:8 - devtmpfs udev rw,size=3967480k,nr_inodes=991870,mode=755,inode64
+25 24 0:23 / /dev/pts rw,nosuid,noexec,relatime shared:9 - devpts devpts rw,gid=5,mode=620,ptmxmode=000
+26 28 0:24 / /run rw,nosuid,nodev,noexec,relatime shared:5 - tmpfs tmpfs rw,size=804028k,mode=755,inode64
+28 1 253:0 / / rw,relatime shared:1 - ext4 /dev/mapper/ubuntu--vg-ubuntu--lv rw
+29 23 0:6 / /sys/kernel/security rw,nosuid,nodev,noexec,relatime shared:3 - securityfs securityfs rw
+30 24 0:27 / /dev/shm rw,nosuid,nodev shared:4 - tmpfs tmpfs rw,inode64
+32 23 0:28 / /sys/fs/cgroup rw,nosuid,nodev,noexec,relatime shared:6 - cgroup2 cgroup2 rw,nsdelegate,memory_recursiveprot
+45 28 259:2 / /boot rw,relatime shared:36 - ext4 /dev/nvme0n1p2 rw
+46 45 259:1 / /boot/efi rw,relatime shared:37 - vfat /dev/nvme0n1p1 rw,fmask=0077,dmask=0077,codepage=437,iocharset=iso8859-1,shortname=mixed,errors=remount-ro
+50 28 8:16 / /www rw,relatime shared:40 - xfs /dev/sdb rw,attr2,inode64,logbufs=8,logbsize=32k,noquota
+51 28 8:32 / /mnt/my\040disk ro,relatime shared:41 - ext4 /dev/sdc ro
+52 28 0:45 / /var/lib/overlayfs/abc/merged rw,relatime shared:42 - overlay overlay rw,lowerdir=/a:/b,upperdir=/c,workdir=/d
+53 28 0:46 / /data rw,relatime - nfs4 10.0.0.2:/export rw,vers=4.2
+54 24 0:26 /snapd/x /snap/core rw shared:50 master:1 unbindable - squashfs /dev/loop0 ro

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wuekevin/lingedge/internal/tools/baota"
 	"github.com/wuekevin/lingedge/internal/tools/security"
 )
 
@@ -31,7 +32,7 @@ func kindOfErr(t *testing.T, err error) Kind {
 
 func TestStateRoundTripPermsAndMissing(t *testing.T) {
 	r := newReg(t)
-	if s, exists, err := r.LoadState(); err != nil || exists || len(s.Components) != 0 || s.SchemaVersion != 1 {
+	if s, exists, err := r.LoadState(); err != nil || exists || len(s.Components) != 0 || s.SchemaVersion != StateSchemaVersion {
 		t.Fatalf("缺失应得空状态: %+v %v %v", s, exists, err)
 	}
 	st := NewState()
@@ -74,7 +75,7 @@ func TestParseStateSchemaVersioning(t *testing.T) {
 		{"schema_version 为字符串", `{"schema_version":"1","components":{}}`, KindStateCorrupt},
 		{"schema_version=0", `{"schema_version":0,"components":{}}`, KindStateCorrupt},
 		{"schema_version 为负", `{"schema_version":-3,"components":{}}`, KindStateCorrupt},
-		{"未来版本 2：失败关闭，不尝试解析其余内容", `{"schema_version":2,"components":{"x":{"future":true}},"new_top":1}`, KindStateUnsupported},
+		{"未来版本 3：失败关闭，不尝试解析其余内容", `{"schema_version":3,"components":{"x":{"future":true}},"new_top":1}`, KindStateUnsupported},
 		{"巨大版本", `{"schema_version":99999999}`, KindStateUnsupported},
 		{"未知顶层字段（同版本内不允许）", `{"schema_version":1,"components":{},"extra":1}`, KindStateCorrupt},
 		{"未知组件字段", `{"schema_version":1,"components":{"server":{"version":"1.0.0","state":"running","ports":[],"extra_field":"x"}}}`, KindStateCorrupt},
@@ -115,7 +116,7 @@ func TestUnsupportedFutureVersionIsNeverRewritten(t *testing.T) {
 	if err := r.L.Ensure(); err != nil {
 		t.Fatal(err)
 	}
-	future := []byte(`{"schema_version":2,"components":{"server":{"v2_only":1}}}` + "\n")
+	future := []byte(`{"schema_version":3,"components":{"server":{"v3_only":1}}}` + "\n")
 	if err := os.WriteFile(r.L.StateFile(), future, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -410,5 +411,128 @@ func TestMarshalStateIsStableJSON(t *testing.T) {
 	}
 	if _, ok := generic["schema_version"]; !ok {
 		t.Fatal("缺 schema_version")
+	}
+}
+
+// ---- Story 1.31：schema 版本 2（host.baota）与对版本 1 的兼容读取 ----
+
+const v1Doc = `{"schema_version":1,"updated_at":"2026-11-01T00:00:00.000Z","components":{"server":{"version":"1.2.3","state":"running","unit":"lingedge-server.service","run_user":"lingedge","ports":[8080],"release_dir":"/opt/lingedge/server/releases/1.2.3","config_dir":"","data_dir":"","installed_at":"2026-11-01T00:00:00.000Z"}}}`
+
+func sampleBaota() *baota.Report {
+	return &baota.Report{ProbedAt: "2026-11-21T01:02:03.000Z", Detected: true, Confidence: "medium", PanelPort: 8888,
+		Evidence:   []baota.Evidence{{Kind: "panel_dir", Path: "/www/server/panel"}, {Kind: "port_file", Path: "/www/server/panel/data/port.pl", Detail: "port=8888"}},
+		WebServers: []baota.WebServer{{Variant: "baota", Kind: "nginx", Binary: "/www/server/nginx/sbin/nginx", Version: "1.24.0"}},
+		Databases:  []baota.DBInstall{}, PHP: []baota.PHP{}, Firewalls: []baota.Firewall{}, WAF: []baota.WAF{}, Plugins: []string{}, Services: []baota.Service{}, Notes: []string{},
+		Sites: []baota.Site{{File: "/www/server/panel/vhost/nginx/a.conf", Source: "baota", ServerNames: []string{"a.example.com"}, Listens: []baota.Listen{{Addr: "*", Port: 80}}}}}
+}
+
+func TestStateV1ReadsAndUpgradesToV2(t *testing.T) {
+	s, err := ParseState([]byte(v1Doc))
+	if err != nil {
+		t.Fatalf("版本 1 的文件必须仍可读取: %v", err)
+	}
+	if s.SchemaVersion != 2 || s.Host != nil || s.Components["server"].Version != "1.2.3" || s.UpdatedAt != "2026-11-01T00:00:00.000Z" {
+		t.Fatalf("迁移结果: %+v", s)
+	}
+	// 经真实文件：读旧文件 → 记录 host.baota → 落盘为版本 2，组件记录原样保留
+	r := newReg(t)
+	if err := r.L.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(r.L.StateFile(), []byte(v1Doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.RecordHostBaota(context.Background(), *sampleBaota()); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(r.L.StateFile())
+	if !bytes.Contains(raw, []byte(`"schema_version": 2`)) || !bytes.Contains(raw, []byte(`"host"`)) {
+		t.Fatalf("应落盘为版本 2: %s", raw)
+	}
+	got, _, err := r.LoadState()
+	if err != nil || got.Components["server"].RunUser != "lingedge" || got.Host == nil || got.Host.Baota == nil || got.Host.Baota.PanelPort != 8888 {
+		t.Fatalf("读回: %+v %v", got, err)
+	}
+	// 版本 1 的文件里不应有 host（该字段自版本 2 起）
+	bad := strings.Replace(v1Doc, `"components"`, `"host":{},"components"`, 1)
+	if _, err := ParseState([]byte(bad)); err == nil || kindOfErrSoft(err) != KindStateCorrupt {
+		t.Errorf("v1 含 host 应为损坏: %v", err)
+	}
+	// 未知顶层字段在版本 1 与 2 都是损坏
+	for _, v := range []string{"1", "2"} {
+		if _, err := ParseState([]byte(`{"schema_version":` + v + `,"components":{},"zzz":1}`)); kindOfErrSoft(err) != KindStateCorrupt {
+			t.Errorf("v%s 未知字段: %v", v, err)
+		}
+	}
+	// 版本 3 仍失败关闭
+	if _, err := ParseState([]byte(`{"schema_version":3,"components":{},"host":{"x":1}}`)); kindOfErrSoft(err) != KindStateUnsupported {
+		t.Errorf("v3: %v", err)
+	}
+}
+
+func TestHostBaotaValidationAndStrictness(t *testing.T) {
+	mk := func(mut func(*baota.Report)) State {
+		s := NewState()
+		b := *sampleBaota()
+		mut(&b)
+		s.Host = &Host{Baota: &b}
+		return s
+	}
+	if _, err := MarshalState(mk(func(*baota.Report) {})); err != nil {
+		t.Fatalf("合法报告: %v", err)
+	}
+	cases := []struct {
+		name string
+		mut  func(*baota.Report)
+		kind Kind
+	}{
+		{"confidence 与 detected 不一致", func(b *baota.Report) { b.Confidence = "" }, KindStateInvalid},
+		{"端口越界", func(b *baota.Report) { b.PanelPort = 99999 }, KindStateInvalid},
+		{"相对路径", func(b *baota.Report) { b.Evidence[0].Path = "www/server/panel" }, KindStateInvalid},
+		{"站点来源非法", func(b *baota.Report) { b.Sites[0].Source = "nowhere" }, KindStateInvalid},
+		{"疑似密钥", func(b *baota.Report) { b.Notes = []string{"password=hunter2hunter2"} }, KindSecret},
+		{"令牌形态", func(b *baota.Report) {
+			b.Sites[0].ServerNames = []string{"Bearer abcdefghijklmnopqrstuvwxyz0123456789"}
+		}, KindSecret},
+	}
+	for _, c := range cases {
+		_, err := MarshalState(mk(c.mut))
+		if err == nil || kindOfErrSoft(err) != c.kind {
+			t.Errorf("%s: kind=%v err=%v，期望 %v", c.name, kindOfErrSoft(err), err, c.kind)
+		}
+	}
+	// 经 RecordHostBaota 写入时，形似令牌的站点名先被 Scrub 遮蔽，写入成功而不是整个 state.json 写失败
+	r := newReg(t)
+	b := *sampleBaota()
+	b.Sites = []baota.Site{{File: "/a.conf", Source: "baota", ServerNames: []string{"ok.example.com", "Bearer abcdefghijklmnopqrstuvwxyz0123456789"}, Listens: []baota.Listen{}}}
+	if err := r.RecordHostBaota(context.Background(), b); err != nil {
+		t.Fatal(err)
+	}
+	st, _, _ := r.LoadState()
+	if st.Host.Baota.Sites[0].ServerNames[0] != "ok.example.com" || strings.Contains(st.Host.Baota.Sites[0].ServerNames[1], "abcdefghij") {
+		t.Errorf("Scrub 结果: %v", st.Host.Baota.Sites[0].ServerNames)
+	}
+	// host.baota 内的未知字段（严格解析）是损坏
+	doc := `{"schema_version":2,"components":{},"host":{"baota":{"detected":false,"evidence":[],"web_servers":[],"databases":[],"php":[],"sites":[],"firewalls":[],"waf":[],"plugins":[],"services":[],"notes":[],"surprise":1}}}`
+	if _, err := ParseState([]byte(doc)); kindOfErrSoft(err) != KindStateCorrupt {
+		t.Errorf("host.baota 未知字段: %v", err)
+	}
+	// 并发：RecordHostBaota 与 UpdateState 互不丢更新
+	r2 := newReg(t)
+	done := make(chan error, 8)
+	for i := 0; i < 4; i++ {
+		go func() { done <- r2.RecordHostBaota(context.Background(), *sampleBaota()) }()
+		go func(i int) {
+			done <- r2.UpdateState(context.Background(), func(s *State) error { s.Components["c"+string(rune('a'+i))] = okComp(); return nil })
+		}(i)
+	}
+	for i := 0; i < 8; i++ {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+	final, _, _ := r2.LoadState()
+	if len(final.Components) != 4 || final.Host == nil {
+		t.Errorf("并发后: %d 个组件，host=%v", len(final.Components), final.Host)
 	}
 }

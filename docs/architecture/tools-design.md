@@ -518,6 +518,8 @@ semver 范围语法子集：`>=a.b.c <x.y.z`、`^`、`~`、`=`、空格即 AND�
 
 检测方法：优先 `ss -H -lntup` 解析（参数数组调用）；回退 `/proc/net/{tcp,tcp6,udp,udp6}` + `/proc/<pid>/fd` 映射。对每个端口区分「同地址冲突」与「通配冲突」（占用者绑定 0.0.0.0 vs 我方 127.0.0.1 也冲突）。冲突时退出码 4，输出占用进程名/pid/属主与选项（换端口 `--set`、释放、取消），**不自动停用**。
 
+实现（Story 1.31，`internal/tools/probe`）：`ParseSS` 解析 `ss -H -lntup`（IPv4/IPv6/`*` 通配、`127.0.0.53%lo` 接口后缀、`users:(("nginx",pid=…,fd=…),…)` 多进程取 pid 最小者为主占用者、无权限时无 users 列 → `Hidden`）；回退 `ParseProcNet`（地址按主机字节序解码，IPv6 为四个主机序 32 位字，端口大端十六进制，TCP 状态 `0A`、UDP 状态 `07` 且远端全零）+ `/proc/<pid>/fd` 的 `socket:[inode]` 映射；两条路径都用 `/proc/<pid>/status` 与 `/etc/passwd` 补属主、用 `/proc/<pid>/cgroup` 补 systemd 单元（`resolver.Listener.Unit`）。同地址/通配语义直接复用 resolver 的 `AddrConflict`（同一套规则，不另造）。**两条路径都不可用时 `Result.ListenersKnown=false`，调用方不得把空监听列表当作「无冲突」**（`probe.Assess` 对每个想要的端口返回「无法检测」冲突）。
+
 ### 10.5 实现（Story 1.30，`internal/tools/resolver`）
 
 `resolver.Resolve(Input) *Plan` 是纯函数（无 IO/时钟/随机，`TestPackageIsPure` 扫描源码 import 守住），失败不返回 error 而写入 `Plan.Blockers`（`--dry-run` 同样展示），`Plan.Err()` 得到 `*resolver.Error`，`cli.ResolveError` 映射退出码：用法 2、NOT_RELEASED 7、BUILTIN 8（`scheduler|worker`，即使清单里没有这个名字也是 BUILTIN）、固定版本命中 `revoked_versions` 5（与 `manifest.CheckTarget`/`VerifyError` 一致）、无解/成环/违反 `min_upgrade_from`/系统/资源 3、端口冲突 4、被动升级未确认 9；多个阻断并存时取优先级最高者的退出码，全部阻断与完整 Plan 放进 `errors[].details`。
@@ -564,6 +566,33 @@ semver 范围语法子集：`>=a.b.c <x.y.z`、`^`、`~`、`=`、空格即 AND�
 | 系统服务 | `systemctl list-units --type=service`（参数数组）；识别 `named`、`systemd-resolved`、`mysqld`、`redis` 等 | — |
 
 结果记录到 `state.json.host.baota`，供 `doctor` 与 Plan 引用。**宝塔存在不阻止安装**；只有真实冲突（端口/路径/同名）才阻止（FR-7）。
+
+### 11.4 实现（Story 1.31：`internal/tools/baota`、`internal/tools/probe`）
+
+**包分工**：`baota` 是叶子包（只依赖 `security`），对一个文件系统视图（`baota.FS`，默认 `OSFS{Root:"/"}`，测试用夹具根）做**只读**探测并产出 `baota.Report`；`probe` 在其上加进程类采集（`ss`、`systemctl`、版本命令）、`/proc`、内存/磁盘、MySQL/Redis/Node.js 探测，产出 `probe.Result`，其中 `Result.System` **就是** `resolver.System`（1.30 定义的输入契约，字段不增不改）。`registry` 依赖 `baota`（`state.json` 持有 `Report`），所以 `baota` 不依赖 `resolver`/`registry`（避免环）。
+
+| 入口 | 用途 |
+|---|---|
+| `probe.Collect(ctx, probe.Options) (Result, error)` | 一次完整只读采集；单项失败转为 `Result.Warnings`，不使整体失败 |
+| `Result.System` | 直接喂给 `resolver.Input.System` |
+| `Result.Baota` | `baota.Report`；写入 `state.json` 用 `registry.(*Registry).RecordHostBaota(ctx, rep)`（经既有 `UpdateState`：全局锁、校验、`WriteFileAtomic`） |
+| `Result.Sockets` | 每个监听的全部占用进程、是否 `Hidden`（doctor 复用） |
+| `Result.ListenersKnown` / `ListenersSource` | `ss` / `proc` / `none`；`none` = 端口冲突无法检测 |
+| `Result.Deps` | 每个 MySQL/Redis 端点的 `DepStatus`（可达、版本、是否需认证；不含凭据） |
+| `probe.Assess(res, fs, probe.Intent)` | 把「宝塔/既有环境」与「我方打算占用的端口/路径/站点名」比对，返回**真实冲突**（`port`/`path`/`name`），宝塔存在本身不产生冲突 |
+| `baota.Probe(ctx, baota.Options)` / `baota.ParseVhost` | 只读识别 / nginx 配置只读解析（doctor 单独用） |
+
+**宝塔判定**：三类证据——面板目录 `/www/server/panel`、`bt` 命令（`/usr/bin/bt`、`/usr/local/bin/bt` 或 `/etc/init.d/bt`）、面板端口文件 `data/port.pl`（内容须是 1–65535 的整数）；**任两类**成立才 `detected`（三类 `high`，两类 `medium`），只有一类仅在 `evidence` 列出并在 `notes` 说明「不判定」。版本取自 `class/common.py` 的 `version = '…'`（备选 `config/version.pl`），`version_source` 如实记录来源，取不到时为空并在 `notes` 说明。`panel_port` 仅在 detected 时输出。**面板版本来源与各 `version.pl` 文件是按宝塔常见布局给出，待 ENV-BT 真机核对。**
+
+**既有环境识别（仅识别）**：Nginx/OpenResty（宝塔 `/www/server/nginx` 与系统 `/usr/sbin/nginx`、`/usr/local/openresty`；`Kind` 以 `nginx -v` 输出为准——宝塔的 Nginx 可能是 OpenResty）、MySQL/MariaDB/Redis（宝塔 `/www/server/mysql|redis` 与系统二进制；版本取 `mysqld --version`/`redis-server --version`，无法执行时取 `version.pl`）、PHP（`/www/server/php/<NN>` → `N.N`，只记录）、站点 vhost（宝塔 `panel/vhost/nginx/*.conf`、系统 `conf.d/*.conf` 与 `sites-enabled/*`；`server_name`/`listen`（含 `ssl`、`default_server`、IPv6、`unix:`、多 listen）/ssl_certificate 有无；注释、引号、嵌套块、畸形配置不 panic，畸形文件标 `malformed`；`sites-enabled` 的符号链接只在目标位于 `/etc/nginx/` 下时读取）、防火墙（`/etc/ufw/ufw.conf`、`firewalld.conf`，活跃状态由 `systemctl list-units` 补全）、WAF/插件目录（`btwaf`、`panel/plugin/*`）、系统服务（`named`/`bind9`/`systemd-resolved`/`dnsmasq`/`nginx`/`mysqld`/`redis`/防火墙等，按 `systemctl list-units --type=service --all --no-legend --no-pager --plain` 解析）。
+
+**MySQL/Redis 探测（T-2、UD-18：不代装）**：免凭据时 MySQL 只读取服务器握手包（版本 + 可达，**不发送任何认证数据**；注意握手后不认证即断开会计入服务器的 `Aborted_connects`/`max_connect_errors`，所以每次 `Collect` 每个端点只探一次）、Redis 只发 `PING`（`+PONG` 可达；`-NOAUTH` 可达但需口令）与无口令时的 `INFO server`。调用方（Server 向导）提供 `Creds` 时才认证：MySQL 经 safeexec 执行 `mysql` 客户端，**只执行 `SELECT VERSION()`**、口令经环境变量 `MYSQL_PWD`（不进 argv）；Redis 发 `AUTH` 与 `INFO server`，且**口令只发往环回地址**（对非环回端点拒绝发送）。Redis 命令在发送前受只读表约束（`PING`/`AUTH`/`INFO server`），MySQL argv 受「恰为该形状」校验。不可达只产生 `dep.mysql.unreachable|absent`、`dep.redis.unreachable|absent|auth_required` 警告并引导到 Server 向导；凭据只存在于 `Creds`，不进 `Result`、日志或 `state.json`，错误经脱敏并显式剔除口令。
+
+**只读与安全**：进程创建只经 `safeexec`（本包 Runner 白名单 `ss systemctl nginx openresty mysqld mariadbd mysql redis-server node`，固定目录解析，不读调用方 PATH），再加一道**只读 argv 表**（例如 `systemctl` 只允许 `list-units …` 这一个形状，`stop/restart/daemon-reload` 在 safeexec 之前就被拒绝）。文件读取经 `readGuard`：**不读取宝塔存储的 MySQL root 密码**（面板 SQLite `default.db`、`default.pl`、`mysql_root*`、`redis.conf`、`my.cnf`、`*.db|*.pem|*.key` 及名称含 `password|passwd|secret|credential|root_pass` 的文件一律拒绝），`OSFS` 不跟随符号链接；整棵探测过程不写任何文件。
+
+**`state.json` schema 版本 2**：新增可选顶层 `host`（`host.baota` = `baota.Report`）。版本规则「只增不改」：`schema_version` 升为 2；**版本 1 的文件仍可读取**（内存升级为 2，下次落盘写成 2；版本 1 的文件里出现 `host` 视为损坏）；更高版本仍失败关闭且不改写。已发布的 1.29 程序读到版本 2 会失败关闭（`state.unsupported_schema`，退出码 3）——这是该规则的预期后果，发行时应让 Tools 自身一并升级。`Report` 写入前先 `Scrub`（遮蔽形似密钥的字符串，如恰好形似令牌的站点名）再 `Validate`（路径规范、枚举、数量上限、泄漏检查）。
+
+**平台**：采集器按 `//go:build linux` 隔离（`/proc/meminfo`、`/proc/self/mountinfo` + `statfs`、`/proc` 默认根）；darwin 仅开发机（总内存 `sysctl hw.memsize`、可用内存记 0、`getfsstat` 磁盘、监听不可用 → `ListenersKnown=false`）；其他平台明确报「不支持」。`linux/amd64`、`linux/arm64` 交叉编译通过。真实 Linux 上的 `ss`/`/proc`/`statfs`/`systemctl` 与真实宝塔面板的复验见 `tests/fixtures/hostprobe/README.md`（ENV-LNX/ENV-BT，Story 1.45）。
 
 ### 11.1 Node 的独立 OpenResty
 
@@ -1125,3 +1154,11 @@ LockPersonality=yes
 
 - 新增 §10.5：求解细则落地决定与 `System` 输入契约（1.31 直接对接）。§10.3 的算法不变；澄清了 `requires.components` 对非内部组件的「远端假定」、`requires.peer` 本机在场即强制、外部依赖作为候选过滤（可回退旧版本）、磁盘记账规则（release 目录与 staging 各自挂载点）、端口通配语义。
 - 退出码映射（`cli.ResolveError`）：用法 2、未发布 7、内置 8、吊销 5、无解/成环/升级路径/系统/资源 3、端口 4、被动升级未确认 9；退出码表与 §4 不变。
+
+## 修订记录 2026-11-21（Story 1.31：系统与宝塔只读探测）
+
+- **§10.4**：补充检测方法的实现细节与「监听未知」语义（`ListenersKnown=false` 不得当作无冲突）。
+- **§11**：新增 §11.4（包分工、公共 API、宝塔判定规则、既有环境识别、MySQL/Redis 探测的只读约束、只读与脱敏、平台隔离）。§11 表中的路径仍是常见默认布局；**面板版本来源文件与 `version.pl` 待 ENV-BT 真机核对**，`version_source` 如实记录实际来源。
+- **`state.json`**：`schema_version` 升为 2，新增可选 `host.baota`；读取版本 1 兼容（内存升级），版本 1 含 `host` 为损坏，版本 3+ 失败关闭。`registry.RecordHostBaota` 经既有原子写写入。
+- **resolver**：仅新增导出封装 `resolver.AddrConflict`/`NormProto`（供 `probe.Assess` 复用同一套地址冲突语义），`Resolve` 行为与 `System` 契约不变。
+

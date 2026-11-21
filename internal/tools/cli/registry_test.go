@@ -241,7 +241,7 @@ func TestStateErrorsMapToExitCodes(t *testing.T) {
 		exit          int
 		code          string
 	}{
-		{"未来 schema", `{"schema_version":2,"components":{}}`, 0o644, 3, "state.unsupported_schema"},
+		{"未来 schema", `{"schema_version":3,"components":{}}`, 0o644, 3, "state.unsupported_schema"},
 		{"损坏", `{"schema_version":1,`, 0o644, 1, "state.corrupt"},
 		{"内容非法", `{"schema_version":1,"components":{"server":{"version":"x","state":"running","ports":[]}}}`, 0o644, 1, "state.invalid"},
 		{"他人可写", `{"schema_version":1,"components":{}}`, 0o666, 3, "state.unsafe_permissions"},

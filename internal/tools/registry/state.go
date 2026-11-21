@@ -10,8 +10,10 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/wuekevin/lingedge/internal/tools/baota"
 	"github.com/wuekevin/lingedge/internal/tools/security"
 )
 
@@ -20,7 +22,10 @@ import (
 // 版本规则：只增不改——同一版本内字段只能新增可选字段是不允许的（解析是严格的，未知字段 = 损坏），任何结构变化都必须递增版本并在 migrate 里写好
 // 「旧版本 → 当前」的内存迁移（下次 UpdateState 落盘时即升级）。读到比本程序所知更高的版本时失败关闭（KindStateUnsupported）：
 // 旧程序若照常解析并回写，会静默丢掉新版本的字段。
-const StateSchemaVersion = 1
+//
+// 版本 2（Story 1.31）：新增可选的顶层 host（host.baota：只读探测报告）。版本 1 的文件仍可读取（内存升级为 2，下次落盘时写成 2）；
+// 版本 1 的文件里若出现 host 则是损坏（该字段在版本 1 不存在）。已发布的 1.29 程序读到版本 2 会失败关闭（KindStateUnsupported）且不改写——这是版本规则的预期行为。
+const StateSchemaVersion = 2
 
 const (
 	maxStateBytes = 4 << 20
@@ -48,6 +53,13 @@ type State struct {
 	SchemaVersion int                  `json:"schema_version"`
 	UpdatedAt     string               `json:"updated_at,omitempty"`
 	Components    map[string]Component `json:"components"`
+	// Host 是宿主机只读探测结果（版本 2 起）。nil = 从未探测。
+	Host *Host `json:"host,omitempty"`
+}
+
+// Host 是 state.json 的 host 段。
+type Host struct {
+	Baota *baota.Report `json:"baota,omitempty"`
 }
 
 // NewState 返回当前版本的空状态。
@@ -86,6 +98,14 @@ func (s State) Validate() error {
 	if s.UpdatedAt != "" {
 		if err := requireTime("updated_at", s.UpdatedAt); err != nil {
 			return err
+		}
+	}
+	if s.Host != nil && s.Host.Baota != nil {
+		if err := s.Host.Baota.Validate(); err != nil {
+			if strings.Contains(err.Error(), "疑似含密钥") {
+				return wrapErr(KindSecret, err, "host.baota 疑似含密钥/口令，拒绝写入")
+			}
+			return wrapErr(KindStateInvalid, err, "host.baota 不合法")
 		}
 	}
 	for _, name := range s.Names() {
@@ -208,10 +228,42 @@ func ParseState(b []byte) (State, error) {
 // migrateState 把版本 from 的字节升级到当前版本的字节。当前只有版本 1，没有需要迁移的旧版本；
 // 未来递增版本时在此按 from 逐级转换，并为每一级补测试。
 func migrateState(from int, b []byte) ([]byte, error) {
-	if from == StateSchemaVersion {
-		return b, nil
+	for from < StateSchemaVersion {
+		switch from {
+		case 1: // 1 → 2：只是加了可选的 host；把 schema_version 改写为 2。版本 1 不应含 host。
+			var m map[string]json.RawMessage
+			if err := json.Unmarshal(b, &m); err != nil {
+				return nil, wrapErr(KindStateCorrupt, err, "state.json 不是 JSON 对象")
+			}
+			if _, has := m["host"]; has {
+				return nil, newErr(KindStateCorrupt, "schema_version=1 的 state.json 不应含 host（该字段自版本 2 起）")
+			}
+			m["schema_version"] = json.RawMessage("2")
+			nb, err := json.Marshal(m)
+			if err != nil {
+				return nil, wrapErr(KindStateCorrupt, err, "无法迁移 state.json")
+			}
+			b = nb
+		default:
+			return nil, newErr(KindStateCorrupt, "没有从 schema_version=%d 到 %d 的迁移", from, StateSchemaVersion)
+		}
+		from++
 	}
-	return nil, newErr(KindStateCorrupt, "没有从 schema_version=%d 到 %d 的迁移", from, StateSchemaVersion)
+	return b, nil
+}
+
+// RecordHostBaota 在全局锁内把只读探测报告写入 state.json 的 host.baota（读 → 改 → 校验 → 原子写，经既有 UpdateState）。
+// 报告先 Scrub（遮蔽形似密钥的字符串），再由 Validate 兜底；其余字段（组件记录）原样保留。
+func (r *Registry) RecordHostBaota(ctx context.Context, rep baota.Report) error {
+	rep = rep.Scrub()
+	return r.UpdateState(ctx, func(s *State) error {
+		if s.Host == nil {
+			s.Host = &Host{}
+		}
+		cp := rep
+		s.Host.Baota = &cp
+		return nil
+	})
 }
 
 // MarshalState 校验并序列化（缩进 JSON + 换行；键序固定，便于 diff）。

@@ -1,0 +1,3 @@
+#!/bin/bash
+# chkconfig: 2345 55 25
+# description: bt Cloud Service

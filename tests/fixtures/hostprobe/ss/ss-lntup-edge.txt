@@ -1,0 +1,5 @@
+tcp   LISTEN 0      128          0.0.0.0:7000       0.0.0.0:*    users:(("Plex Media Serv",pid=2100,fd=33))
+tcp   LISTEN 0      128          0.0.0.0:7001       0.0.0.0:*    users:(("a\"b,c)d",pid=2101,fd=3),("x",pid=2102,fd=4))
+tcp   LISTEN 0      128          0.0.0.0:7002       0.0.0.0:*    users:(("\xe4\xb8\xad\xe6\x96\x87",pid=2103,fd=3))
+tcp   LISTEN 0      128        [fe80::1]%eth0:7003       [::]:*    users:(("srv",pid=2104,fd=3))
+tcp   LISTEN 0      128             [::ffff:127.0.0.1]:7004          [::]:*    users:(("srv",pid=2105,fd=3))

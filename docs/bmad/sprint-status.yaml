@@ -69,7 +69,7 @@ development_status:
   1-28b-遗留项清理: review   # 开发完成（见 docs/bmad/stories/1-28b-遗留项清理.md）：Config.ResumeDir 跨调用断点续传（缓存在 staging 外、0700、不被信任、整体 SHA256 后才落名、失败删缓存、flock 并发互斥，AC4 不变）；测试内真实 SOCKS5 服务器验证 socks5/socks5h/认证/失败分类；真实 GNU/PAX 稀疏 tar 测试并修复 SafeExtract 对 PAX 0.0/0.1 稀疏的缺口；Params.DeferCommit + Acquired.Commit/Discard/Finish；1.28 的 5 条未检出变异 3 条补出区分测试、2 条证明不可达；无新迁移/无契约变更
   1-29-registry-安装状态-journal-任务锁: review   # 开发完成、本机门禁见 docs/bmad/stories/1-29-*.md：internal/tools/registry（state.json：schema 版本化/未来版本失败关闭不改写/严格解析/写入前泄漏检查/0644/经 security.WriteFileAtomic 原子写，真实故障注入=RLIMIT_FSIZE 写失败+kill -9 下读者始终读到完整版本；journal：每条 fsync、先记 undo 再动手、open/begin/done/undone/commit/abort 共用状态机、只容忍尾行撕裂（逐字节截断测试）、可归档、EnsureFile/Dir/Symlink 幂等不覆盖；flock 全局锁+组件锁（字典序、LOCK_NB、持有者 pid/run_id/command、真实子进程 kill -9 无陈旧锁）；Begin 先锁后扫 journal，6/13；journal 自身 flock 判存活；12 个 kill 点真实 SIGKILL 后 journal 可解析且 UndoPlan 足以恢复；LockedSequence 落实 FileSequenceStore/Acquire 的跨进程锁约定）+ cli 写命令接 6/13、list/status 经真实 registry 读取（替换 state.reader_unavailable）；变异验证 26/26 检出；fuzz 2 个；等待环境验证：ENV-LNX（真实 root 目录布局、Linux flock/proc/statfs、断电撕裂）；后续：1.33 编排与 recover 本体、1.42 doctor 的网络文件系统告警
   1-30-resolver-依赖-版本-资源-端口求解-纯函数: review   # 开发完成、本机门禁见 docs/bmad/stories/1-30-*.md：internal/tools/resolver（纯函数 Resolve(Input)→Plan{components,order,steps,ports,units,files,warnings,blockers}，blockers 非空不执行、--dry-run 同样展示；scheduler|worker→BUILTIN 8、unreleased→NOT_RELEASED 7；内部依赖闭包（node→openresty）、requires.components/peer/external/runtime 约束传播与完备回溯（对照独立暴力枚举 4000 随机图 + fuzz）、无解 3 带冲突链、min_upgrade_from（逐级路径）、已装组件反向约束与被动升级标记+确认 9、revoked_versions 命中不可作目标（固定版本 5）；内存/磁盘按最长前缀挂载点分别统计；端口矩阵含 0.0.0.0 对 127.0.0.1、IPv6 ::/::1、tcp6 归一、自有监听豁免、--set 覆盖；环路径；确定性与纯度由测试证明）+ cli.ResolveError（映射 2/3/4/5/7/8/9，经 Run.finish）；变异验证 45 条 44 检出（1 条等价）；System 输入契约（1.31 产出）见 tools-design §10.5；无等待环境验证项；后续：1.31 真实探测、1.33 编排接线（不在本 Story）
-  1-31-系统与宝塔只读探测-baota-端口-依赖: backlog
+  1-31-系统与宝塔只读探测-baota-端口-依赖: review   # 开发完成、本机门禁见 docs/bmad/stories/1-31-*.md：internal/tools/baota（只读 FS 视图+readGuard 不读宝塔存储的 MySQL root 密码；三类证据任两类判定+置信度+证据列表、单类不判定；Nginx/OpenResty/MySQL/Redis/PHP 仅识别、vhost 只读解析 server_name/listen、防火墙/WAF/插件、畸形配置不 panic）+ internal/tools/probe（Collect→resolver.System 直接产出；ss -H -lntup 解析与 /proc/net+/proc/<pid>/fd 回退、同地址/通配冲突 Assess 并给占用者 pid/name/属主、ListenersKnown=false 不当作无冲突；MySQL 免凭据握手/认证 SELECT VERSION()、Redis PING/AUTH/INFO、口令只发环回、只读 argv 表；内存/磁盘/systemctl 服务识别；linux 采集 build tag 隔离、darwin 降级）；state.json schema 2（host.baota，v1 兼容读取）+ registry.RecordHostBaota；真实临时 MySQL/Redis 测试；fuzz 3 个；变异验证 72 条 70 检出（2 条等价）；等待环境验证：ENV-LNX（真实 ss//proc/statfs/systemctl）、ENV-BT（真实宝塔面板布局与版本来源文件）；后续：1.33 编排接线、1.42 doctor、Server 向导
   1-32-service-包-systemd-unit-渲染-运行用户-目录-systemctl-封装: backlog
   1-33-installer-编排-22-步安装状态机-journal-回滚-dry-run-recover: backlog
   1-34-发行流水线与离线签名流程-待签清单-包-sbom: backlog
@@ -747,10 +747,12 @@ environment_verification:   # 『等待环境验证』登记（验证人/日期�
     verified_by: ""
     verified_on: ""
   1-31-系统与宝塔只读探测-baota-端口-依赖:
-    status: not_started
+    status: partial
     required_env: "ENV-LNX、ENV-BT（含宝塔面板的 Linux 机）"
     condition: "解析器与输出模型用真实命令输出样本（`tests/fixtures`）本机完成；真实宝塔/端口探测在 ENV-LNX/ENV-BT
       验证前标「等待环境验证」。"
+    done_locally: "make lint security gate-selftest race vuln contract-check build verify-build migrate-test 全绿：见 docs/bmad/stories/1-31-系统与宝塔只读探测-baota-端口-依赖.md。本机真实：mysqld/mysql/nginx/redis-server/node 版本、真实握手包与 INFO、真实临时 MySQL/Redis 的连通性/认证/只读证明、darwin 内存与磁盘；按真实格式构造（待复验）：ss、/proc/*、meminfo、mountinfo、systemctl、宝塔目录树。"
+    pending: "ENV-LNX：真实 ss/proc/statfs/systemctl 与 cgroup 单元、非 root 降级；ENV-BT：真实宝塔面板布局、port.pl、bt 命令、面板版本来源文件、version.pl、vhost 样式、WAF/插件目录（复验清单见 tests/fixtures/hostprobe/README.md，Story 1.45）。"
     verified_by: ""
     verified_on: ""
   1-32-service-包-systemd-unit-渲染-运行用户-目录-systemctl-封装:
