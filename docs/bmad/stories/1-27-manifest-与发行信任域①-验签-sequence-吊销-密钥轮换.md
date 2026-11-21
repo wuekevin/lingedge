@@ -42,8 +42,8 @@ context:
 
 脚本逐条做最小改动、运行对应包的测试、立刻还原并核对文件内容一致（共 48 条 + 3 条补充）。**首轮 48 条中检出 44 条，4 条未检出，逐条处理如下**：
 1. 「不检查 key 状态」（Verify 里的 status 判定）——`NewTrustSet` 已把 `status=revoked` 并入吊销集，该判定是纵深防御的第二层，首轮不可达。**已补测试** `TestVerifyRejectsKeyWithNonVerifiableStatus`（直接构造异常信任集），复跑**检出**。
-2. 「allow-expired 不要求 offline」（`!Offline || !AllowExpired` 里的 `!Offline`）——前面的 `KindOptions` 检查已使该分支不可达，属**等价变异**（两层同一约束），未新增测试。
-3. 「revoked_versions 缺失放行」（`requireFields` 中去掉该字段）——后面的 `RevokedVersions == nil` 检查同样拒绝，属**等价变异**（两层同一约束；「缺 revoked_versions」「revoked_versions 为 null」两个用例仍分别断言拒绝）。
+2. 「allow-expired 不要求 offline」（`!Offline || !AllowExpired` 里的 `!Offline`）——`Verify` 入口处 `AllowExpired && !Offline → KindOptions` 先行拒绝，使 `!Offline` 在该判定处恒为假，属**真正的等价变异**（无任何经公共入口可观察的输入能区分；Story 1.27b 复核确认，不为它改成可注入内部状态的测试，那等于测试实现细节）。
+3. 「revoked_versions 缺失放行」（`requireFields` 中去掉该字段）——后面的 `RevokedVersions == nil` 检查同样拒绝，两层拒绝都对「是否拒绝」可见但**错误文本不同**，Story 1.27b 复核后**补出了能区分的测试** `TestRevokedVersionsMissingAndNullRejectedByDistinctChecks`（缺失须报「缺少必需字段 revoked_versions」，null 须报「不得为 null」），去掉 `requireFields` 里的该字段即失败。
 4. 「门禁不查测试公钥」（`checkKeysJSON` 的逐 key 比较）——同一文件里的 base64/hex 内容扫描是第二层，单独去掉任一层都被另一层兜住；补充变异「**两层同时去掉**」与「仅去掉内容扫描」均**检出**。
 首轮检出的 44 条覆盖：去掉验签、清单签名不含域前缀、未知/吊销 key 放行、公钥窗口、sequence 回滚/相等边界、过期/过期边界/告警、allow-expired 无 offline、通道不符、revoked_versions 失效、轮换（背书签名不验/retired 背书/同名替换/复活吊销/缺背书/整体不处理）、critical 放行、重复键、schema_version、sha256 格式、https、损坏 state 当空、sequence 可回退、包签名不绑定 component/不查窗口、semver 宽松解析、约束子集、keys.d 同名异钥/符号链接/宽权限、alg、cli 退出码映射（两处）、cli allow-expired、门禁各规则（发行缺失/杂散文件/私钥字段/key_id 字样）、Makefile 前置守卫与 `-require`、testdouble 不扫测试公钥。另手工验证：从指纹表去掉一把测试公钥后 manifest 与 cli 的单测会失败（登记检查生效）。
 变异验证中发现并修正的两处弱点：① 首轮未检出的第 1 项（上文）；② 门禁的两层冗余检测会互相掩盖单点退化，已用「两层同时去掉」的变异证明联合有效。
@@ -74,4 +74,4 @@ context:
 - **ENV-LNX**：`/var/lib/lingedge/tools/trust` 的 root 属主与 0700/0600 语义（本机仅验证权限位与符号链接/宽权限拒绝，单用户非 root）——**等待环境验证**。
 - **第二实现交叉验证**：Ruby OpenSSL 对 §9.6 向量的复验（本机 Ruby 2.6/LibreSSL 不支持 Ed25519）——随 1.34（流水线签名器产出同口径向量）进行。
 - **后续 Story（接线与消费）**：1.28 downloader 调 `Verifier`/`VerifyPackageSums`/`PackageMeta.Matches` 与 `security.SafeExtract`（步骤 5–6 的流式 SHA256 与解压）；1.29 registry 对 `trust/state`/`keys.d` 的事务边界（本 Story 提供文件实现与「验签成功后才写」的 `Commit` 语义）；1.30 resolver 消费 `Manifest`/`Constraint`；1.33/1.43 命令经 `Env.NewVerifier` 接线并在整条链成功后 `Commit`；1.34 离线签名器与 `make release`（须经 `make build RELEASE=1`）。
-- **已知限制（如实）**：`FileSequenceStore` 不自带跨进程锁（由 1.29 的全局任务锁保证）；清单 `requires.*` 约束值在 schema 阶段按语法子集校验但 `runtime` 里的非约束占位文本（§9.2 示例里的「示意」字样）会被拒绝——真实清单必须填约束；`key_rotation` 不支持多级链式背书（旧 active → 新，新公钥在下一次清单里才可作背书者）。
+- **已知限制（如实）**：`FileSequenceStore` 不自带跨进程锁（由 1.29 的全局任务锁保证）；`key_rotation` 不支持**同一份清单内**的多级链式背书（背书者必须是已在可信集中的 active key；新公钥在下一份清单里才可作背书者，多级链靠多份连续清单逐跳完成；放开须改 CF-6 冻结语义，见 Story 1.27b 的评估）。~~`runtime` 占位文本会被拒绝~~ 已在 Story 1.27b 把 tools-design §9.1/§9.2 示例改为合法取值并由 `TestToolsDesignExamplesPassSchema` 守护。

@@ -233,3 +233,18 @@ func TestSchemaDesignDocExampleShape(t *testing.T) {
 		t.Fatalf("server 版本解析异常: %+v", v)
 	}
 }
+
+// revoked_versions「缺失」与「为 null」由两道不同的检查拒绝（requireFields 与 null 检查）；
+// 单看「是否被拒绝」，去掉前者仍被后者拒绝（等价变异），所以这里断言各自的错误文本，使两道检查都被独立钉住。
+func TestRevokedVersionsMissingAndNullRejectedByDistinctChecks(t *testing.T) {
+	_, err := ParseManifest(mf(t, func(m map[string]any) { delete(m, "revoked_versions") }))
+	wantKind(t, err, KindSchema)
+	if !strings.Contains(err.Error(), "缺少必需字段") || !strings.Contains(err.Error(), "revoked_versions") {
+		t.Errorf("缺失应由必需字段检查给出明确错误: %v", err)
+	}
+	_, err = ParseManifest(mf(t, func(m map[string]any) { m["revoked_versions"] = nil }))
+	wantKind(t, err, KindSchema)
+	if !strings.Contains(err.Error(), "不得为 null") {
+		t.Errorf("null 应由 null 检查给出明确错误: %v", err)
+	}
+}

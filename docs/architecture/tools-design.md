@@ -293,9 +293,9 @@ Bubble Tea 复选框列表：`Server / Admin Web / Console / Website / Node / DN
 {
   "schema_version": 1,
   "keys": [
-    { "key_id": "rel-2026-a", "alg": "ed25519", "public_key": "<base64, 32 bytes>",
+    { "key_id": "rel-2026-a", "alg": "ed25519", "public_key": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=",
       "not_before": "2026-11-01T00:00:00Z", "not_after": "2028-11-01T00:00:00Z", "status": "active" },
-    { "key_id": "rel-2025-z", "alg": "ed25519", "public_key": "<base64>", "status": "retired" }
+    { "key_id": "rel-2025-z", "alg": "ed25519", "public_key": "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8=", "status": "retired" }
   ],
   "revoked_key_ids": [ "rel-2024-x" ]
 }
@@ -310,7 +310,7 @@ Bubble Tea 复选框列表：`Server / Admin Web / Console / Website / Node / DN
 
 `manifest.json.sig`（JSON，非二进制）：`{"key_id":"rel-2026-a","alg":"ed25519","sig":"<base64>"}`。签名对象为 `"LINGEDGE-MANIFEST-V1\n" || manifest.json 原始字节`（域分隔；对**文件字节**签名，免去规范化歧义）。
 
-`manifest.json`（下例版本号、哈希、URL 均为**格式示意**，不是真实发行数据）：
+`manifest.json`（下例的版本号、哈希、URL、公钥均为**虚构的合法示例**，不是真实发行数据；示例满足本节全部 schema 规则，并由测试 `TestToolsDesignExamplesPassSchema` 逐次校验，文档改动若使示例不合法则测试失败）：
 
 ```json
 {
@@ -319,7 +319,7 @@ Bubble Tea 复选框列表：`Server / Admin Web / Console / Website / Node / DN
   "sequence": 42,
   "generated_at": "2026-11-16T00:00:00Z",
   "valid_until": "2027-02-14T00:00:00Z",
-  "revoked_versions": [ { "component": "node", "version": "0.0.9", "reason": "示意：已知缺陷" } ],
+  "revoked_versions": [ { "component": "node", "version": "0.0.9", "reason": "示例：已知缺陷" } ],
   "components": {
     "server": {
       "status": "available",
@@ -329,9 +329,9 @@ Bubble Tea 复选框列表：`Server / Admin Web / Console / Website / Node / DN
           "version": "0.1.0",
           "released_at": "2026-11-15T00:00:00Z",
           "min_upgrade_from": "0.1.0",
-          "notes_url": "https://<release-host>/notes/server-0.1.0",
+          "notes_url": "https://releases.example.invalid/notes/server-0.1.0",
           "requires": {
-            "system": { "os": ["linux"], "arch": ["amd64", "arm64"], "min_memory_mb": 0, "min_disk_mb": 0 },
+            "system": { "os": ["linux"], "arch": ["amd64", "arm64"], "min_memory_mb": 1024, "min_disk_mb": 2048 },
             "external": { "mysql": ">=8.0.16 <9", "redis": ">=8" },
             "components": { },
             "runtime": { }
@@ -351,9 +351,10 @@ Bubble Tea 复选框列表：`Server / Admin Web / Console / Website / Node / DN
           "variants": {
             "default": {
               "artifacts": {
-                "linux-amd64": { "url": "https://<release-host>/server/0.1.0/lingedge-server-0.1.0-linux-amd64.tar.gz",
-                                 "sha256": "<hex>", "size": 0 },
-                "linux-arm64": { "url": "…", "sha256": "<hex>", "size": 0 }
+                "linux-amd64": { "url": "https://releases.example.invalid/server/0.1.0/lingedge-server-0.1.0-linux-amd64.tar.gz",
+                                 "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 41943040 },
+                "linux-arm64": { "url": "https://releases.example.invalid/server/0.1.0/lingedge-server-0.1.0-linux-arm64.tar.gz",
+                                 "sha256": "2222222222222222222222222222222222222222222222222222222222222222", "size": 39845888 }
               }
             }
           }
@@ -364,11 +365,12 @@ Bubble Tea 复选框列表：`Server / Admin Web / Console / Website / Node / DN
       "status": "available",
       "versions": [ { "version": "0.1.0",
         "variants": {
-          "static": { "artifacts": { "any": { "url": "…", "sha256": "…", "size": 0 } }, "requires": { "runtime": {} } },
-          "ssr":    { "artifacts": { "any": { "url": "…", "sha256": "…", "size": 0 } }, "requires": { "runtime": { "node": "<按 Nuxt 3 引擎要求，发布时填写>" } } }
+          "static": { "artifacts": { "any": { "url": "https://releases.example.invalid/website/0.1.0/lingedge-website-static-0.1.0.tar.gz", "sha256": "3333333333333333333333333333333333333333333333333333333333333333", "size": 8388608 } }, "requires": { "runtime": {} } },
+          "ssr":    { "artifacts": { "any": { "url": "https://releases.example.invalid/website/0.1.0/lingedge-website-ssr-0.1.0.tar.gz", "sha256": "4444444444444444444444444444444444444444444444444444444444444444", "size": 16777216 } }, "requires": { "runtime": { "node": ">=20 <23" } } }
         } } ]
     },
-    "node":      { "status": "available", "versions": [ { "version": "0.1.0", "requires": { "components": { "openresty": ">=1 <2" } } } ] },
+    "node":      { "status": "available", "versions": [ { "version": "0.1.0", "requires": { "components": { "openresty": ">=1 <2" } },
+                    "variants": { "default": { "artifacts": { "linux-amd64": { "url": "https://releases.example.invalid/node/0.1.0/lingedge-node-0.1.0-linux-amd64.tar.gz", "sha256": "5555555555555555555555555555555555555555555555555555555555555555", "size": 33554432 } } } } } ] },
     "openresty": { "status": "available", "internal": true,  "versions": [ ] },
     "dns":       { "status": "unreleased" },
     "scheduler": { "status": "builtin", "builtin_in": "server" },
@@ -379,7 +381,7 @@ Bubble Tea 复选框列表：`Server / Admin Web / Console / Website / Node / DN
 ```
 
 要点：
-- **schema 规则（CF-6）**：`schema_version` 目前只能是 1；`channel ∈ stable|beta`；`sequence` 为 ≥1 的整数；`valid_until` 必须晚于 `generated_at`；`revoked_versions` 与 `components` 必填（`revoked_versions` 缺失即拒绝，防止「静默没有吊销」）；每个 `available` 组件的每个版本条目必须有 `variants`，每个 variant 至少一个 `artifacts`（平台键 `linux-amd64|linux-arm64|any`），`url` 为不含凭据的 https、`sha256` 为 64 位小写十六进制、`size ∈ [1, 8GiB]`（上例的 `0`/`<hex>`/`…` 仅为格式示意，真实清单不允许）。重复 JSON 键、超过 24 层嵌套、超过 8 MiB 一律拒绝。
+- **schema 规则（CF-6）**：`schema_version` 目前只能是 1；`channel ∈ stable|beta`；`sequence` 为 ≥1 的整数；`valid_until` 必须晚于 `generated_at`；`revoked_versions` 与 `components` 必填（`revoked_versions` 缺失即拒绝，防止「静默没有吊销」）；每个 `available` 组件的每个版本条目必须有 `variants`，每个 variant 至少一个 `artifacts`（平台键 `linux-amd64|linux-arm64|any`），`url` 为不含凭据的 https、`sha256` 为 64 位小写十六进制、`size ∈ [1, 8GiB]`（上例的哈希、大小与域名 `releases.example.invalid` 是虚构取值，真实清单填真实发行数据）。重复 JSON 键、超过 24 层嵌套、超过 8 MiB 一律拒绝。
 - **未知必需字段拒绝、未知可选字段忽略**：对象（顶层、component、version 条目、variant、artifact）可带 `"critical": ["<字段名>", …]`——producer 把「接收方必须理解」的字段名列入其中；解析方只要不认识其中任一名字即拒绝整份清单（升级 Tools 后重试）；未列入 `critical` 的未知字段被忽略。
 - 版本约束为本节「semver 范围语法子集」（见 §10），在 schema 校验时即解析，非法约束拒绝整份清单。
 - `status ∈ available | unreleased | builtin`；`unreleased` → 退出码 7，`builtin` → 退出码 8。

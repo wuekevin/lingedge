@@ -168,3 +168,62 @@ func TestJSONOnlyEnvelopeEvenOnParseFailure(t *testing.T) {
 		t.Error("--json 下 stdout 不得含 Cobra 用法文本")
 	}
 }
+
+// 解析失败时 envelope 行为须与 pflag 的实际解析一致：--json 的各种合法/非法写法、出错点之后的 --json、
+// 与其他标志混排、`--` 之后、被其他标志当作取值的 --json。
+func TestJSONEnvelopeOnParseFailureMatchesPflag(t *testing.T) {
+	cases := []struct {
+		name     string
+		args     []string
+		wantJSON bool
+	}{
+		{"--json 在出错点之前", []string{"list", "--json", "--bogus"}, true},
+		{"--json 在出错点之后", []string{"list", "--bogus", "--json"}, true},
+		{"--json=true", []string{"list", "--bogus", "--json=true"}, true},
+		{"--json=1", []string{"list", "--bogus", "--json=1"}, true},
+		{"--json=TRUE", []string{"list", "--bogus", "--json=TRUE"}, true},
+		{"--json=True", []string{"list", "--bogus", "--json=True"}, true},
+		{"--json=t", []string{"list", "--bogus", "--json=t"}, true},
+		{"--json=T", []string{"list", "--bogus", "--json=T"}, true},
+		{"--json=false 不是 json", []string{"list", "--bogus", "--json=false"}, false},
+		{"--json=0 不是 json", []string{"list", "--bogus", "--json=0"}, false},
+		{"--json=maybe 非法 bool 不是 json", []string{"list", "--bogus", "--json=maybe"}, false},
+		{"--json=yes 非法 bool 不是 json", []string{"list", "--bogus", "--json=yes"}, false},
+		{"后者覆盖前者（假覆盖真）", []string{"list", "--bogus", "--json", "--json=false"}, false},
+		{"后者覆盖前者（真覆盖假）", []string{"list", "--bogus", "--json=false", "--json"}, true},
+		{"-- 之后的 --json 是位置参数", []string{"list", "--bogus", "--", "--json"}, false},
+		{"-- 之前的 --json 生效", []string{"list", "--json", "--bogus", "--", "x"}, true},
+		{"--config 的取值是 --json 字样", []string{"list", "--bogus", "--config", "--json"}, false},
+		{"--config=--json", []string{"list", "--bogus", "--config=--json"}, false},
+		{"与短标志混排", []string{"-y", "list", "--bogus", "--no-color", "--json"}, true},
+		{"未知命令后的 --json", []string{"frobnicate", "--json"}, true},
+		{"未知命令且 --json=TRUE", []string{"frobnicate", "--json=TRUE"}, true},
+		{"取值缺失（--log-level 缺参）后的 --json 不可达", []string{"list", "--json", "--log-level"}, true},
+		{"子命令本地标志取值是 --json 字样", []string{"install", "server", "--bogus", "--channel", "--json"}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t)
+			code := h.run(c.args...)
+			if code != 2 {
+				t.Fatalf("退出码 %d（应为 2）stdout=%q stderr=%q", code, h.stdout.String(), h.stderr.String())
+			}
+			if !c.wantJSON {
+				if h.stdout.Len() != 0 {
+					t.Fatalf("非 --json 时 stdout 应为空: %q", h.stdout.String())
+				}
+				if !strings.Contains(h.stderr.String(), "退出码 2") {
+					t.Errorf("应输出人类错误: %q", h.stderr.String())
+				}
+				return
+			}
+			env := h.envelope()
+			if env["ok"] != false || env["exit_code"] != 2.0 {
+				t.Errorf("envelope: %v", env)
+			}
+			if h.stderr.Len() != 0 && strings.Contains(h.stderr.String(), "发生了什么") {
+				t.Errorf("--json 下不应再输出人类错误: %q", h.stderr.String())
+			}
+		})
+	}
+}

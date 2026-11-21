@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/wuekevin/lingedge/internal/tools/manifest"
 )
@@ -43,7 +44,7 @@ type Run struct {
 	runID   string
 
 	opts     globalOpts
-	jsonPre  bool // 解析前对 argv 的预扫描（标志解析失败时也能输出 envelope）
+	jsonPre  bool // 标志解析失败后按 pflag 语义重扫得到的 --json（见 jsonAfterParseFailure）
 	nonInter bool
 	log      *fileLogger
 	stdin    *bufio.Reader
@@ -55,17 +56,51 @@ type Run struct {
 
 func (r *Run) jsonMode() bool { return r.opts.JSON || r.jsonPre }
 
-// scanJSON 在标志解析前预判是否 --json（解析失败时用）。
-func scanJSON(args []string) bool {
-	for _, a := range args {
-		if a == "--" {
-			return false
-		}
-		if a == "--json" || a == "--json=true" || a == "--json=1" {
-			return true
-		}
+// lenientValue 接收任意取值：重扫只关心 --json，其他标志的取值是否合法留给 Cobra 报告。
+type lenientValue struct{ typ string }
+
+func (v *lenientValue) String() string   { return "" }
+func (v *lenientValue) Set(string) error { return nil }
+func (v *lenientValue) Type() string     { return v.typ }
+
+// jsonAfterParseFailure 在 Cobra 标志解析失败后判定 --json 是否生效。pflag 一出错就停止，
+// 出错点之后的 --json 不会被记到 opts.JSON，但调用方仍期望 envelope，所以用与真实解析同一套
+// pflag 语义重扫一遍：同一个命令的完整标志集（含继承的全局标志）、同样的 `--` 终止、同样的
+// 取值消耗（--config --json 中的 --json 是取值而非标志）、bool 经 strconv.ParseBool
+// （--json=TRUE/t/1 为真，--json=maybe 为非法而不是真）、后者覆盖前者。除 json 外其他标志用
+// 宽松取值，使其取值非法不会中断重扫；未知标志按 pflag 自己的规则跳过。
+func jsonAfterParseFailure(cmd *cobra.Command, args []string) bool {
+	if cmd == nil {
+		return false
 	}
-	return false
+	fs := pflag.NewFlagSet("json-rescan", pflag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	fs.ParseErrorsAllowlist.UnknownFlags = true
+	var asJSON bool
+	cmd.Flags().VisitAll(func(f *pflag.Flag) {
+		if f.Name == "json" {
+			fs.BoolVar(&asJSON, "json", false, "")
+			return
+		}
+		nf := &pflag.Flag{Name: f.Name, Shorthand: f.Shorthand, NoOptDefVal: f.NoOptDefVal, Value: &lenientValue{typ: f.Value.Type()}}
+		fs.AddFlag(nf)
+	})
+	_ = fs.Parse(args) // 出错（如 --json=maybe）即停止，已解析到的结果保留，与 pflag 一致
+	return asJSON
+}
+
+// isParseStageError 判定错误是否来自 Cobra 的标志/命令解析阶段（解析失败的 FlagErrorFunc 包装，
+// 或 Cobra 自己的未知命令/参数错误），而不是命令执行期的结构化错误。
+func isParseStageError(err error) bool {
+	var ce *Error
+	var me *manifest.Error
+	switch {
+	case errors.As(err, &ce):
+		return ce.Code == "usage.invalid_flag"
+	case errors.As(err, &me), errors.Is(err, context.Canceled):
+		return false
+	}
+	return true
 }
 
 // Execute 运行 lingedge 并返回进程退出码。stdout/stderr 的分工见 tools-design §5：
@@ -75,7 +110,7 @@ func Execute(ctx context.Context, env Env, args []string) int {
 	now := env.Now()
 	r := &Run{
 		env: env, ctx: ctx, args: append([]string(nil), args...),
-		started: now, runID: env.NewRunID(now), jsonPre: scanJSON(args),
+		started: now, runID: env.NewRunID(now),
 		stdin: bufio.NewReader(env.Stdin),
 	}
 	root := buildRoot(r)
@@ -95,6 +130,10 @@ func (r *Run) finish(cmd *cobra.Command, err error) int {
 	var me *manifest.Error
 	if err == nil && r.ctx.Err() != nil && r.result == nil && !r.helpDone {
 		err = context.Canceled
+	}
+	if err != nil && !r.opts.JSON && isParseStageError(err) {
+		// 解析在出错点停止：再用 pflag 语义重扫，保证出错点之后的 --json 同样得到 envelope。
+		r.jsonPre = jsonAfterParseFailure(cmd, rewriteHelpTopic(r.args))
 	}
 	if err != nil {
 		switch {

@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 11-16-2026 23:18
-last_updated: 11-22-2026 00:30
+last_updated: 11-22-2026 02:00
 project: LingEdge（凌界云）
 project_key: NOKEY
 tracking_system: file-system
@@ -64,6 +64,7 @@ development_status:
   1-25-tools-骨架-命令树-退出码-json-envelope-非交互约定: review   # 开发完成、本机门禁见 docs/bmad/stories/1-25-*.md：internal/tools/cli（Cobra 命令树按 tools-design §3 全量声明，未交付命令 Hidden + 调用时 cli.not_implemented 退出码 1 绝不假成功；退出码表 0/1–14/130 与 tools-design §4/cli-tui §4.2 由测试解析文档逐项一致；`--help exit-codes`；lingedge.cli/v1 envelope + 7 个 JSON Schema（go:embed）+ 11 个真实输出快照；非交互自动判定/确认退出码 9/root 检查退出码 3+sudo 提示/参数校验退出码 2；argv 与日志经 pkg/redact 脱敏）+ gates flags（旧标志名全仓 0 命中，接入 make security）；版本/list/status 已交付、state.json 存在时如实报 state.reader_unavailable（1.29）；等待环境验证：ENV-LNX 真实 root / 缺省日志与 state 路径 / 进程级 SIGINT；CF-5 冻结点 = 退出码表 + JSON schema
   1-26-security-叶子包-安全解压-安全执行-脱敏-权限: review   # 开发完成、本机门禁见 docs/bmad/stories/1-26-*.md：internal/tools/security（SafeExtract：仅普通文件/目录、拒绝链接/设备/FIFO、路径与 %XX 编码/..、os.Root+词法+realpath 三层落点、限额含声明与实际流式大小与解压后流总量、边写边校验 SHA256、缺失/多余即失败、失败删 .partial；ValidateUnitValue；RedactArgs 等封装 pkg/redact 不另立规则；CreateFile/WriteFileAtomic/MkdirAllPerm 创建即最终权限）+ safeexec 子包（唯一进程创建入口：白名单+固定目录解析+环境清洗+无 shell，Linux 专属 Pdeathsig 隔离）+ gates extract（G-4 静态）+ tests/security G-4 向量集 33 条与 4 个 fuzz；变异验证 35 条全部检出；cli 日志脱敏接到新包；等待环境验证：ENV-LNX 真实 Linux 文件系统语义/Pdeathsig/root 属主
   1-27-manifest-与发行信任域①-验签-sequence-吊销-密钥轮换: review   # 开发完成、本机门禁见 docs/bmad/stories/1-27-*.md：internal/tools/manifest（keys.json/keys.d 可信公钥集；清单对原始字节 LINGEDGE-MANIFEST-V1 域前缀 Ed25519 验签；未知/吊销 key、篡改、sequence 按通道回滚、valid_until 过期、--offline --allow-expired-manifest 放行并告警、revoked_versions、key_rotation 旧 active key 背书并经 Commit 落盘 keys.d；schema 未知必需字段（critical）拒绝/未知可选忽略；包 SHA256SUMS 签名 LINGEDGE-PKG-V1 与 META 校验；Masterminds/semver v3.5.0 固定 + 边界测试；§9.6 golden 向量入 testdata/vectors.json）+ cli.VerifyError（退出码 5 真实生产者，信任库损坏 3）+ gates release-keys（发行构建缺失内置公钥/含测试公钥即构建失败）；变异验证见 Story 文档；等待环境验证：ENV-LNX（trust 目录 root 属主/0700 语义）；UD-3 真实发行公钥待发行签名人；CF-6 冻结点 = manifest/keys/sig/包 META schema + 签名域前缀（docs/bmad/contract-changes/CF-6.md）
+  1-27b-遗留项清理: review   # 开发完成（本机门禁见 docs/bmad/stories/1-27b-遗留项清理.md）：1.25 标志解析失败时 --json 判定改用 pflag 自身语义重扫（TRUE/t/--/取值消耗/覆盖）；tools-design §9.1/§9.2 示例改为合法并由测试守护；1.27 两条变异：一条补出可区分测试、一条确认等价；key_rotation 多级链式背书与 Unix socket 凭据/热重载口令/ACCOUNT LOCK 评估后保持登记（理由见文档）；UD-27 补充默认值登记；无新迁移/无契约变更（CF-6 schema 哈希不变）
   1-28-downloader-与离线-bundle-完整校验链: backlog
   1-29-registry-安装状态-journal-任务锁: backlog
   1-30-resolver-依赖-版本-资源-端口求解-纯函数: backlog
@@ -485,6 +486,11 @@ sprint_plan:
         depends_on: ["1.26"]
         env: "本机；trust 目录的 root 属主/0700 语义在 Linux 真实路径需 ENV-LNX"
         waiting_env_verification: true
+      - key: "1-27b-遗留项清理"
+        id: "1.27b"
+        depends_on: ["1.27"]
+        env: "本机；遗留中需 ENV-LNX/ENV-BT/MySQL 8.0.16 的项保持等待环境验证"
+        waiting_env_verification: false
       - key: "1-28-downloader-与离线-bundle-完整校验链"
         id: "1.28"
         depends_on: ["1.26", "1.27"]
@@ -702,6 +708,14 @@ environment_verification:   # 『等待环境验证』登记（验证人/日期�
     condition: "验签/sequence/过期/吊销/轮换/schema/semver 均为纯 Go 逻辑与真实文件系统（临时目录）测试，本机完成；真实 Linux 路径下的 root 属主与目录权限、以及真实发行公钥（UD-3）验证前标「等待环境验证」。本 Story 的「通过」不代表对真实发行源验签通过。"
     done_locally: "make lint security gate-selftest race vuln contract-check build verify-build migrate-test 全绿：见 docs/bmad/stories/1-27-*.md（篡改清单逐字节翻转/篡改签名/未知与吊销 key/回滚/过期边界/--allow-expired-manifest/revoked_versions/key_rotation 背书与落盘重载/schema 拒绝 60+ 项/semver 边界与 fuzz/§9.6 golden 向量/退出码 5 经 Run.finish/构建守卫经真实 make 与 go build -overlay；变异验证全部检出；linux/amd64+arm64 交叉编译与 vet 通过）。"
     pending: "① UD-3：真实发行公钥注入 builtin/keys.json 与真实签名验收；② ENV-LNX：trust 目录 root 属主与权限语义；③ 后续 Story：1.28 downloader 调用 Verifier/VerifyPackageSums/PackageMeta.Matches 与 SafeExtract、1.29 registry 对 sequence 与 keys.d 的事务边界（本 Story 提供 FileSequenceStore 文件实现）、1.30 resolver 使用 manifest 类型与 Constraint、1.33/1.43 命令调用 Env.NewVerifier 与 Commit（sequence 在验签成功后才写）、1.34 流水线签名器（离线签名产出同口径 golden 向量并做 Ruby 交叉验证、发行经 make build RELEASE=1 注入 keys.json）；④ Ruby OpenSSL 对 §9.6 向量的第二实现复验（本机 Ruby 2.6/LibreSSL 不支持 Ed25519）。"
+    verified_by: ""
+    verified_on: ""
+  1-27b-遗留项清理:
+    status: partial
+    required_env: "本机"
+    condition: "仅代表 macOS 本机：1.25 --json 判定、文档示例校验、1.27 变异收口、默认值登记；1.24–1.27 中需 ENV-LNX/ENV-BT/MySQL 8.0.16/UD-3 的项仍在各自 Story 块登记，未因本 Story 关闭。"
+    done_locally: "make lint security gate-selftest race vuln contract-check build verify-build migrate-test 全绿：见 docs/bmad/stories/1-27b-遗留项清理.md。"
+    pending: "无新增；保持登记：Unix socket 凭据（CC 加法 + 1.37 + ENV-BT）、热重载口令与 ACCOUNT LOCK（ADR-026 Deferred，1.43）、key_rotation 同清单多级背书（CF-6 变更，1.34）、Ruby 第二实现（1.34）。"
     verified_by: ""
     verified_on: ""
   1-28-downloader-与离线-bundle-完整校验链:

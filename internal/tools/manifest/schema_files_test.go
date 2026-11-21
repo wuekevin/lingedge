@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io/fs"
+	"os"
 	"strings"
 	"testing"
 
@@ -175,6 +176,59 @@ func TestSchemaFilesFrozen(t *testing.T) {
 	for n, h := range frozenSchemaHashes {
 		if got[n] != h {
 			t.Errorf("CF-6 冻结的 %s 被改动：sha256=%s（冻结值 %s）。契约变更须走变更说明流程（docs/bmad/contract-changes/CF-6.md）", n, got[n], h)
+		}
+	}
+}
+
+// docJSONBlock 返回 tools-design.md 中以 heading 开头的小节里第一个 ```json 代码块。
+func docJSONBlock(t *testing.T, doc, heading string) []byte {
+	t.Helper()
+	i := strings.Index(doc, heading)
+	if i < 0 {
+		t.Fatalf("文档缺少小节 %q", heading)
+	}
+	rest := doc[i:]
+	start := strings.Index(rest, "```json\n")
+	if start < 0 {
+		t.Fatalf("小节 %q 没有 json 示例", heading)
+	}
+	rest = rest[start+len("```json\n"):]
+	end := strings.Index(rest, "```")
+	if end < 0 {
+		t.Fatalf("小节 %q 的 json 示例未闭合", heading)
+	}
+	return []byte(rest[:end])
+}
+
+// 文档里的示例必须是合法文档（此前 §9.2 示例含「示意」占位约束，会被 schema 拒绝）：
+// 同时通过 JSON Schema 与 Go 解析（Go 是权威实现，含约束语法、variants 必填等 schema 表达不了的规则）。
+func TestToolsDesignExamplesPassSchema(t *testing.T) {
+	raw, err := os.ReadFile("../../../docs/architecture/tools-design.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := string(raw)
+
+	m := docJSONBlock(t, doc, "### 9.2 ")
+	if err := loadSchema(t, "manifest.schema.json").VisitJSON(anyOf(t, m)); err != nil {
+		t.Errorf("§9.2 清单示例未通过 manifest.schema.json: %v", err)
+	}
+	if _, err := ParseManifest(m); err != nil {
+		t.Errorf("§9.2 清单示例未通过 ParseManifest: %v", err)
+	}
+
+	k := docJSONBlock(t, doc, "### 9.1 ")
+	if err := loadSchema(t, "keys.schema.json").VisitJSON(anyOf(t, k)); err != nil {
+		t.Errorf("§9.1 keys.json 示例未通过 keys.schema.json: %v", err)
+	}
+	if _, err := ParseKeysFile(k); err != nil {
+		t.Errorf("§9.1 keys.json 示例未通过 ParseKeysFile: %v", err)
+	}
+
+	// 防回退：示例里不得再出现占位字样。
+	for _, bad := range []string{"<hex>", "<base64", "<release-host>", "按 Nuxt 3 引擎要求", `"…"`} {
+		if strings.Contains(string(m), bad) || strings.Contains(string(k), bad) {
+			t.Errorf("示例仍含占位文本 %q", bad)
 		}
 	}
 }
