@@ -1,0 +1,24 @@
+{
+  "_comment": "仅测试，非发行密钥。tools-design §9.6 的示例向量：Ruby OpenSSL 与 Go crypto/ed25519 双实现各自实际计算并验签通过。供 manifest/downloader 包 golden 测试与 1.34 流水线交叉验证。",
+  "seed_phrase": "LingEdge golden test vector seed v1 - TEST ONLY",
+  "seed_hex": "cd8dc2235741957912a9f476a2b5b9bb9d75ae02bde212b9d8089a92fb895749",
+  "public_key_b64": "P3pE/lvUPOLOFWJtF/1sxj4LU923fmJQU9Utz1K5ghc=",
+  "public_key_hex": "3f7a44fe5bd43ce2ce15626d17fd6cc63e0b53ddb77e625053d52dcf52b98217",
+  "key_id": "golden-test-1",
+  "manifest": {
+    "file_text": "{\"schema_version\":1,\"channel\":\"stable\",\"sequence\":1,\"generated_at\":\"2026-01-01T00:00:00Z\",\"valid_until\":\"2026-04-01T00:00:00Z\",\"revoked_versions\":[],\"components\":{}}\n",
+    "sha256": "a231c5e64c6b3d757cd9ed6ada65eb3997c7afe7726f6910ea9352ed7c014c52",
+    "domain_prefix": "LINGEDGE-MANIFEST-V1\n",
+    "sig_b64": "L5VbA6b3kohy34+RRMyB0adDM+SpIMKWU9g6k75onjjlLLv7XKUpq6JJg6h5G8PKaIQrH8S9aFnAjGCh9RKYDQ=="
+  },
+  "package": {
+    "component": "node",
+    "version": "0.1.0",
+    "platform": "linux-amd64",
+    "payload_path": "payload/hello.txt",
+    "payload_text": "hello\n",
+    "sha256sums_text": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03  payload/hello.txt\n",
+    "sig_input_prefix": "LINGEDGE-PKG-V1\nnode\n0.1.0\nlinux-amd64\n",
+    "sig_b64": "YLlLdkS0mzZ4zZYLbph1d34DZ/CjhSEr1CSslVVc5PRjIwHBaJHJwYfsORDZq+X2EKkGCIHGquM08a9sn/VqAA=="
+  }
+}

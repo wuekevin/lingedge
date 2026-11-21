@@ -7,6 +7,8 @@ import (
 
 	"github.com/oklog/ulid/v2"
 	"golang.org/x/term"
+
+	"github.com/wuekevin/lingedge/internal/tools/manifest"
 )
 
 // 默认路径（tools-design §3、§8）。
@@ -14,6 +16,8 @@ const (
 	DefaultConfigPath = "/etc/lingedge/tools/tools.yaml"
 	DefaultLogPath    = "/var/log/lingedge/tools.log"
 	DefaultStatePath  = "/var/lib/lingedge/tools/state.json"
+	// DefaultTrustDir 是信任域①的本地状态目录（tools-design §9.1/§9.2）：keys.d/（密钥轮换落盘）与 state（各通道已见最大 sequence），root 0700。
+	DefaultTrustDir = "/var/lib/lingedge/tools/trust"
 )
 
 // Env 是命令树与外部世界的全部接触面：标准流、终端判定、环境变量、有效 UID、主机名、时钟与状态来源。
@@ -31,6 +35,10 @@ type Env struct {
 
 	StatePath      string
 	DefaultLogFile string
+	// TrustDir 是信任库目录（缺省 DefaultTrustDir）；BuiltinKeys 返回内置发行公钥 keys.json 的字节（缺省 manifest.BuiltinKeys，
+	// 未注入公钥的构建返回 no_builtin_keys 错误，验证一律失败关闭）。install/update（Story 1.33/1.43）经它们构造 manifest.Verifier。
+	TrustDir    string
+	BuiltinKeys func() ([]byte, error)
 	// State 缺省为读取 StatePath 的 FileState（见 state.go）。
 	State StateSource
 }
@@ -50,6 +58,8 @@ func DefaultEnv() Env {
 		NewRunID:       func(t time.Time) string { return ulid.Make().String() },
 		StatePath:      DefaultStatePath,
 		DefaultLogFile: DefaultLogPath,
+		TrustDir:       DefaultTrustDir,
+		BuiltinKeys:    manifest.BuiltinKeys,
 	}
 }
 
@@ -83,6 +93,12 @@ func (e Env) withDefaults() Env {
 	}
 	if e.State == nil {
 		e.State = FileState{Path: e.StatePath}
+	}
+	if e.TrustDir == "" {
+		e.TrustDir = DefaultTrustDir
+	}
+	if e.BuiltinKeys == nil {
+		e.BuiltinKeys = manifest.BuiltinKeys
 	}
 	return e
 }

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "META/package.json（CF-6，tools-design §9.3）",
+  "description": "包为 .tar.gz：META/package.json、META/SHA256SUMS、META/SHA256SUMS.sig、payload/…。未知可选字段忽略。",
+  "type": "object",
+  "required": ["component", "version", "variant", "platform", "built_at", "config_schema_version", "files_count", "unpacked_size"],
+  "properties": {
+    "component": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"},
+    "version": {"type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$"},
+    "variant": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"},
+    "platform": {"enum": ["any", "linux-amd64", "linux-arm64"]},
+    "built_at": {"type": "string", "format": "date-time"},
+    "config_schema_version": {"type": "integer", "minimum": 0},
+    "files_count": {"type": "integer", "minimum": 1},
+    "unpacked_size": {"type": "integer", "minimum": 0}
+  }
+}

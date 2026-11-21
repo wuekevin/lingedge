@@ -41,7 +41,7 @@ endef
 
 .PHONY: help build verify-build test race lint fmt vet check-scaffold clean \
         gen-lint arch-check golangci shell-check repo-check gate-selftest vuln verify-gates \
-        contract-bin contract-selftest openapi-breaking migrations-check migrations-seal freeze-check perms-check tenantscope-check audit-check contract-check \
+        release-keys-check contract-bin contract-selftest openapi-breaking migrations-check migrations-seal freeze-check perms-check tenantscope-check audit-check contract-check \
         print-ldflags migrate migrate-test proto proto-check openapi-check frontend e2e edge-test security release
 
 help:
@@ -51,8 +51,15 @@ help:
 	@echo "迁移(Story 1.6): migrate（MIGRATE_ARGS=plan|up|down|status|recover|lint ...）migrate-test"
 	@echo "未实现的目标会输出 NOT_IMPLEMENTED(story X.Y) 并以非零退出。"
 
+# 内置发行公钥守卫（Story 1.27 AC5、NFR-1）：internal/tools/manifest/builtin/keys.json 由发行流水线在构建前注入（不入库）。
+# 含测试公钥/测试 key_id/私钥字段/杂散文件 → 任何构建失败；缺失 → 开发构建放行（lingedge 运行期对任何清单失败关闭），
+# 发行构建（make build RELEASE=1；make release 本体属 Story 1.34，须经它）失败。门禁自测见 scripts/gates/releasekeys_test.go、tests/gates、tests/security/releasekeys。
+release-keys-check:
+	$(GATES) release-keys $(if $(RELEASE),-require,)
+
 # 生产构建不得带 lingedge_testdouble 标签（此处从不传入 -tags）。
 build:
+	@$(MAKE) --no-print-directory release-keys-check
 	@rm -rf $(DIST)
 	@for os_arch in $(foreach a,$(ARCHS),linux/$(a)) windows/amd64; do \
 	  os=$${os_arch%/*}; arch=$${os_arch#*/}; \
@@ -231,6 +238,7 @@ edge-test:
 # 本目标当前只覆盖 Story 1.2 的静态门禁：G-6 固定口令、G-11 测试替身隔离、G-12 命令注入（Story 1.14 追加任务类型白名单 tasktype）、NFR-29 品牌。
 # Story 1.11 追加 G-5（日志脱敏扫描：向真实 logx 注入私钥/Token/主密钥/明文，断言输出无泄露，含负向自测）。
 # 威胁模型 §9 的其余门禁（G-1、G-3、G-7…G-10、G-13；Story 1.26 起 G-4 已接入：gates extract + tests/security 路径穿越向量集）尚未接入，由对应 Story 逐项追加到本目标；
+# Story 1.27 追加 release-keys（内置发行公钥守卫，含 -require 的发行模式）。
 # Story 1.23 追加三个信任域门禁（gates trustdomain：Server 代码路径不得存在加载发行清单私钥的逻辑；tests/security/trustdomain 对真实二进制符号表做同样检查，含负向样本）与 G-5 签名密钥材料日志脱敏用例。
 # Story 1.20 追加 G-2（多租户隔离矩阵 tests/security/tenant_isolation：真实临时 MySQL/Redis 上的真实进程内装配；缺 MySQL/Redis 时测试以「等待环境验证」跳过——
 # 跳过不代表通过，LINGEDGE_REQUIRE_MYSQL=1 / LINGEDGE_REQUIRE_REDIS=1 可把缺失视为失败）。
@@ -244,9 +252,11 @@ security:
 	$(GATES) trustdomain
 	$(GATES) flags
 	$(GATES) extract
+	$(GATES) release-keys
 	$(GO) test -count=1 ./tests/security/...
-	@echo "make security: 已覆盖 G-2（租户隔离矩阵）/G-4（Tools 解压：extract 门禁 + tests/security 路径穿越向量集）/G-5/G-6/G-11/G-12（含任务类型白名单 tasktype、Tools 白名单执行入口 safeexec 的元字符注入向量）/三个信任域（trustdomain）/CLI 旧标志名（flags，MIN-04）/品牌；未接入（随对应 Story 追加）: G-1 G-3 G-7 G-8 G-9 G-10 G-13" >&2
+	@echo "make security: 已覆盖 G-2（租户隔离矩阵）/G-4（Tools 解压：extract 门禁 + tests/security 路径穿越向量集）/G-5/G-6/G-11/G-12（含任务类型白名单 tasktype、Tools 白名单执行入口 safeexec 的元字符注入向量）/三个信任域（trustdomain）/发行公钥构建守卫（release-keys，Story 1.27 AC5；发行构建 RELEASE=1 缺失即失败）/CLI 旧标志名（flags，MIN-04）/品牌；未接入（随对应 Story 追加）: G-1 G-3 G-7 G-8 G-9 G-10 G-13" >&2
 
+# 发行流水线本体随 Story 1.34 交付；1.34 须让本目标先走 `make build RELEASE=1`（内置发行公钥守卫，缺失/含测试公钥即失败）。
 release:
 	$(call not_implemented,1.34)
 

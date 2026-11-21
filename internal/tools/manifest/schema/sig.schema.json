@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "manifest.json.sig / META/SHA256SUMS.sig（CF-6，tools-design §9.2/§9.3）",
+  "description": "清单签名对象 = \"LINGEDGE-MANIFEST-V1\\n\" ‖ manifest.json 原始字节；包签名对象 = \"LINGEDGE-PKG-V1\\n<component>\\n<version>\\n<platform>\\n\" ‖ SHA256SUMS 字节；key_rotation 背书对象 = \"LINGEDGE-KEYROT-V1\\n\" ‖ key_id\\nalg\\npublic_key\\nnot_before\\nnot_after\\nstatus\\n。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["key_id", "alg", "sig"],
+  "properties": {
+    "key_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"},
+    "alg": {"enum": ["ed25519"]},
+    "sig": {"type": "string", "pattern": "^[A-Za-z0-9+/]{86}==$"}
+  }
+}

@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "manifest.json（CF-6，tools-design §9.2）",
+  "description": "清单 schema_version=1。未知可选字段忽略（额外属性允许）；必需字段由对象内 critical 数组声明，解析方不认识其中任一名字即拒绝（Go 实现 internal/tools/manifest 是权威，本 schema 为其机器可读镜像）。",
+  "type": "object",
+  "required": ["schema_version", "channel", "sequence", "generated_at", "valid_until", "revoked_versions", "components"],
+  "properties": {
+    "schema_version": {"enum": [1]},
+    "channel": {"enum": ["stable", "beta"]},
+    "sequence": {"type": "integer", "minimum": 1},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "valid_until": {"type": "string", "format": "date-time"},
+    "critical": {"type": "array", "items": {"type": "string"}},
+    "revoked_versions": {
+      "type": "array",
+      "items": {"type": "object", "required": ["component", "version"],
+        "properties": {"component": {"$ref": "#/$defs/name"}, "version": {"$ref": "#/$defs/semver"}, "reason": {"type": "string", "maxLength": 512}}}
+    },
+    "components": {"type": "object", "propertyNames": {"$ref": "#/$defs/name"}, "additionalProperties": {"$ref": "#/$defs/component"}},
+    "key_rotation": {
+      "type": "object", "required": ["keys", "endorsements"],
+      "properties": {
+        "keys": {"type": "array", "minItems": 1, "maxItems": 8, "items": {"$ref": "keys.schema.json#/$defs/key"}},
+        "endorsements": {"type": "array", "items": {"type": "object", "required": ["key_id", "endorsed_by", "sig"],
+          "properties": {"key_id": {"type": "string"}, "endorsed_by": {"type": "string"}, "sig": {"type": "string"}}}}
+      }
+    }
+  },
+  "$defs": {
+    "name": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$"},
+    "semver": {"type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$"},
+    "constraint": {"type": "string", "minLength": 1, "maxLength": 256},
+    "constraintMap": {"type": "object", "additionalProperties": {"$ref": "#/$defs/constraint"}},
+    "requires": {
+      "type": "object",
+      "properties": {
+        "system": {"type": "object", "properties": {"os": {"type": "array", "items": {"type": "string"}}, "arch": {"type": "array", "items": {"type": "string"}},
+          "min_memory_mb": {"type": "integer", "minimum": 0}, "min_disk_mb": {"type": "integer", "minimum": 0}}},
+        "external": {"$ref": "#/$defs/constraintMap"}, "components": {"$ref": "#/$defs/constraintMap"},
+        "runtime": {"$ref": "#/$defs/constraintMap"}, "peer": {"$ref": "#/$defs/constraintMap"}
+      }
+    },
+    "artifact": {
+      "type": "object", "required": ["url", "sha256", "size"],
+      "properties": {"url": {"type": "string", "pattern": "^https://[^\\s@]+$"}, "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "size": {"type": "integer", "minimum": 1, "maximum": 8589934592}, "critical": {"type": "array", "items": {"type": "string"}}}
+    },
+    "variant": {
+      "type": "object", "required": ["artifacts"],
+      "properties": {
+        "critical": {"type": "array", "items": {"type": "string"}},
+        "requires": {"$ref": "#/$defs/requires"},
+        "artifacts": {"type": "object", "minProperties": 1, "propertyNames": {"enum": ["linux-amd64", "linux-arm64", "any"]}, "additionalProperties": {"$ref": "#/$defs/artifact"}}
+      }
+    },
+    "version": {
+      "type": "object", "required": ["version", "variants"],
+      "properties": {
+        "version": {"$ref": "#/$defs/semver"}, "released_at": {"type": "string", "format": "date-time"},
+        "min_upgrade_from": {"$ref": "#/$defs/semver"}, "notes_url": {"type": "string", "pattern": "^https://"},
+        "critical": {"type": "array", "items": {"type": "string"}},
+        "requires": {"$ref": "#/$defs/requires"},
+        "conflicts": {"type": "array", "items": {"type": "object", "required": ["component"], "properties": {"component": {"$ref": "#/$defs/name"}, "version": {"$ref": "#/$defs/constraint"}}}},
+        "ports": {"type": "array", "items": {"type": "object", "required": ["proto", "port"],
+          "properties": {"proto": {"enum": ["tcp", "udp"]}, "port": {"type": "integer", "minimum": 1, "maximum": 65535}, "bind": {"type": "string"}, "purpose": {"type": "string"}, "conditional": {"type": "boolean"}}}},
+        "migrations": {"type": "object", "properties": {"schema_from": {"type": "string"}, "schema_to": {"type": "string"}, "classes": {"type": "array", "items": {"type": "string"}},
+          "irreversible_count": {"type": "integer", "minimum": 0}, "backup_required": {"type": "boolean"}}},
+        "config_schema_version": {"type": "integer", "minimum": 0},
+        "variants": {"type": "object", "minProperties": 1, "additionalProperties": {"$ref": "#/$defs/variant"}}
+      }
+    },
+    "component": {
+      "type": "object", "required": ["status"],
+      "properties": {
+        "status": {"enum": ["available", "unreleased", "builtin"]}, "description": {"type": "string"}, "internal": {"type": "boolean"},
+        "builtin_in": {"$ref": "#/$defs/name"}, "critical": {"type": "array", "items": {"type": "string"}},
+        "versions": {"type": "array", "items": {"$ref": "#/$defs/version"}}
+      }
+    }
+  }
+}

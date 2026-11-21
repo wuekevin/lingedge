@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/wuekevin/lingedge/internal/tools/manifest"
 )
 
 // globalOpts 是全局标志（tools-design §3）。
@@ -90,12 +92,17 @@ func (r *Run) finish(cmd *cobra.Command, err error) int {
 	defer r.log.close()
 	exit := ExitOK
 	var ce *Error
+	var me *manifest.Error
 	if err == nil && r.ctx.Err() != nil && r.result == nil && !r.helpDone {
 		err = context.Canceled
 	}
 	if err != nil {
 		switch {
 		case errors.As(err, &ce):
+			exit = ce.Exit
+		case errors.As(err, &me):
+			// 发行信任域①的验证失败（验签/sequence/吊销/过期/轮换/包内签名）：退出码 5 的真实生产者。
+			ce = VerifyError(me)
 			exit = ce.Exit
 		case errors.Is(err, context.Canceled):
 			ce = newErr(ExitSigint, "interrupt.sigint", "已被用户中断（SIGINT）", "再次运行以继续；若有未完成事务，先运行 lingedge recover")

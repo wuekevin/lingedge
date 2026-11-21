@@ -9,6 +9,9 @@ package gates
 
 import (
 	"bytes"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
 	"io"
 	"io/fs"
 	"os"
@@ -370,7 +373,7 @@ func TestGateCommandsNegativeAndCleanup(t *testing.T) {
 	}
 	dst := copyRepo(t)
 	// 门禁在 gates 目录自身被跳过；副本里的 docs/ 不存在，品牌与口令门禁只看代码与配置。
-	for _, g := range []string{"arch", "testdouble", "passwords", "brand", "shell", "repo", "tasktype", "trustdomain", "flags", "extract"} {
+	for _, g := range []string{"arch", "testdouble", "passwords", "brand", "shell", "repo", "tasktype", "trustdomain", "flags", "extract", "release-keys"} {
 		if code, out := runGate(t, dst, g); code != 0 {
 			t.Fatalf("干净副本的 %s 门禁应通过，退出码 %d:\n%s", g, code, out)
 		}
@@ -441,6 +444,15 @@ func TestGateCommandsNegativeAndCleanup(t *testing.T) {
 		{
 			name: "非白名单位置直接解析归档", gate: "extract", wantRule: "extract-archive", wantText: "G-4",
 			files: map[string]string{"internal/tools/downloader/unpack.go": "package downloader\n\nimport \"archive/tar\"\n\nvar _ = tar.TypeReg\n"},
+		},
+		{
+			// 生产构建「含测试公钥即构建失败」（Story 1.27 AC5、NFR-1）：§9.6 golden 测试公钥被注入为内置发行公钥。
+			name: "内置发行公钥含测试公钥", gate: "release-keys", wantRule: "release-keys-test-pubkey", wantText: "NFR-1",
+			files: map[string]string{"internal/tools/manifest/builtin/keys.json": `{"schema_version":1,"keys":[{"key_id":"rel-2026-a","alg":"ed25519","public_key":"P3pE/lvUPOLOFWJtF/1sxj4LU923fmJQU9Utz1K5ghc=","status":"active"}],"revoked_key_ids":[]}`},
+		},
+		{
+			name: "builtin 目录混入其他文件", gate: "release-keys", wantRule: "release-keys-stray-file", wantText: "go:embed",
+			files: map[string]string{"internal/tools/manifest/builtin/dev-keys.json": "{}"},
 		},
 		{
 			name: "shell -c", gate: "shell", wantRule: "shell-c",
@@ -596,5 +608,32 @@ func Find(ctx context.Context, a, b scope.Scope) error { return nil }
 	put(t, dst, "internal/website/internal/service/ok.go", "package service\n\nimport \"context\"\n\nfunc Do(ctx context.Context) {}\n")
 	if code, out := runGate(t, dst, "repo"); code != 0 {
 		t.Fatalf("合法写法不应被 repo 门禁拦截，退出码 %d:\n%s", code, out)
+	}
+}
+
+// 发行构建（-require）缺少内置公钥 keys.json 即失败；注入非测试公钥后通过（Story 1.27 AC5）。
+func TestReleaseKeysGateRequireMode(t *testing.T) {
+	dst := copyRepo(t)
+	if code, out := runGate(t, dst, "release-keys"); code != 0 {
+		t.Fatalf("开发构建（缺失 keys.json）应放行，退出码 %d:\n%s", code, out)
+	}
+	code, out := runGate(t, dst, "release-keys", "-require")
+	if code != 1 || !strings.Contains(out, "[release-keys-missing]") {
+		t.Fatalf("发行构建缺失 keys.json 必须失败，实际 %d:\n%s", code, out)
+	}
+	pub, _, err := ed25519.GenerateKey(rand.Reader) // 运行期随机公钥，代表发行方真实公钥
+	if err != nil {
+		t.Fatal(err)
+	}
+	put(t, dst, "internal/tools/manifest/builtin/keys.json",
+		`{"schema_version":1,"keys":[{"key_id":"rel-2026-a","alg":"ed25519","public_key":"`+base64.StdEncoding.EncodeToString(pub)+`","status":"active"}],"revoked_key_ids":[]}`)
+	if code, out := runGate(t, dst, "release-keys", "-require"); code != 0 {
+		t.Fatalf("注入非测试公钥后发行构建应通过，退出码 %d:\n%s", code, out)
+	}
+	// 注入后其余门禁（testdouble 对产物字符串的扫描、trustdomain 等）仍应通过。
+	for _, g := range []string{"testdouble", "trustdomain", "passwords"} {
+		if code, out := runGate(t, dst, g); code != 0 {
+			t.Fatalf("注入真实形态公钥后 %s 门禁应通过，退出码 %d:\n%s", g, code, out)
+		}
 	}
 }

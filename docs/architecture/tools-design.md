@@ -120,6 +120,7 @@ lingedge install <component> [flags]  # component: server|admin-web|console|webs
     --version <semver>                #   默认：通道内满足约束的最高稳定版
     --channel stable|beta             #   默认 stable
     --offline <bundle.tar>            #   从离线可信发行包安装（同样验签，§9.4）
+    --allow-expired-manifest          #   仅与 --offline 联用：放行已过 valid_until 的清单（气隙环境；告警；sequence/签名/吊销仍生效，§9.2）
     --set key=value (可重复)          #   组件初始配置项（经 schema 校验，非任意文本注入）
     --mode static|ssr                 #   仅 website（变体）
     --skip-start                      #   仅物化，不启动（调试）
@@ -130,7 +131,7 @@ lingedge update check [--channel …]   # 获取签名清单，列出可升级�
 lingedge update <component>           # 例：update node、update server
 lingedge update --all
 lingedge update self                  # 升级 lingedge 自身（原子替换 /usr/local/bin/lingedge，保留 .prev）
-    通用标志：--version、--offline <bundle>、--accept-irreversible（§17.3）、--no-backup（仅非 server 组件且需 --yes）、--plan-only（等价 --dry-run）
+    通用标志：--version、--offline <bundle>、--allow-expired-manifest（仅与 --offline 联用）、--accept-irreversible（§17.3）、--no-backup（仅非 server 组件且需 --yes）、--plan-only（等价 --dry-run）
 lingedge update node --apply-staged
                                       # 【内部入口】仅 root；供 lingedge-node-upgrade.service 调用（§15.3），固定读取 staging 目录中的 upgrade.request
 
@@ -301,6 +302,8 @@ Bubble Tea 复选框列表：`Server / Admin Web / Console / Website / Node / DN
 ```
 
 - 多公钥并存支持轮换：`active` 与 `retired` 在重叠期内都可验证**已有**包；`revoked` 一律拒绝。新增公钥通过**新版 Tools 发行**（Tools 自身用旧 active key 签名）更新；另可在清单内携带 `key_rotation` 段（新公钥 + 由旧 active key 签名的背书），验证通过后落盘到 `/var/lib/lingedge/tools/trust/keys.d/`。私钥离线保管，不在发布流水线可达的机器上。
+- **`key_rotation` 段格式（Story 1.27，CF-6）**：清单顶层可选字段 `"key_rotation": {"keys":[<新公钥条目，格式同上，status 必须为 active>], "endorsements":[{"key_id":"<新公钥>","endorsed_by":"<旧 active key_id>","sig":"<base64>"}]}`。背书签名输入 = `"LINGEDGE-KEYROT-V1\n"` ‖ `key_id\nalg\npublic_key\nnot_before\nnot_after\nstatus\n`（缺省字段为空串；覆盖新公钥全部语义字段，背书后无法改有效期/状态）。**只有清单本身验签通过后**才处理该段；背书者必须是当前可信集中**未吊销、active、generated_at 在其有效期内**的旧公钥；新 key_id 不得与已有公钥同名异钥、不得在吊销集内；任一条背书不成立则**整份清单被拒绝**（退出码 5）。落盘发生在整条校验链成功之后（`Verifier.Commit`）：`keys.d/<key_id>.json`（格式同 keys.json，文件 0600、目录 0700，原子写）；落盘前后重放同一清单幂等。`keys.d/` 内文件也可携带 `revoked_key_ids` 追加吊销；`keys.d` 中与内置公钥同名异钥、符号链接、group/other 可写的文件一律使加载失败（失败关闭）。
+- **公钥有效期窗口**以清单的 `generated_at`（包签名则为其所属清单的 `generated_at`）判定，而非「现在」：旧清单/离线 bundle 不因公钥后来到期而无法验证，且一把公钥签不出生成时间在其窗口之外的清单；公钥泄露的补救是吊销，不靠时钟。窗口为 `[not_before, not_after)`。
 - 具体 Ed25519 实现：Go 标准库 `crypto/ed25519`（无第三方依赖）。
 
 ### 9.2 清单 `manifest.json` 与 `manifest.json.sig`
@@ -376,13 +379,18 @@ Bubble Tea 复选框列表：`Server / Admin Web / Console / Website / Node / DN
 ```
 
 要点：
+- **schema 规则（CF-6）**：`schema_version` 目前只能是 1；`channel ∈ stable|beta`；`sequence` 为 ≥1 的整数；`valid_until` 必须晚于 `generated_at`；`revoked_versions` 与 `components` 必填（`revoked_versions` 缺失即拒绝，防止「静默没有吊销」）；每个 `available` 组件的每个版本条目必须有 `variants`，每个 variant 至少一个 `artifacts`（平台键 `linux-amd64|linux-arm64|any`），`url` 为不含凭据的 https、`sha256` 为 64 位小写十六进制、`size ∈ [1, 8GiB]`（上例的 `0`/`<hex>`/`…` 仅为格式示意，真实清单不允许）。重复 JSON 键、超过 24 层嵌套、超过 8 MiB 一律拒绝。
+- **未知必需字段拒绝、未知可选字段忽略**：对象（顶层、component、version 条目、variant、artifact）可带 `"critical": ["<字段名>", …]`——producer 把「接收方必须理解」的字段名列入其中；解析方只要不认识其中任一名字即拒绝整份清单（升级 Tools 后重试）；未列入 `critical` 的未知字段被忽略。
+- 版本约束为本节「semver 范围语法子集」（见 §10），在 schema 校验时即解析，非法约束拒绝整份清单。
 - `status ∈ available | unreleased | builtin`；`unreleased` → 退出码 7，`builtin` → 退出码 8。
 - `sha256` 与签名覆盖关系：清单签名已覆盖所有 `sha256`；因此校验链为「清单验签 → 包 SHA256 → 包内逐文件 SHA256SUMS（及其签名）」。
 - `size` 用于下载上限（超出即中止）。`min_*` 数值由发行方填写，Tools 不内置。
 - `migrations` 为**预告**；以新二进制的 `lingedge-server migrate plan --json` 实际结果为准，二者冲突取更严格级别（§17.2）。
-- **sequence**：清单的单调递增整数。Tools 在 `/var/lib/lingedge/tools/trust/state` 记录已见最大 sequence；新清单 `sequence < 已见` 视为回滚攻击，退出码 5。相等允许（幂等重取）。
-- **valid_until**：清单过期时间（冻结攻击防护）。过期默认拒绝并提示；`--offline` 包可经 `--allow-expired-manifest` 显式放行并告警（气隙环境）。**注意：该过期仅作用于 Tools 的安装/升级决策，与节点配置签名（无过期，R-4）无关。**
+- **sequence**：清单的单调递增整数。Tools 在 `/var/lib/lingedge/tools/trust/state` 记录**每个通道**已见最大 sequence（JSON：`{"schema_version":1,"max_sequence":{"stable":42,"beta":7}}`，0600，原子写；stable 与 beta 是各自独立的序列，互不阻断）；新清单 `sequence < 该通道已见` 视为回滚攻击，退出码 5。相等允许（幂等重取）。`trust/state` 损坏/权限过宽/被替换为符号链接时**失败关闭**（退出码 3），绝不当作「从未见过任何清单」（否则删改该文件即可旁路回滚防护）。清单 `channel` 必须等于请求的 `--channel`，否则退出码 5。
+- **valid_until**：清单过期时间（冻结攻击防护）。过期默认拒绝并提示（`now >= valid_until` 即过期）；`--offline` 包可经 `--allow-expired-manifest` 显式放行并告警（气隙环境）；`--allow-expired-manifest` 不带 `--offline` 是用法错误（退出码 2），在线路径永不放行过期清单；放行过期不放行回滚——sequence、签名、吊销检查仍生效。**注意：该过期仅作用于 Tools 的安装/升级决策，与节点配置签名（无过期，R-4）无关。**
 - 版本吊销 `revoked_versions`：命中则拒绝安装/作为升级目标，已装则 `doctor` 告警。
+
+**构建策略（Story 1.27，NFR-1）**：内置公钥集由发行流水线在构建前注入 `internal/tools/manifest/builtin/keys.json`（`go:embed`，不入库）。`gates release-keys`（`make security` 内；`make build` 前置；`RELEASE=1` 的 `make build` 带 `-require`；`make release` 本体属 Story 1.34，须经它）：keys.json **含测试公钥**（与 `scripts/gates/data/test-release-pubkeys.txt` 指纹相同）、key_id 带 test/golden/demo 字样、含私钥/种子字段、`builtin/` 下有其他文件、或没有 active 公钥 → 任何构建失败；keys.json **缺失** → 发行构建失败，开发构建放行（产物内置零公钥，运行期对任何清单以 `no_builtin_keys` 失败关闭，退出码 5）。测试公钥/私钥只允许在 `tests/`、`_test.go`、`testdata/` 与 `lingedge_testdouble` 标签内；G-11 testdouble 门禁同时把这些测试公钥（base64/hex）当作固定假数据扫描生产源码与产物。真实公钥待发行签名人确认（UD-3）。
 
 ### 9.3 包格式
 
@@ -418,7 +426,9 @@ offline-bundle/
 6. 解压前读取 `META/SHA256SUMS(.sig)`，验证其签名；解压时逐文件边写边校验 SHA256（§18.1 的安全解压）。
 7. 校验 `META/package.json` 的 component/version/platform 与清单一致。
 
-**签名对象一览（唯一规范，ADR-012 引用本节）**：清单 = 对 `manifest.json` **文件原始字节**（不做 canonical JSON）加域前缀签名；吊销 = 内置/`trust/keys.d/` 的 `keys.json.revoked_key_ids` ∪ 清单 `revoked_versions`（清单内**不含** `revoked_key_ids`）；包 = `.tar.gz`；包内签名对象见 §9.3。
+校验顺序的代码落点：步骤 1–4 在 `internal/tools/manifest`（`LoadTrust` → `Verifier.Verify` → `Manifest.CheckTarget`），步骤 6 的包内签名在 `Verifier.VerifyPackageSums`，步骤 7 在 `PackageMeta.Matches`；步骤 5 与解压（`security.SafeExtract`）属 downloader（Story 1.28）。失败映射：验证失败一律退出码 5，本地信任库损坏退出码 3，参数不合法退出码 2（`cli.VerifyError`）。
+
+**签名对象一览（唯一规范，ADR-012 引用本节）**：清单 = 对 `manifest.json` **文件原始字节**（不做 canonical JSON）加域前缀签名；吊销 = 内置/`trust/keys.d/` 的 `keys.json.revoked_key_ids` ∪ 清单 `revoked_versions`（清单内**不含** `revoked_key_ids`）；包 = `.tar.gz`；包内签名对象见 §9.3；`key_rotation` 背书对象见 §9.1（域前缀 `LINGEDGE-KEYROT-V1\n`，与 Server 的 `LINGEDGE-REVISION-V1`/`LINGEDGE-KEYSET-V1` 互不相同）。机器可读 schema 与 CF-6 冻结记录：`internal/tools/manifest/schema/*.json`、`docs/bmad/contract-changes/CF-6.md`。
 
 ### 9.6 示例向量（**仅测试，非发行密钥**；供 `manifest`/`downloader` 包的 golden 测试，放入 `internal/tools/manifest/testdata/vectors.json`）
 
@@ -435,6 +445,8 @@ offline-bundle/
 | 包内 `META/SHA256SUMS` 字节 | `5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03  payload/hello.txt` + `\n`（`payload/hello.txt` 内容为 `hello\n`） |
 | 包签名输入 | `"LINGEDGE-PKG-V1\nnode\n0.1.0\nlinux-amd64\n"` ‖ `SHA256SUMS` 字节 |
 | `META/SHA256SUMS.sig` 的 `sig`（base64） | `YLlLdkS0mzZ4zZYLbph1d34DZ/CjhSEr1CSslVVc5PRjIwHBaJHJwYfsORDZq+X2EKkGCIHGquM08a9sn/VqAA==` |
+
+Story 1.27 已按本节落盘 `internal/tools/manifest/testdata/vectors.json`（key_id 取 `golden-test-1`），并由 `golden_test.go` 经生产验签路径与 Go 复算双重断言（逐字节翻转清单/签名/SHA256SUMS 均失败）；本机的 Ruby 2.6/LibreSSL 不支持 Ed25519，Ruby 侧的验签结论沿用上表（1.34 流水线交叉验证）。
 
 测试断言：验签通过；任一输入字节翻转 → 失败；`key_id` 不在公钥集或在 `revoked_key_ids` → 失败；`sequence` 小于本地已见值 → 退出码 5。该种子私钥**只允许出现在测试代码与本文**，生产构建扫描不得出现该种子/公钥（G-6/ADR-023 的固定数据检查）。
 

@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"embed"
+	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"go/build/constraint"
 	"go/parser"
@@ -78,7 +80,7 @@ var buildTargets = []struct{ goos, goarch string }{{"linux", "amd64"}, {"linux",
 // runTestdouble 实现 G-11（NFR-1、ADR-023 §A）：生产构建不得含测试替身与固定假数据。
 // 源码层：替身位置/构建标签/生产代码引用；构建层：go list -deps、产物符号与字符串扫描。
 func runTestdouble(root string, opts options) ([]Finding, error) {
-	markers := loadLines("fake-data-markers.txt")
+	markers := append(loadLines("fake-data-markers.txt"), testPubKeyMarkers()...)
 	var out []Finding
 	fset := token.NewFileSet()
 
@@ -236,4 +238,15 @@ func scanBuiltBinaries(root string, markers []string) ([]Finding, error) {
 		}
 	}
 	return out, nil
+}
+
+// testPubKeyMarkers：测试发行公钥（data/test-release-pubkeys.txt，Story 1.27）的 base64 与 hex 表示也是固定假数据——
+// 其私钥种子公开在测试里，生产源码、配置与生产产物里不得出现（NFR-1）。门禁自身目录与测试/文档位置不在扫描范围内。
+func testPubKeyMarkers() []string {
+	var out []string
+	for raw := range testReleasePubKeys() {
+		out = append(out, base64.StdEncoding.EncodeToString([]byte(raw)), hex.EncodeToString([]byte(raw)))
+	}
+	sort.Strings(out)
+	return out
 }

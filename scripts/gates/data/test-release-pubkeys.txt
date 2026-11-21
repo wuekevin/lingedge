@@ -1,0 +1,15 @@
+# 测试发行公钥指纹（Story 1.27 AC5，gates release-keys）：这些公钥的私钥（确定性种子）公开存在于 tests/、_test.go 与 tools-design §9.6，
+# 因此任何构建都不得把它们内置为发行公钥（internal/tools/manifest/builtin/keys.json）。
+# 格式：每行「<标准 base64 公钥> # 说明」；# 开头为注释。新增测试密钥必须登记于此（manifest 包的 TestMain 与 cli 单测会机器核对，遗漏则测试失败）。
+P3pE/lvUPOLOFWJtF/1sxj4LU923fmJQU9Utz1K5ghc= # golden (tools-design §9.6)
+c1yzxo+9eui/8tpHcDbWTNbg3mdpRU+uUgoyZoHHO5w= # internal/tools/manifest 单测: a
+qBov8h7h/2eU8/CgezsKbvJHOO2LkdnWA10JFj+lZko= # internal/tools/manifest 单测: old
+tfqCWGLrZuQndhVcg3JzZrSrOfUq/J4+ZVY2ysDsbwE= # internal/tools/manifest 单测: x
+pYE2PaZaMyH7BlrrzuXcbhe+F9N3oJQ3vIh09IusMrs= # internal/tools/manifest 单测: stranger
+EZdpCCt26VEPclckZ/kj/a6LPvY5RiH8LiYbtdcMuho= # internal/tools/manifest 单测: b
+RtR98kZE6Q5I/9U2jHZB8e99GU7XldpMl5L+Y/7RQuM= # internal/tools/manifest 单测: evil
+TOS11h8xcTLVwzBYPublsXI0XgN1olAlAb+lYS8ZI2k= # internal/tools/manifest 单测: c
+vjapK4/VledQvijoPrj9lIbviKvHFFD+i1qxbGSINe4= # internal/tools/manifest 单测: z
+cHrPiW4RVyu+MamV/cNjreGdMYHy2l3hF7UjLzB5t5E= # internal/tools/cli 单测: active
+P3VsoQRHeivHgYIy3JSoWsMr9BW+iLnx84Y8Zy+1YgY= # internal/tools/cli 单测: revoked
+lE+kL18gwDYORAp8isXUPnYxWy/TBuCUi2ct+2yecRE= # internal/tools/cli 单测: stranger

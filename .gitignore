@@ -42,3 +42,6 @@ go.work.sum
 
 # BMAD 本地配置与渲染产物
 /_bmad/
+
+# 内置发行公钥：由发行流水线在构建前注入，仓库内不存在任何发行公钥（Story 1.27 AC5、UD-3）
+internal/tools/manifest/builtin/keys.json

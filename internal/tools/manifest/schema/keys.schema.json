@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "keys.json / trust/keys.d/*.json（CF-6，tools-design §9.1）",
+  "description": "严格格式：不允许未知字段（受信配置，拼写错误必须暴露）。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "keys", "revoked_key_ids"],
+  "properties": {
+    "schema_version": {"enum": [1]},
+    "keys": {"type": "array", "items": {"$ref": "#/$defs/key"}},
+    "revoked_key_ids": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/keyId"}}
+  },
+  "$defs": {
+    "keyId": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"},
+    "key": {
+      "type": "object", "additionalProperties": false, "required": ["key_id", "alg", "public_key", "status"],
+      "properties": {
+        "key_id": {"$ref": "#/$defs/keyId"}, "alg": {"enum": ["ed25519"]},
+        "public_key": {"type": "string", "pattern": "^[A-Za-z0-9+/]{43}=$"},
+        "not_before": {"type": "string", "format": "date-time"}, "not_after": {"type": "string", "format": "date-time"},
+        "status": {"enum": ["active", "retired", "revoked"]}
+      }
+    }
+  }
+}

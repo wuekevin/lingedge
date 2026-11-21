@@ -50,6 +50,12 @@ func commandSpecs() []*cmdSpec {
 				return e
 			}
 		}
+		// 过期清单只能经离线 bundle 显式放行（tools-design §9.2；在线路径永远不得放行过期清单）。
+		if inv.cmd.Flags().Lookup("allow-expired-manifest") != nil && inv.flag("allow-expired-manifest") {
+			if inv.str("offline") == "" {
+				return usageErr("usage.flag_requires", "--allow-expired-manifest 必须与 --offline <bundle> 一起使用", "仅气隙环境的离线 bundle 可放行已过期的清单（会告警）；在线路径请获取最新清单")
+			}
+		}
 		return nil
 	}
 
@@ -78,6 +84,7 @@ func commandSpecs() []*cmdSpec {
 			str(fs, "version", "", "组件版本（semver）；缺省为通道内满足约束的最高稳定版")
 			str(fs, "channel", "stable", "发行通道 stable|beta")
 			str(fs, "offline", "", "从离线可信发行包安装（同样验签）")
+			fs.Bool("allow-expired-manifest", false, "仅与 --offline 联用：放行已过 valid_until 的清单（气隙环境；会告警，sequence/签名/吊销检查仍生效）")
 			fs.StringArray("set", nil, "组件初始配置项 key=value（可重复，经 schema 校验）")
 			str(fs, "mode", "", "仅 website：static|ssr")
 			fs.Bool("skip-start", false, "只物化，不启动（调试）")
@@ -126,6 +133,7 @@ func commandSpecs() []*cmdSpec {
 			str(fs, "version", "", "目标版本（semver）")
 			str(fs, "channel", "stable", "发行通道 stable|beta")
 			str(fs, "offline", "", "离线 bundle")
+			fs.Bool("allow-expired-manifest", false, "仅与 --offline 联用：放行已过 valid_until 的清单（气隙环境；会告警，sequence/签名/吊销检查仍生效）")
 			fs.Bool("accept-irreversible", false, "接受不可逆迁移（非交互必须显式传入）")
 			fs.Bool("no-backup", false, "跳过升级前备份（仅非 server 组件，且需 --yes）")
 			fs.Bool("plan-only", false, "等价 --dry-run：只输出升级计划")
