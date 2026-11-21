@@ -98,12 +98,12 @@ context:
 
 - **待 1.21 写 audit_logs**：`updateTenant`/`addTenantMember`/`putTenantQuotas` 与 acting-as 请求目前只有结构化日志（`audit_logs_written=false`）；1.21 须消费 `httpx.ActingAsFrom` 同事务写 `actor_user_id + tenant_id + acting_as`，并替换过渡审计钩子；`cancelTask` 须转为矩阵的 `Driven`（当前断言它被审计钩子拒绝，1.21 交付后该断言会失败，迫使转换）。 【Story 1.21 已收口：审计记录器 internal/platform/audit 在业务事务内写 audit_logs，过渡的结构化日志与 adminAuditor 已移除；见 1-21 说明】
 - **createTenant（P5）与租户用户账号创建未实现**：`addTenantMember` 只能加入已存在的租户用户；M1 的租户用户由安装向导/运维经库写入。
-- **配额不强制、无 `used`**：强制与用量统计在 Story 6.9；`members`/`api_tokens` 等配额目前对 `addTenantMember`/令牌创建无任何约束（有测试断言「不强制」，避免假装强制）。
+- **配额不强制、无 `used`**：强制与用量统计在 Story 6.9；`members`/`api_tokens` 等配额目前对 `addTenantMember`/令牌创建无任何约束（有测试断言「不强制」，避免假装强制）。 【Story 1.22b 已收口：`api_tokens` 已在令牌创建时强制（其余键与 `used` 仍属 6.9）；见 1-22b-遗留项清理.md】
 - **`placement.default_cluster_uids` 未种、未被任何代码读取**：由后续建站 Story 使用；本 Story 只保证租户可见响应不含集群标识。
 - **任务中心的租户视图只做键名剔除**：`error.message` 等自由文本里若出现节点主机名/IP（由各任务处理函数写入）不会被剔除——属于各任务类型 Story 的写入纪律；矩阵的断言器对已种入的内部取值做子串扫描，新增任务类型的 Story 应在其驱动里种入对应反例。
 - **每个租户资源 Story 必须扩充矩阵**（`docs/testing/tenant-isolation-matrix.md` §2）：新增已注册的 tenant|either 路由未登记，矩阵即失败——这是有意的，也是 DoD 的一部分。
 - **Registry 的 Exempt 是人工登记**：理由与引用的专项测试需评审把关（门禁只核对引用函数存在）。
-- `tests/apistack` 的装配是 `cmd/lingedge-server` 装配的镜像：漂移由 `TestRegisteredRoutesMatchServerBinary`（路由集合）与 `TestTenantScopeCoverage`（真实路由表的 Scope 覆盖）兜底，但钩子装配本身（`Hooks` 选项）仍是两处各写一次。
+- `tests/apistack` 的装配是 `cmd/lingedge-server` 装配的镜像：漂移由 `TestRegisteredRoutesMatchServerBinary`（路由集合）与 `TestTenantScopeCoverage`（真实路由表的 Scope 覆盖）兜底，但钩子装配本身（`Hooks` 选项）仍是两处各写一次。 【Story 1.22b 已收口：已收敛为同一个装配根 `cmd/lingedge-server/assembly`（生产与测试调用同一个构造函数）；见 1-22b-遗留项清理.md】
 
 ## 开发记录
 

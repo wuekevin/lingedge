@@ -55,7 +55,7 @@ context:
 | scheduler | 仅生命周期骨架：不调度任何任务 | 1.15 |
 | worker | 仅生命周期骨架：不消费 `tasks` | 1.14 |
 
-metrics（`metrics.listen`，缺省 127.0.0.1:9180，非回环地址会告警）对所有角色常开。幂等键保留期清理（`idempotency.Store.DeleteExpired`）等内部周期作业**不在本 Story 登记**，归 1.14/1.15（`assembly.go` 注释已标注）。
+metrics（`metrics.listen`，缺省 127.0.0.1:9180，非回环地址会告警）对所有角色常开。幂等键保留期清理（`idempotency.Store.DeleteExpired`）等内部周期作业**不在本 Story 登记**，归 1.14/1.15（`assembly.go` 注释已标注）。 【Story 1.22b 已收口：`metrics.listen` 现由 config 层直接拒绝非回环（不再只告警），`server.Run` 纵深防御再拒一次；见 1-22b-遗留项清理.md】
 
 ## Tasks & Acceptance
 
@@ -109,7 +109,7 @@ metrics（`metrics.listen`，缺省 127.0.0.1:9180，非回环地址会告警）
 |---|---|---|
 | 探针无法发现 dirty/校验和（app 看不到 `schema_migrations_runs`） | low | accept：已在探针注释与本文登记；这类问题由 `migrate status`（迁移凭据）检查，迁移中途失败仍表现为 Applied<Latest 而不就绪 |
 | 未升级到 000014 的库，就绪检查 503/unknown，而非更友好的提示 | low | accept（fail-closed 是期望）；`docs/bmad/contract-changes/CC-3` 已写明升级路径是普通 `migrate up` |
-| `metrics.listen` 允许配置为非回环地址 | low | 只告警不拒绝（config 校验属 1.4 范围）；若要强制回环应由 config 层统一收紧，留待安全加固 |
+| `metrics.listen` 允许配置为非回环地址 | low | 只告警不拒绝（config 校验属 1.4 范围）；若要强制回环应由 config 层统一收紧，留待安全加固 | 【Story 1.22b 已收口：config 层已拒绝非回环（architecture §7/tools-design §10.4 没有受控的非回环场景，故无放开开关）；见 1-22b-遗留项清理.md】
 | 优雅停机排空依赖 `http.Server.Shutdown`：Hijack/长连接不在其管理内 | low | 现无此类路由；1.14 之后若出现 SSE/WebSocket 需 `RegisterOnShutdown` 逐个处理，已作为遗留 |
 | 同时对 grpc 角色的骨架不监听 9443/9444，Tools 安装后的 `health.server` 检查若期望这些端口会不通过 | low | 设计如此（3.13 之前没有 gRPC）；文档与日志均标明，未伪造监听 |
 | `LINGEDGE_*` 未知变量导致启动失败 | info | 已有行为（1.4）；本 Story 在文档登记，不放宽 |

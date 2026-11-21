@@ -75,7 +75,7 @@ context:
 - **指标**：自带 Prometheus 文本 0.0.4 输出（计数器/直方图/仪表，route 标签为路由模板、未命中记 `unmatched`，基数有界），`NewMetricsServer(addr)` 仅服务 `GET /metrics`，默认 `DefaultMetricsAddr=127.0.0.1:9180`；监听与关闭由 1.13 装配。
 - **访问日志/脱敏**：只记路径（不记查询串、请求头、请求体），其余字段经 `logx` 脱敏核心；panic 值与栈经 `logx.PanicFields` 脱敏；访问日志用 defer 记录，panic 的请求也被记为 500。
 - **CORS**：精确白名单（拒绝 `*`、`null`、通配、路径、userinfo），回显白名单源并带 `Vary: Origin`/`Allow-Credentials`，预检非白名单 403；安全头 nosniff/DENY/no-referrer/CSP `default-src 'none'; frame-ancestors 'none'`/`Cache-Control: no-store`。HSTS 由 Nginx 终止 TLS 时设置（本进程只在 127.0.0.1 后面）。
-- **其他行为收紧**：不做尾斜杠/大小写重定向；405 折叠为 404（不泄漏路由存在性）；X-Forwarded-For 只信任 `127.0.0.1/::1`（`Options.TrustedProxies` 可改）；`BindJSON` 要求 `application/json`、体积受限（默认 1 MiB）、拒绝未知字段与多余内容、错误体不回显请求内容。
+- **其他行为收紧**：不做尾斜杠/大小写重定向；405 折叠为 404（不泄漏路由存在性）；X-Forwarded-For 只信任 `127.0.0.1/::1`（`Options.TrustedProxies` 可改）；`BindJSON` 要求 `application/json`、体积受限（默认 1 MiB）、拒绝未知字段与多余内容、错误体不回显请求内容。 【Story 1.22b 已收口：生产装配现经 `server.trusted_proxies` 配置；见 1-22b-遗留项清理.md】
 - **门禁**：新增 `[gin-raw-engine]`（只有 `internal/platform/httpx` 可 `gin.New/Default`，别名导入同样识别；`tests/gates` 含 3 个负向样本与 3 个合法写法）；`openapi-check` 新规则 `path-param-name`、`idempotency-422`、`route-*`，各带负向样本。
 
 ### 契约冲突与处理（CC-2）

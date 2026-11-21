@@ -79,7 +79,7 @@ context:
 ## 等待环境验证（本机通过不代表这些已验证）
 
 1. **MySQL 8.0.16（最低版本）与 Linux 验收机**重跑 `tests/integration/auth`、`tests/integration/server`、`make migrate-test`：`api_tokens` 的 `(tenant_id <=> ?)`、`CAST(? AS JSON)`、`FOR UPDATE` 行为在 8.0.16 上的表现。
-2. **真实反向代理下的来源 IP**：本机用 `httptest` 监听 127.0.0.1 + 配置 `TrustedProxies` 验证 `X-Forwarded-For` 取值规则；生产装配（`internal/platform/server`）沿用 `httpx.Options.TrustedProxies` 的默认值（仅信任本机反代 127.0.0.1/::1；配置文件尚未暴露该项，属 1.12/1.13 既有现状）。Nginx 与 Server 同机部署时成立；反代不在本机时 `allowed_cidrs` 会取到反代地址——须在真实部署形态上验证，必要时另开 Story 暴露该配置项。
+2. **真实反向代理下的来源 IP**：本机用 `httptest` 监听 127.0.0.1 + 配置 `TrustedProxies` 验证 `X-Forwarded-For` 取值规则；生产装配（`internal/platform/server`）沿用 `httpx.Options.TrustedProxies` 的默认值（仅信任本机反代 127.0.0.1/::1；配置文件尚未暴露该项，属 1.12/1.13 既有现状）。Nginx 与 Server 同机部署时成立；反代不在本机时 `allowed_cidrs` 会取到反代地址——须在真实部署形态上验证，必要时另开 Story 暴露该配置项。 【Story 1.22b 已收口：`server.trusted_proxies` 已暴露到配置文件并传入路由器（校验、示例配置、`docs/operations/server-config.md`、测试）；真实 Nginx 反代下的取值仍待环境验证；见 1-22b-遗留项清理.md】
 3. **多 Server 实例**：`last_used_at` 节流是进程内的（每实例每令牌每分钟一次）；多实例并发吊销/使用的整链、Redis 缓存键清除在多实例间的行为。
 4. **真实 Redis 部署形态**（Upstash/Redis 版本差异）下令牌映射缓存的 TTL 与键清除。
 5. 产品/安全确认三项口径：默认有效期 90 天/上限 365 天 `[ASSUMPTION]`；轮换无宽限期；令牌管理仅限本人名下令牌且只能用 Cookie 会话。
@@ -88,10 +88,10 @@ context:
 
 - **待 1.21 补写 audit_logs**：令牌创建/轮换/吊销当前只有结构化日志（`audit_logs_written=false`）；1.21 交付后以真实 Auditor 替换 `adminAuditor`，并记录 actor / 资源 / 变更摘要（禁含明文、哈希）。 【Story 1.21 已收口：审计记录器 internal/platform/audit 在业务事务内写 audit_logs，过渡的结构化日志与 adminAuditor 已移除；见 1-21 说明】
 - **完整 Scope 钩子属 1.20**：平台令牌的 acting-as（`X-Tenant-ID`）仍被过渡 Scope 钩子安全拒绝；租户令牌的 Scope 仅按令牌所属租户设定（授权决策 `own_tenant`）。1.20 交付后应补：acting-as 下的令牌（`tenant:impersonate` 令牌）整链、目标租户存在/可用性校验、令牌写操作审计里 actor 与目标租户。
-- **租户配额 `api_tokens`**：`tenant_quotas` 已有 `api_tokens` 配额键，本 Story 未接线（租户/配额模块属后续 Story）；当前没有令牌数量上限（仅 scopes/CIDR 数量上限）。
+- **租户配额 `api_tokens`**：`tenant_quotas` 已有 `api_tokens` 配额键，本 Story 未接线（租户/配额模块属后续 Story）；当前没有令牌数量上限（仅 scopes/CIDR 数量上限）。 【Story 1.22b 已收口：令牌创建时核对 `api_tokens` 配额（硬上限，`403 tenant.quota_exceeded`）；通用强制与用量统计仍属 6.9；见 1-22b-遗留项清理.md】
 - **门禁变更**：`api_tokens` 移出「禁入身份表」名单（见上）——请评审确认「Scope 之前以 token_hash 为键」的豁免理由。
 - **缓存映射的残余作用**：Redis 只缓存「哈希 → id」，对 MySQL 的读取减少有限（仍有一次按主键的联表读取）；这是用「吊销不依赖缓存失效」换来的确定性。若后续压测显示热路径瓶颈，可加极短 TTL（≤5 秒）的状态缓存，但须接受该窗口内的陈旧。
-- Bearer 在 `must_change_password`、强制 TOTP 下一律 401（与会话的「受限放行」不同：令牌没有「只能调用启用流程」的概念）。
+- Bearer 在 `must_change_password`、强制 TOTP 下一律 401（与会话的「受限放行」不同：令牌没有「只能调用启用流程」的概念）。 【Story 1.22b 已收口：记为设计决定写入 ADR-018 修订记录，并以测试证明 401 与「令牌不存在」逐字节一致；见 1-22b-遗留项清理.md】
 - 日志里令牌前缀可见（约定的合规写法）；前缀是 40 位随机，不构成可用凭据。
 
 ## 开发记录

@@ -27,7 +27,8 @@ Redis 只存可重建/可丢失的数据；不可用、被清空、重启、超�
 - 非租户入口 `Keyspace.Key` 拒绝形如 `t<ULID>` 的标识段，租户键只能经 `TenantKey` 构造。
 - 租户键必须持有租户范围的 `scope.Scope`（零值/平台范围被拒）并带合法 ULID 的 `tenant_uid`。已知边界：`Scope` 只携带内部数值 id，不含 uid，二者一致性由调用方的 Scope 来源保证。
 - 写入必须带正 TTL（`ErrNoTTL`，不发出任何命令，`TestConnectivityTTLAndNamespace` 旁路核对）；值含明文敏感信息（经 `pkg/redact` 判定）返回 `ErrSensitiveValue`。
-- Pub/Sub 用途穷尽清单：`cert_revoke`（节点证书吊销）、`perm_version`（权限版本失效）、`task_wakeup`（任务唤醒）；清单外用途被拒（`ErrBadPurpose`）。
+- Pub/Sub 用途穷尽清单：`cert_revoke`（节点证书吊销）、`perm_version`（权限版本失效）、`task_wakeup`（任务唤醒）、`setting_change`（系统设置变更的缓存失效，Story 1.22b；消息体不含设置值，兜底：快照 TTL 5 秒 + 订阅轮询对账）；清单外用途被拒（`ErrBadPurpose`）。
+- 被拒绝类审计（`access.denied`）的去重/上限计数使用限流计数键（`le:<env>:audit:denied:…`、`le:<env>:audit:deniedcap:…`，带窗口 TTL）：Redis 不可用时降级为进程内计数（多实例各记一条，可接受）；没有 Redis 客户端时该功能关闭。
 
 - 限流计数键即使被外部去掉 TTL，下一次计数会恢复 TTL（`TestLimiterHealsKeyWithoutTTL`）。
 - `Client.Close` 终止仍在运行的订阅（`TestCloseStopsSubscriptions`）。

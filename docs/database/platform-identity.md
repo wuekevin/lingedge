@@ -249,14 +249,14 @@ C2。`role_id` FK→roles CASCADE；`permission_id` FK→permissions CASCADE。�
 | actor_type | VARCHAR(16) | N | — | `user/api_token/system/node` |
 | actor_user_id | BIGINT UNSIGNED | Y | — | |
 | actor_token_id | BIGINT UNSIGNED | Y | — | |
-| actor_label | VARCHAR(255) | N | — | 操作者快照（邮箱/令牌名/节点名） |
+| actor_label | VARCHAR(255) | N | — | 操作者快照（邮箱/令牌前缀/节点名/系统组件名）。**面向租户的读取接口不直接返回邮箱**：租户用户显示其展示名（缺失时脱敏邮箱 `a***@example.com`），平台操作者统一 `platform`，节点 `system`；平台视角原样返回快照（Story 1.22b，读取时转换，库里不改） |
 | actor_tenant_id | BIGINT UNSIGNED | Y | — | 操作者所属租户 |
 | tenant_id | BIGINT UNSIGNED | Y | — | **被操作对象所属租户**（代租户操作时与 actor 不同） |
 | acting_as | TINYINT(1) | N | 0 | 平台管理员经 `X-Tenant-ID` 代租户操作 |
 | action | VARCHAR(96) | N | — | 如 `site.create`、`deployment.publish`、`auth.login` |
 | resource_type | VARCHAR(48) | N | — | |
 | resource_uid | VARCHAR(64) | Y | — | |
-| result | VARCHAR(16) | N | — | `success/failure/denied` |
+| result | VARCHAR(16) | N | — | `success/failure/denied`。`success` 由业务 Service 在业务事务内写入；`denied`（Story 1.22b）只记**已认证主体**的授权类拒绝（403 auth.forbidden/auth.reauth_required/feature.disabled，action=`access.denied`，resource_type=`operation`，resource_uid=operationId），带防刷（同一 (主体, operation, 60 秒窗口) 一条、每主体每窗口至多 20 条），不与业务事务同提交、写入失败不影响响应；未认证请求/校验失败/登录失败不写 audit_logs（登录失败只写 login_logs）。`failure` 暂未写 |
 | changes_json | JSON | Y | — | 脱敏后的变更摘要（禁止含口令/令牌/私钥） |
 | meta_json | JSON | Y | — | |
 | request_id | CHAR(26) | N | — | NFR-21 |

@@ -62,7 +62,7 @@ updated: 2026-11-16（依据架构评审修订，见 docs/bmad/architecture-revi
 | updated_at | DATETIME(3) | N | CURRENT_TIMESTAMP(3) ON UPDATE | |
 
 - 唯一：`uk_tenant_quotas(tenant_id, quota_key)`。CHECK：`limit_value IS NULL OR limit_value >= 0`。
-- **Story 1.20（只存取）**：配额键字典（`GET/PUT /tenants/{id}/quotas` 校验）固定为 `api_tokens`、`cache_tasks_per_day`、`certificates`、`domains_per_site`、`l4_applications`、`members`、`rules_per_site`、`sites`（`internal/tenant/internal/domain.QuotaKeys`；新增键须同步本表与代码）。未写入的键读作 `limit_value=null`、`source=default`（默认租户无限制——不需要种子行）；`PUT` 写入 `source=manual`，`null` 表示不限；一次 `PUT` 全部成功或全部不写。**强制执行与用量统计属 Story 6.9**：1.20 不在任何路径上强制配额（`members` 配额为 0 仍可加成员，有测试断言），响应里不提供 `used`。
+- **Story 1.20（只存取）**：配额键字典（`GET/PUT /tenants/{id}/quotas` 校验）固定为 `api_tokens`、`cache_tasks_per_day`、`certificates`、`domains_per_site`、`l4_applications`、`members`、`rules_per_site`、`sites`（`internal/tenant/internal/domain.QuotaKeys`；新增键须同步本表与代码）。未写入的键读作 `limit_value=null`、`source=default`（默认租户无限制——不需要种子行）；`PUT` 写入 `source=manual`，`null` 表示不限；一次 `PUT` 全部成功或全部不写。**强制执行与用量统计属 Story 6.9**：1.20 不在任何路径上强制配额（`members` 配额为 0 仍可加成员，有测试断言），响应里不提供 `used`。**唯一例外（Story 1.22b）：`api_tokens`**——创建 API Token 的事务内核对该键（无行/NULL = 不限；有限额时锁配额行后统计本租户有效令牌 = 未吊销且未过期，`>=` 限额 → `403 tenant.quota_exceeded`；限额 0 = 禁止创建；轮换不检查；平台令牌不受租户配额约束）；其余键与 `used` 仍属 6.9，6.9 落地时把令牌检查收编进统一框架，语义保持一致。
 
 ## 2. 站点
 

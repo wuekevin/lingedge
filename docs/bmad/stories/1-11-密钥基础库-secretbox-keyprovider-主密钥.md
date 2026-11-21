@@ -87,7 +87,7 @@ context:
 | 解析失败路径上已解码的 KEK 残留 | medium | patch：解析失败时清零已解码的密钥，读文件缓冲区 `defer Zero` |
 | G-5 初版用「password=」字面量触发 G-6 固定口令门禁 | low | patch：测试改用 `dsn=` 键（门禁正常工作，未豁免） |
 | 轮密钥无法清零 | accept | Go 标准库限制，`LimitCORE=0` 补偿，已文档化 |
-| `RecordStore` 无真实库实现；`CountByKEK/ListByKEK/Replace` 仅有内存实现的测试 | patch（遗留补齐，见下） | 已补 `internal/platform/secrets/repository` 与真实 MySQL 端到端测试；worker `secrets.rewrap` 任务接线仍属后续 Story |
+| `RecordStore` 无真实库实现；`CountByKEK/ListByKEK/Replace` 仅有内存实现的测试 | patch（遗留补齐，见下） | 已补 `internal/platform/secrets/repository` 与真实 MySQL 端到端测试；worker `secrets.rewrap` 任务接线仍属后续 Story | 【Story 1.22b 已收口：核对确认：TaskType 已在白名单、处理函数属后续 Story（Tools 密钥轮换/备份接线）——仅登记不实现，`cmd/lingedge-server/tasks_test.go` 的 `pendingHandlers` 守卫其「未登记」状态；见 1-22b-遗留项清理.md】
 | 自由文本中不带敏感键名的裸 base64 主密钥无法被 redact 识别 | patch（保守识别，见下） | `pkg/redact/bare.go`：恰 43 字符 + 三类字符 + 熵≥4.5；残余风险见 docs/operations/secrets.md §7 |
 
 ### AC 对照
