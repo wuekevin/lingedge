@@ -18,6 +18,7 @@ type ManifestEntry struct {
 	Reauth      bool     `json:"reauth"`
 	Idempotent  bool     `json:"idempotent"`
 	Phase       string   `json:"phase"`
+	Feature     string   `json:"feature,omitempty"`
 }
 
 // Manifest 返回已注册路由的清单（按 operationId 升序）。
@@ -29,7 +30,7 @@ func (r *Router) Manifest() []ManifestEntry {
 		sort.Strings(perms)
 		out = append(out, ManifestEntry{
 			OperationID: m.OperationID, Method: m.Method, Path: m.Path, Auth: string(m.Auth), Permissions: perms,
-			TenantScope: string(m.TenantScope), Audit: m.Audit, Reauth: m.Reauth, Idempotent: m.Idempotent, Phase: m.Phase,
+			TenantScope: string(m.TenantScope), Audit: m.Audit, Reauth: m.Reauth, Idempotent: m.Idempotent, Phase: m.Phase, Feature: m.Feature,
 		})
 	}
 	return out

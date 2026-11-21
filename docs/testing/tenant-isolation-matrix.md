@@ -52,6 +52,8 @@
 | tasks | `listTasks`、`getTask`、`listTaskEvents`、`cancelTask` | 1.14 / 1.20 / **1.21** | 列表只含本租户；他租户/平台/不存在 404 逐字节一致；`cancelTask`（取消 + 审计同事务）：自己的 pending 任务 200 并恰好写一条审计（操作者、所属租户、`acting_as`、令牌）、越权 404 不写审计、终态 409 不写审计 |
 | audit-logs | `listAuditLogs`、`getAuditLog` | **1.21** | A/B/平台级各一批审计行：列表只含本租户；平台 acting-as 与租户视角一致；`acting_as` 记录抹去平台操作者身份；`changes` 里内部标识键被剔除、聚合计数保留；他租户/平台级/不存在 404 逐字节一致；租户用 `tenant_uid` 过滤他租户得空集；平台不带 `X-Tenant-ID` 跨租户、保留管理员标签（断言器有区分力） |
 
+**Story 1.22 说明（系统设置、运行模式、版本、安装记录、公开信息）**：新增的 12 个 operation 都是 `platform`（`/admin/settings*`、`/admin/system/run-mode|version`、`/admin/installations`）或 `public`（`/public/site-info|version`）路由——按本节规则 `platform` 路由不需要登记（由骨架行统一覆盖：租户 Console 会话 401、租户令牌 403、平台主体带 `X-Tenant-ID` 400，骨架对所有已注册 operation 自动执行），`public` 路由不属于租户隔离范围；它们没有租户可寻址的资源。`GET /auth/me`（Exempt）新增的 `features` 对租户可见，其 R-T1 扫描（模块键/能力键为通用词）与「`modules_delivered` 与真实路由一致」由 `tests/integration/sysconfig` 的 `TestMeFeaturesAndCapabilityRegistry` 断言，已加入 `getMe` 的 `Refs`。
+
 `ipAllowedOps`（`matrix_test.go`）：审计记录的 `ip` 是租户自己用户的来源地址（AuditLog schema 字段），因此这两个 operation 的响应不做「任何 IP 字面量」检查；节点/出口 IP 仍由内部取值表逐一检查。
 
 ## 3. 响应字段断言（R-T1 / BLK-02）

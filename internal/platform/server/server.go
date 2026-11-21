@@ -111,6 +111,8 @@ type Deps struct {
 	// OnShutdown 登记停机钩子：在监听排空、角色停止之后、MySQL/Redis 关闭之前，按登记的相反顺序执行（模块用它收尾异步写入，如认证模块的 Flush，Story 1.16 遗留）。
 	// 钩子在 ctx 的停机预算内运行；返回的错误并入停机错误。仅在装配阶段（BuildHooks/Register）调用。
 	OnShutdown func(name string, fn func(ctx context.Context) error)
+	// Migrations 是迁移版本探针（app 只读 schema_migrations，Story 1.13）：/admin/system/version 据此返回真实迁移版本（Story 1.22）。
+	Migrations httpx.MigrationProbe
 }
 
 // Info 是就绪后的实际状态。
@@ -240,7 +242,7 @@ func Run(ctx context.Context, o Options) error {
 	if err != nil {
 		return fail(err)
 	}
-	deps := Deps{Tasks: taskStore, Enqueuer: enq, DB: app, Redis: rc, Clock: o.Clock, IDs: ids, Logger: o.Logger, Config: cfg, Secrets: box,
+	deps := Deps{Tasks: taskStore, Enqueuer: enq, DB: app, Redis: rc, Clock: o.Clock, IDs: ids, Logger: o.Logger, Config: cfg, Secrets: box, Migrations: probe,
 		OnShutdown: func(name string, fn func(context.Context) error) { closers = append(closers, closer{name, fn}) }}
 
 	metrics := httpx.NewMetrics()

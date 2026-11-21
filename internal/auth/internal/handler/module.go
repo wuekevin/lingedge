@@ -41,6 +41,8 @@ type Options struct {
 	PermPollEvery time.Duration
 	// Audit 是审计记录器（internal/platform/audit）：写操作的审计与业务变更同一事务（fail-closed，IMP-19）；非 ManifestOnly 时必填。
 	Audit audit.Recorder
+	// Features 提供 /auth/me 的 features（sysconfig.Module，Story 1.22）；nil = 用本模块读到的运行模式与能力注册表常量。
+	Features FeaturesProvider
 	// ManifestOnly 仅用于导出路由清单（lingedge-server routes）：不需要数据库与 Redis，处理函数不可被调用。
 	ManifestOnly bool
 }
@@ -74,7 +76,7 @@ func NewModule(ctx context.Context, o Options) (*Module, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Module{svc: svc, handlers: New(svc), authn: NewAuthenticator(svc, o.ExtraOrigins, bearerAuthenticator{svc: svc}), authz: NewAuthorizer(svc), log: o.Log.Named("auth")}, nil
+	return &Module{svc: svc, handlers: New(svc).WithFeatures(o.Features), authn: NewAuthenticator(svc, o.ExtraOrigins, bearerAuthenticator{svc: svc}), authz: NewAuthorizer(svc), log: o.Log.Named("auth")}, nil
 }
 
 // Authenticator 返回 httpx 认证钩子的真实实现（装配点：cmd/lingedge-server 的 assembleHooks）；ManifestOnly 时为 nil。
@@ -131,6 +133,8 @@ type HooksOptions struct {
 	Tenants httpx.TenantResolver
 	// Auditor 是审计钩子（audit.Writer.Auditor()，Story 1.21）；nil = 安全拒绝默认（要求审计的路由一律 500，fail-closed）。
 	Auditor httpx.Auditor
+	// Features 是功能开关钩子（sysconfig 模块的 Gate()，Story 1.22）；nil = 安全拒绝默认（声明了 x-feature 的路由一律 403 feature.disabled）。
+	Features httpx.FeatureGate
 }
 
 // Hooks 是 REST 四个钩子的唯一装配（cmd/lingedge-server 与集成测试共用，避免装配漂移）：
@@ -144,7 +148,7 @@ type HooksOptions struct {
 //	               未注入时保持安全拒绝默认（DenyAuditor）。
 //	WithSelfService  /auth/* 自助 operation 的最小授权语义（1.16；审计钩子不再被它绕过）。
 func (m *Module) Hooks(o HooksOptions) httpx.Hooks {
-	base := httpx.Hooks{Authenticator: m.Authenticator(), Authorizer: m.authzHook(), Auditor: o.Auditor}
+	base := httpx.Hooks{Authenticator: m.Authenticator(), Authorizer: m.authzHook(), Auditor: o.Auditor, Features: o.Features}
 	base = httpx.WithTenantScope(base, o.Tenants, m.log)
 	return httpx.WithReauth(httpx.WithSelfService(base, m.SelfService), m.ReauthChecker())
 }

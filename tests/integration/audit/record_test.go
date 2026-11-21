@@ -20,7 +20,7 @@ func recordOutsideTx(w *apistack.World) error {
 }
 
 // AC1：Audit=true 的路由，写操作执行后记录操作者、租户、acting_as、对象类型/uid、动作、结果、脱敏的变更摘要、request_id、来源 IP。
-// 本用例逐个驱动 audit.Catalog 登记的全部 27 个 operation（真实 API、真实事务），断言每次成功都恰好留下一条对应 request_id 的审计行；
+// 本用例逐个驱动 audit.Catalog 登记的全部 31 个 operation（真实 API、真实事务），断言每次成功都恰好留下一条对应 request_id 的审计行；
 // 最后断言 Catalog 里的每个动作都真的出现在 audit_logs（「声明 Audit 但未记录」的动态检查），且运行期兜底计数为 0。
 // 同时做 G-5 脱敏扫描：运行期生成的口令/令牌/TOTP 种子/恢复码/MFA 令牌不得出现在任何审计行与审计 API 响应里。
 func TestEveryAuditedOperationWritesExactlyOneAuditRow(t *testing.T) {
@@ -161,6 +161,12 @@ func TestEveryAuditedOperationWritesExactlyOneAuditRow(t *testing.T) {
 	task := w.SeedTaskStatus(&tn.ID, "pending", map[string]any{"note": "rec"})
 	expect("cancelTask", "task.cancel", ownerSes.Do("POST", "/tasks/"+task+"/cancel", nil), 200)
 
+	// ---- 系统设置（Story 1.22）：通用 PATCH、品牌、运行模式（x-reauth，上面已再认证）、SSRF 白名单 ----
+	expect("patchSettings", "setting.update", adm.Do("PATCH", "/admin/settings", map[string]any{"values": map[string]any{"login.throttle_ip_max": 40, "brand.name": "审计品牌"}}), 200)
+	expect("putBrandSettings", "setting.brand.update", adm.Do("PUT", "/admin/settings/brand", map[string]any{"name": "审计品牌", "primary_color": "#102030"}), 200)
+	expect("putRunMode", "system.run_mode.update", adm.Do("PUT", "/admin/system/run-mode", map[string]any{"run_mode": "commercial"}), 200)
+	expect("putSsrfAllowlist", "setting.ssrf_allowlist.update", adm.Do("PUT", "/admin/settings/ssrf-allowlist", map[string]any{"entries": []map[string]string{{"cidr": "10.8.0.0/16", "note": "审计"}}}), 200)
+
 	// ---- API Token ----
 	ct := ownerSes.Do("POST", "/auth/api-tokens", map[string]any{"name": "审计令牌", "scopes": []string{"task:read"}})
 	expect("createApiToken", "api_token.create", ct, 201)
@@ -186,8 +192,8 @@ func TestEveryAuditedOperationWritesExactlyOneAuditRow(t *testing.T) {
 			t.Errorf("Catalog 动作 %s 声明了审计却从未被记录", a)
 		}
 	}
-	if n := len(audit.Catalog); n != 27 {
-		t.Errorf("Catalog 应登记 27 个 operation（与 x-audit: true 的已实现路由一致）: %d", n)
+	if n := len(audit.Catalog); n != 31 {
+		t.Errorf("Catalog 应登记 31 个 operation（与 x-audit: true 的已实现路由一致）: %d", n)
 	}
 	if n := w.Audit.Missing(); n != 0 {
 		t.Errorf("运行期兜底：声明了审计却没有记录的请求数应为 0: %d", n)

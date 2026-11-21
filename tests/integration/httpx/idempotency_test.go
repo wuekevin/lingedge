@@ -37,6 +37,11 @@ func (p principal) IsPlatform() bool          { return false }
 func (p principal) TenantID() uint64          { return p.actor }
 func (p principal) HasPermission(string) bool { return true }
 
+// allowAllFeatures 放行全部功能（仅用于不关心运行模式的测试；功能开关本身的行为见 httpx/feature_test.go 与 tests/integration/sysconfig）。
+type allowAllFeatures struct{}
+
+func (allowAllFeatures) Enabled(context.Context, string) (bool, error) { return true, nil }
+
 type testHooks struct {
 	mu       sync.Mutex
 	audits   []httpx.AuditOutcome
@@ -545,7 +550,8 @@ func newFixtureForSpec(t *testing.T, spec *contracttest.Spec) *fixture {
 	}
 	r, err := httpx.NewRouter(httpx.Options{
 		Clock: f.clk, IDs: f.ids, Idempotency: store,
-		Hooks: httpx.Hooks{Authenticator: f.hooks, Authorizer: f.hooks, Scope: f.hooks, Auditor: f.hooks},
+		// 本用例验证幂等契约而非功能开关：契约里的商业类 operation（x-feature: commercial，Story 1.22）在此需要放行，否则首次请求会被 403 feature.disabled 拒绝。
+		Hooks: httpx.Hooks{Authenticator: f.hooks, Authorizer: f.hooks, Scope: f.hooks, Auditor: f.hooks, Features: allowAllFeatures{}},
 	})
 	if err != nil {
 		t.Fatal(err)

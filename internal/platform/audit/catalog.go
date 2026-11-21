@@ -37,6 +37,12 @@ const (
 	ActionTenantQuotasPut Action = "tenant.quotas.put"
 
 	ActionTaskCancel Action = "task.cancel"
+
+	// 系统设置（Story 1.22）。
+	ActionSettingUpdate       Action = "setting.update"
+	ActionSettingBrandUpdate  Action = "setting.brand.update"
+	ActionSSRFAllowlistUpdate Action = "setting.ssrf_allowlist.update"
+	ActionRunModeUpdate       Action = "system.run_mode.update"
 )
 
 // 资源类型（audit_logs.resource_type）。
@@ -47,6 +53,8 @@ const (
 	ResourceAPIToken = "api_token"
 	ResourceTenant   = "tenant"
 	ResourceTask     = "task"
+	ResourceSetting  = "setting"
+	ResourceSystem   = "system"
 )
 
 // Op 登记一个要求审计（x-audit: true）的 operation 可以记录的动作：请求上下文里的 operationId 与被记录动作不匹配即拒绝（编程错误，fail-closed）。
@@ -91,6 +99,11 @@ var Catalog = []Op{
 	{"putTenantQuotas", []Action{ActionTenantQuotasPut}},
 
 	{"cancelTask", []Action{ActionTaskCancel}},
+
+	{"patchSettings", []Action{ActionSettingUpdate}},
+	{"putBrandSettings", []Action{ActionSettingBrandUpdate}},
+	{"putSsrfAllowlist", []Action{ActionSSRFAllowlistUpdate}},
+	{"putRunMode", []Action{ActionRunModeUpdate}},
 }
 
 // ActionsFor 返回 operationId 登记的动作；未登记返回 nil。

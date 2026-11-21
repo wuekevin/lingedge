@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 11-16-2026 23:18
-last_updated: 11-21-2026 20:00
+last_updated: 11-21-2026 23:30
 project: LingEdge（凌界云）
 project_key: NOKEY
 tracking_system: file-system
@@ -57,7 +57,7 @@ development_status:
   1-19-api-token-作用域-吊销-轮换: review   # 开发完成、本机门禁全绿（真实 MySQL/Redis 临时实例：/auth/api-tokens* 5 个 operation（无 501 占位，响应经 kin-openapi 校验）、令牌 le_<8位前缀>_<随机> 仅存 SHA-256+前缀且明文仅创建响应一次（全库/Redis/日志/幂等记录扫描无明文）、scopes ⊆ 创建者当前权限与近期 MFA、真实 Bearer 认证替换占位（不使用 Cookie/CSRF；有效权限 = scopes ∩ 创建者当前权限，创建者降权/禁用后令牌随之收缩；过期/吊销/来源 IP 不符等一律同一 401；租户令牌访问平台资源 403；他租户 404；令牌只能调用业务路由，令牌管理只能用 Cookie 会话）、CIDR（IPv4/IPv6/映射地址，伪造 X-Forwarded-For 不能绕过，httpx.ClientIPFrom）、吊销即时（缓存命中/残留键/Redis 被杀/从未可用）、轮换链（旧令牌立即吊销）、last_used 节流异步写、G-5 补用例；无迁移变更，仅 CC-7（OpenAPI 加法）；identity-tables 登记 api_tokens 并调整 gates 自测禁入名单；acting-as 仍由过渡 Scope 钩子安全拒绝（完整实现归 1.20）；审计待 1.21 补写 audit_logs（本 Story 未写，仅结构化日志 audit_logs_written=false）（Story 1.21 已收口：审计记录器 internal/platform/audit 在业务事务内写 audit_logs，过渡日志与 adminAuditor 已移除）；等待环境验证见下方 1-19 块
   1-20-租户模块-scope-中间件与隔离测试框架: review   # 开发完成、本机门禁全绿（真实 MySQL/Redis 临时实例的真实进程内装配，无 Mock：完整 Scope 钩子 httpx.WithTenantScope 替换过渡钩子（Scope 仅由已认证主体 + 路由元数据 + X-Tenant-ID 生成，X-Tenant-ID 仅在授权钩子判定 acting-as 后才解析；目标租户须存在且 active，否则 404 与他租户资源逐字节一致；API Token 经 Bearer 进入同一 Scope 生成，含 1.19 遗留的目标租户存在性校验；平台令牌 acting-as 同样受 tenant:impersonate 约束）；租户模块 /tenants* 8 个 operation（无 501 占位，响应经 kin-openapi 校验；配额只存取、强制在 6.9；种子默认租户即 MVP 运营入口 D-13；createTenant 属 P5 未实现）；acting-as 审计上下文 httpx.ActingAsFrom 供 1.21 直接消费 + 结构化日志，audit_logs 未写（待 1.21，测试断言表为空）（Story 1.21 已收口：审计记录器 internal/platform/audit 在业务事务内写 audit_logs，过渡日志与 adminAuditor 已移除）；scopeMintPaths 收窄到 internal/platform/{httpx,taskrt,server}/ 并带自测；make tenantscope-check（真实路由表 + 探针钩子 + 负向样本，并入 contract-check）；tests/security/tenant_isolation 隔离矩阵（骨架由 openapi x-tenant-scope 自动生成，新增租户资源未登记即失败，docs/testing/tenant-isolation-matrix.md）；R-T1 响应字段断言器 internal/platform/leakguard（并修复任务中心租户视图对 egress_node*/targets 的剔除缺口）；CC-8 仅加法（getCurrentTenant 补 400/404），无迁移变更；等待环境验证见下方 1-20 块
   1-21-审计模块与审计-登录日志-api: review   # 开发完成、本机门禁全绿（真实 MySQL/Redis 临时实例 + 真实 Worker，无 Mock：审计模块 internal/platform/audit——Service 在业务事务内经 audit.Recorder 写 audit_logs，审计写入失败=业务整体回滚（fail-closed，真实 MySQL 触发器注入 9 个写 operation：500、数据不残留、重试成功恰好一条审计）；真实审计钩子替换 adminAuditor/DenyAuditor 默认并对运行期「声明了审计却无记录」报警；27 个 x-audit operation 逐个驱动各恰好一条审计行（操作者/租户/acting_as/对象/动作/结果/脱敏摘要/request_id/来源 IP），Admin 代租户双记；audit_logs 只 INSERT（真实 app 账号 UPDATE/DELETE/TRUNCATE/DROP/ALTER 被拒，API 无写路径）；GET /audit-logs（游标分页、9 个过滤、租户仅见自己租户且字段裁剪、平台跨租户/代租户）、GET /audit-logs/{id}、GET /admin/login-logs，kin-openapi 契约；partition.maintain 对真实审计写入的 audit_logs 联调（真实 lingedge_maint，pmax 保留、行搬迁不丢）；Request ID 追踪审计+Task+Worker 日志；make audit-check（gates audit + 真实路由集合检查，含负向样本，并入 contract-check）；隔离矩阵 cancelTask FailClosed→Driven 并新增 audit-logs 驱动；无迁移变更、无契约变更；保留期 DROP PARTITION 属 3.48 未实现、失败/拒绝类审计未写）；等待环境验证见下方 1-21 块
-  1-22-系统设置-运行模式开关与能力注册表: backlog
+  1-22-系统设置-运行模式开关与能力注册表: review   # 开发完成、本机门禁全绿（真实 MySQL/Redis 临时实例的真实进程内装配，无 Mock：internal/platform/sysconfig——键注册表（27 个业务键 + 4 个只读能力状态键，类型/范围/枚举/格式校验、默认值、分组、敏感、可否经通用 PATCH）、类型化设置服务（整批校验、变更与审计同一事务、死锁/重复键整体重试；注入审计失败的 4 个写 operation 均 500 + 不残留 + 重试恰好一条审计）、敏感键 mail.smtp_password 经 secretbox 信封加密落 value_enc（AAD=表|列|uid，库扫描无明文，读取脱敏，密文挪行解密失败）；/admin/settings*（含 brand、ssrf-allowlist）、/admin/system/run-mode（x-reauth，行锁串行化并发切换：16 并发全部成功且审计 from/to 成链，无需迁移，立即生效）、/admin/system/version（真实 pkg/version + 迁移探针）、/admin/installations、/public/site-info、/public/version（匿名、字段白名单、leakguard/运行期秘密扫描、Cache-Control、按 IP 限流 429）共 12 个 operation（无 501 占位，响应经 kin-openapi 校验）；feature.disabled：httpx RouteMeta.Feature(x-feature) + FeatureGate + 中间件（认证后、授权前；开关读取失败 500、未装配默认拒绝），商业类 operation（billing 标签 43 个 + register/listPublicPlans/createTenant）契约加 x-feature: commercial（CC-9，仅加法），CI 新增 checkFeatureTags（带负向样本）与清单 feature 一致性，M1 用测试专用合成路由端到端验证（自用 403、商业放行、切换即时）；能力注册表：DeliveredModules + CheckModules 对真实路由集合核对（不虚报/不漏登/不半交付），高级能力 http3|l2_cache|dnssec|edge_compute 恒 unverified、置为 available 被拒（PATCH/服务层，带外写入不生效）；/auth/me 返回 features{run_mode,modules_delivered,capability_status} 并改走 permission_version 缓存（关闭 1.18 遗留）；认证模块键/默认值/范围别名到注册表（单一来源，三项一致性测试）；无迁移变更）；等待环境验证见下方 1-22 块
   1-23-签名与-ca-密钥初始化-信任域②③: backlog
   1-24-server-setup-mode-与-web-安装向导后端-含-setup-token: backlog
   1-25-tools-骨架-命令树-退出码-json-envelope-非交互约定: backlog
@@ -451,8 +451,8 @@ sprint_plan:
       - key: "1-22-系统设置-运行模式开关与能力注册表"
         id: "1.22"
         depends_on: ["1.18", "1.21"]
-        env: "本机 MySQL + Redis"
-        waiting_env_verification: false
+        env: "本机 MySQL + Redis；MySQL 8.0.16 与 Linux 验收机、多 Server 实例、真实 Redis 部署形态需 ENV-LNX"
+        waiting_env_verification: true
       - key: "1-23-签名与-ca-密钥初始化-信任域②③"
         id: "1.23"
         depends_on: ["1.7", "1.11"]
@@ -647,6 +647,14 @@ environment_verification:   # 『等待环境验证』登记（验证人/日期�
     condition: "本机通过仅代表 macOS + 8.0.46 临时 mysqld + Redis 临时实例、单进程单库下的行为：MySQL 8.0.16 上审计 INSERT（VARBINARY ip、JSON changes）、分区表 REORGANIZE PARTITION 与 BEFORE UPDATE/DELETE 触发器、LEFT JOIN 游标查询、测试里 root 建 BEFORE INSERT 触发器的故障注入手法；宝塔/生产 MySQL 上 lingedge_maint 授权与 information_schema.PARTITIONS 可见性、触发器创建前置条件（binlog/SET_USER_ID）；多 Server 实例并发写审计及审计 INSERT 对写路径延迟/锁的影响，均不得由本机通过代替。"
     done_locally: "make lint security gate-selftest race vuln contract-check build verify-build migrate-test 全绿：见 docs/bmad/stories/1-21-*.md 的 Tasks & Acceptance（27 个审计 operation 逐个驱动各恰好一条审计行与动作全覆盖、acting-as 双记、同事务回滚注入（9 个写 operation）、不可篡改（真实 app 账号）、分区联调（真实 lingedge_maint）、游标分页/过滤/字段裁剪/越权/契约、平台登录日志、Request ID 追踪审计+Task+Worker 日志、G-5 脱敏扫描、make audit-check 与负向样本、隔离矩阵 cancelTask Driven 与 audit-logs 驱动）。"
     pending: "① MySQL 8.0.16 与 Linux 验收机重跑 tests/integration/audit、tests/security/tenant_isolation、tests/integration/auth、tests/integration/tenant、tests/integration/server、make migrate-test；② 宝塔/生产 MySQL 上 lingedge_maint 授权、分区可见性与触发器前置条件，1.24 向导写入 database.maint.* 后的整链联调；③ 多 Server 实例并发写审计与延迟压测；④ 产品/安全确认：只记成功、租户视角平台操作者裁剪为 platform、审计保留期 365 天（OQ-6）；⑤ 保留期 DROP PARTITION 清理（Story 3.48）与 pmax 非空告警/doctor（1.42）；⑥ 失败/拒绝类安全事件审计（result=failure|denied）未写，需要时另开 Story。"
+    verified_by: ""
+    verified_on: ""
+  1-22-系统设置-运行模式开关与能力注册表:
+    status: partial
+    required_env: "ENV-LNX（Linux 验收机，多 Server 实例）；MySQL 8.0.16；真实 Redis 部署形态"
+    condition: "本机通过仅代表 macOS + 8.0.46 临时 mysqld + Redis 临时实例、单进程单库下的行为：MySQL 8.0.16 上 SELECT … FOR UPDATE OF s（含 LEFT JOIN 的行锁）、CAST(JSON AS CHAR)、并发首次插入同一设置键的死锁/重复键重试；多 Server 实例下运行模式/设置快照跨实例最迟 5 秒生效（本机仅用带外写库模拟）、公开接口限流在 Redis 不可用降级时的进程内计数；真实 Redis 部署形态下 /auth/me 的权限缓存链路与公开限流窗口，均不得由本机通过代替。"
+    done_locally: "make lint security gate-selftest race vuln contract-check build verify-build migrate-test 全绿：见 docs/bmad/stories/1-22-*.md 的 Tasks & Acceptance（模式切换含再认证/审计/即时生效/并发、feature.disabled 合成路由与链序单测、能力注册表一致性与 available 被拒、public 接口契约与敏感信息扫描与限流、设置 schema 校验与敏感值加密脱敏、设置变更与审计同事务回滚注入、/auth/me 权限缓存、版本与安装记录、认证键别名一致性、checkFeatureTags 负向样本、G-5 脱敏）。"
+    pending: "① MySQL 8.0.16 与 Linux 验收机重跑 tests/integration/sysconfig、tests/security/tenant_isolation、tests/integration/auth、make migrate-test；② 多 Server 实例（运行模式跨实例 ≤5 秒、公开限流）；③ 真实 Redis 部署形态；④ 产品/安全确认：通用 PATCH /admin/settings 无 x-reauth（可降低安全强度的键仅需 setting:write）、公开接口限流 120/分钟/IP 与 max-age=30、品牌默认值；⑤ brand.logo_media_uid/favicon_media_uid 的媒体存在性校验待 media 模块；⑥ 真实商业路由（P5）交付时在 DeliveredModules 登记并带 x-feature（CI 强制）。"
     verified_by: ""
     verified_on: ""
   1-24-server-setup-mode-与-web-安装向导后端-含-setup-token:

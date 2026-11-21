@@ -158,6 +158,7 @@ func (r *Router) Register(meta RouteMeta, h gin.HandlerFunc) (err error) {
 	chain := []gin.HandlerFunc{
 		setMetaMiddleware(meta),
 		authnMiddleware(r.hooks.Authenticator, meta),
+		featureMiddleware(r.hooks.Features, meta), // 认证后、授权前（ADR-018 §11）：未启用的功能不泄漏授权细节
 		authzMiddleware(r.hooks.Authorizer, meta),
 		scopeMiddleware(r.hooks.Scope, meta),
 		auditMiddleware(r.hooks.Auditor, meta),

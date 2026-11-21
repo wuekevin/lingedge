@@ -71,6 +71,7 @@ func TestCheckRoutesNegativeSamples(t *testing.T) {
 		"审计不一致":          mut(func(m *httpx.RouteMeta) { m.Audit = !m.Audit }),
 		"再认证不一致":         mut(func(m *httpx.RouteMeta) { m.Reauth = true }),
 		"阶段不一致":          mut(func(m *httpx.RouteMeta) { m.Phase = "P2" }),
+		"功能开关不一致":        mut(func(m *httpx.RouteMeta) { m.Feature = "commercial" }),
 		"认证不一致":          mut(func(m *httpx.RouteMeta) { m.Auth = httpx.AuthRequired }),
 	} {
 		if len(probs) == 0 {

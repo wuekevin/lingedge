@@ -56,6 +56,10 @@ type RouteMeta struct {
 	// Idempotent 表示该 operation 声明了 Idempotency-Key 头（openapi 的 IdempotencyKey 参数）；仅 POST。
 	Idempotent bool
 	Phase      string // x-phase，如 M1、P2
+	// Feature 是 x-feature：该路由属于哪个「功能开关」（如 commercial = 商业类 API）。运行模式不允许该功能时，认证后、授权前
+	// 由 feature 中间件返回 403 feature.disabled（FR-24、ADR-018 §11）；空 = 不受功能开关限制。商业类 operation 必须声明它
+	// （scripts/contract 的 x-feature 检查按 billing 标签与显式清单强制）。
+	Feature string
 }
 
 // NoPermissions 返回「显式声明无权限要求」的空列表（与 nil 的「缺失」区分）。
@@ -65,6 +69,7 @@ var (
 	reOperationID = regexp.MustCompile(`^[a-z][A-Za-z0-9]*$`)
 	rePermission  = regexp.MustCompile(`^[a-z][a-z0-9_-]*(:[a-z][a-z0-9_-]*)+$`)
 	rePhase       = regexp.MustCompile(`^[MP][0-9]+$`)
+	reFeature     = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 	reLiteralSeg  = regexp.MustCompile(`^[A-Za-z0-9._~-]+$`)
 	reParamName   = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]*$`)
 )
@@ -131,6 +136,9 @@ func (m RouteMeta) Validate() []string {
 	}
 	if !rePhase.MatchString(m.Phase) {
 		add("%s: Phase %q 非法（如 M1、P2）", where, m.Phase)
+	}
+	if m.Feature != "" && !reFeature.MatchString(m.Feature) {
+		add("%s: Feature %q 非法（小写字母/数字/下划线）", where, m.Feature)
 	}
 	return p
 }

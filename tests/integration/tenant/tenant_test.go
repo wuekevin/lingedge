@@ -369,7 +369,7 @@ func TestTenantQuotasStoredNotEnforced(t *testing.T) {
 
 // 写操作审计（Story 1.21 AC1）：updateTenant / putTenantQuotas / addTenantMember 在同一业务事务内写 audit_logs——操作者（平台管理员）、
 // 目标租户（tenant_id = 被操作租户）、对象类型/uid、动作、结果、脱敏变更摘要、request_id；平台路由不是 acting-as（acting_as=0）。
-// 全部 27 个审计 operation 的逐个驱动见 tests/integration/audit。
+// 全部 31 个审计 operation 的逐个驱动见 tests/integration/audit。
 func TestTenantWritesAreAudited(t *testing.T) {
 	w := apistack.New(t)
 	a := admin(w)

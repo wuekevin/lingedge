@@ -234,6 +234,27 @@ func authnMiddleware(h Authenticator, meta RouteMeta) gin.HandlerFunc {
 	}
 }
 
+// featureMiddleware 执行功能开关（Story 1.22）：声明了 Feature 的路由，功能未启用 → 403 feature.disabled；开关读取失败 → 500（fail-closed）。
+// 它在认证之后：未认证的请求仍得到 401（不向匿名者暴露哪些功能被关闭），已认证主体（含 API Token）在授权之前就被拒绝。
+func featureMiddleware(g FeatureGate, meta RouteMeta) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if meta.Feature == "" {
+			c.Next()
+			return
+		}
+		ok, err := g.Enabled(c.Request.Context(), meta.Feature)
+		if err != nil {
+			Fail(c, apierr.Internal(err))
+			return
+		}
+		if !ok {
+			Fail(c, apierr.New(apierr.FeatureDisabled, "feature is not enabled"))
+			return
+		}
+		c.Next()
+	}
+}
+
 func authzMiddleware(h Authorizer, meta RouteMeta) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if meta.Auth == AuthPublic {

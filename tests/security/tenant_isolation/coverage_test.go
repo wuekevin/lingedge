@@ -67,7 +67,8 @@ var Registry = map[string]Coverage{
 	"revokeApiToken": {Kind: Exempt, Reason: tokenReason, Refs: []TestRef{{authIT, "TestTenantTokenIsolation"}, {authIT, "TestAPITokenRevocationIsImmediate"}}},
 	"rotateApiToken": {Kind: Exempt, Reason: tokenReason, Refs: []TestRef{{authIT, "TestTenantTokenIsolation"}, {authIT, "TestAPITokenRotationChain"}}},
 	// 自助 operation（Story 1.16/1.17）。
-	"getMe":           {Kind: Exempt, Reason: selfServiceReason, Refs: []TestRef{{authIT, "TestAuthorizationMatrixHTTP"}, {authIT, "TestLoginSuccessSessionAndCookie"}}},
+	"getMe": {Kind: Exempt, Reason: selfServiceReason, Refs: []TestRef{{authIT, "TestAuthorizationMatrixHTTP"}, {authIT, "TestLoginSuccessSessionAndCookie"},
+		{"tests/integration/sysconfig", "TestMeFeaturesAndCapabilityRegistry"}}}, // Story 1.22：features 能力清单；租户可见响应的 R-T1 扫描见该测试
 	"getCsrfToken":    {Kind: Exempt, Reason: selfServiceReason, Refs: []TestRef{{authIT, "TestCSRF"}}},
 	"logout":          {Kind: Exempt, Reason: selfServiceReason, Refs: []TestRef{{authIT, "TestLoginSuccessSessionAndCookie"}}},
 	"changePassword":  {Kind: Exempt, Reason: selfServiceReason, Refs: []TestRef{{authIT, "TestChangePasswordRevokesAllSessions"}}},

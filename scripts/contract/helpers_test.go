@@ -48,6 +48,8 @@ type opOpts struct {
 	Params   string // 额外参数 YAML（缩进 8 空格，每项以 "- " 开头）
 	RespYAML string // 200 响应 schema（缩进 18 空格起）；空则用 {type: object}
 	Omit     string // 省略的扩展名
+	Tags     string // 形如 "[billing]"；空则不写 tags
+	Feature  string // x-feature 取值；空则不写
 }
 
 func (o opOpts) yaml(method string) string {
@@ -73,6 +75,12 @@ func (o opOpts) yaml(method string) string {
 		if o.Omit != k {
 			b.WriteString("      " + k + ": " + v + "\n")
 		}
+	}
+	if o.Tags != "" {
+		b.WriteString("      tags: " + o.Tags + "\n")
+	}
+	if o.Feature != "" {
+		b.WriteString("      x-feature: " + o.Feature + "\n")
 	}
 	ext("x-permissions", o.Perms)
 	ext("x-tenant-scope", o.Scope)

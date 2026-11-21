@@ -25,6 +25,7 @@ type routeEntry struct {
 	Reauth      bool     `json:"reauth"`
 	Idempotent  bool     `json:"idempotent"`
 	Phase       string   `json:"phase"`
+	Feature     string   `json:"feature,omitempty"`
 }
 
 func readRoutes(path string) ([]routeEntry, error) {
@@ -132,6 +133,9 @@ func checkRoutes(doc *openapi3.T, routes []routeEntry) (fs []finding, unimplemen
 		}
 		if s, _ := extString(o.Op, "x-phase"); r.Phase != s {
 			diff("Phase", r.Phase, s)
+		}
+		if s, _ := extString(o.Op, "x-feature"); r.Feature != s {
+			diff("Feature", r.Feature, s)
 		}
 		public := o.Op.Security != nil && len(*o.Op.Security) == 0
 		if (r.Auth == "public") != public {

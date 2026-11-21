@@ -377,6 +377,43 @@ func checkReauthSet(doc *openapi3.T, pinned []string) []finding {
 	return fs
 }
 
+// commercialTag 与 commercialOps 定义「商业类 operation」（FR-24）：billing 标签下的全部 operation，加上不在 billing 标签下的商业入口
+// （租户自助注册、官网套餐展示、商业模式创建租户）。它们必须声明 `x-feature: commercial`——自用模式下运行时 403 feature.disabled。
+// 新增商业类入口（不带 billing 标签）时须把 operationId 加到这里，否则「未标注就不受保护」。
+const commercialTag = "billing"
+
+var commercialOps = []string{"register", "listPublicPlans", "createTenant"}
+
+// knownFeatures 是 x-feature 的合法取值（运行时由 sysconfig.FeatureEnabled 解释；未知功能一律视为未启用）。
+var knownFeatures = map[string]bool{"commercial": true}
+
+// checkFeatureTags（Story 1.22）：商业类 operation 必须声明 x-feature: commercial；x-feature 取值必须已知（清单陈旧由真实契约的单测 TestFeatureTags 核对）。
+func checkFeatureTags(doc *openapi3.T, ids []string) []finding {
+	var fs []finding
+	explicit := map[string]bool{}
+	for _, id := range ids {
+		explicit[id] = true
+	}
+	for _, o := range operations(doc) {
+		raw, present := o.Op.Extensions["x-feature"]
+		feat, isStr := raw.(string)
+		if present && (!isStr || !knownFeatures[feat]) {
+			fs = append(fs, finding{"x-feature", o.String(), fmt.Sprintf("x-feature 取值 %v 非法（已知：commercial）", raw)})
+			continue
+		}
+		commercial := explicit[o.Op.OperationID]
+		for _, t := range o.Op.Tags {
+			if t == commercialTag {
+				commercial = true
+			}
+		}
+		if commercial && feat != "commercial" {
+			fs = append(fs, finding{"x-feature", o.String(), "商业类 operation（billing 标签或商业入口清单）必须声明 x-feature: commercial，否则自用模式下不受 feature.disabled 保护"})
+		}
+	}
+	return fs
+}
+
 // listResponseSchemas 返回 operation 全部 2xx JSON 响应 schema（媒体类型按前缀 application/json 匹配，如带 charset）。
 func listResponseSchemas(op *openapi3.Operation) []*openapi3.Schema {
 	var out []*openapi3.Schema

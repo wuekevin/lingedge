@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"github.com/wuekevin/lingedge/internal/platform/apierr"
 	"github.com/wuekevin/lingedge/internal/platform/httpx"
 	"github.com/wuekevin/lingedge/internal/platform/requestid"
+	"github.com/wuekevin/lingedge/internal/platform/sysconfig"
 )
 
 // 路由元数据：与 docs/api/openapi.yaml 的 x-permissions / x-tenant-scope / x-audit / x-phase 及 security 一一对应
@@ -53,10 +55,22 @@ func Metas() []httpx.RouteMeta {
 }
 
 // Handlers 是 /auth/* 的处理函数集合。svc 在 ManifestOnly（路由清单导出）模式下可为 nil（处理函数不会被调用）。
-type Handlers struct{ svc *service.Service }
+type Handlers struct {
+	svc *service.Service
+	// features 提供 /auth/me 的 features（运行模式 + 已交付模块 + 能力状态，sysconfig 模块，Story 1.22）；nil 时用本模块读到的运行模式与注册表常量。
+	features FeaturesProvider
+}
+
+// FeaturesProvider 提供 /auth/me 的 features（sysconfig.Module 满足）。
+type FeaturesProvider interface {
+	Features(ctx context.Context) (sysconfig.FeaturesView, error)
+}
 
 // New 创建 Handlers。
 func New(svc *service.Service) *Handlers { return &Handlers{svc: svc} }
+
+// WithFeatures 返回带 features 提供者的副本。
+func (h *Handlers) WithFeatures(f FeaturesProvider) *Handlers { c := *h; c.features = f; return &c }
 
 // Register 注册全部 /auth/* 路由。
 func (h *Handlers) Register(r *httpx.Router) error {
@@ -219,16 +233,18 @@ type capabilities struct {
 
 // MeResponse 是 OpenAPI Me。
 type MeResponse struct {
-	User             UserSummary    `json:"user"`
-	Realm            string         `json:"realm"`
-	Tenant           *TenantSummary `json:"tenant"`
-	ActingTenant     *TenantSummary `json:"acting_tenant"`
-	Roles            []string       `json:"roles"`
-	Permissions      []string       `json:"permissions"`
-	MenuKeys         []string       `json:"menu_keys"`
-	Capabilities     capabilities   `json:"capabilities"`
-	CSRFToken        string         `json:"csrf_token"`
-	SessionExpiresAt string         `json:"session_expires_at"`
+	User         UserSummary    `json:"user"`
+	Realm        string         `json:"realm"`
+	Tenant       *TenantSummary `json:"tenant"`
+	ActingTenant *TenantSummary `json:"acting_tenant"`
+	Roles        []string       `json:"roles"`
+	Permissions  []string       `json:"permissions"`
+	MenuKeys     []string       `json:"menu_keys"`
+	Capabilities capabilities   `json:"capabilities"`
+	// Features 是能力清单（FR-31）：前端据此裁剪菜单，不自行猜测——运行模式、已交付模块、高级能力状态（恒 unverified，NFR-27）。
+	Features         sysconfig.FeaturesView `json:"features"`
+	CSRFToken        string                 `json:"csrf_token"`
+	SessionExpiresAt string                 `json:"session_expires_at"`
 }
 
 func (h *Handlers) me(c *gin.Context) {
@@ -241,10 +257,20 @@ func (h *Handlers) me(c *gin.Context) {
 		httpx.Fail(c, err)
 		return
 	}
+	fv := sysconfig.FeaturesView{RunMode: res.RunMode, ModulesDelivered: sysconfig.ModulesDelivered(), CapabilityStatus: sysconfig.CapabilityStatus()}
+	if h.features != nil {
+		v, ferr := h.features.Features(c.Request.Context())
+		if ferr != nil {
+			httpx.Fail(c, apierr.Internal(ferr))
+			return
+		}
+		fv = v
+	}
 	out := MeResponse{
 		User: userSummary(p.User), Realm: string(p.Realm), Roles: res.Access.Roles, Permissions: res.Access.Permissions, MenuKeys: res.Access.MenuKeys,
-		// 已交付且可用的后端模块：本 Story 只交付认证；其余模块由各自 Story 追加（前端据此裁剪菜单，FR-31）。
-		Capabilities:     capabilities{RunMode: res.RunMode, Modules: []string{"auth"}, Features: map[string]any{"commercial": res.RunMode == "commercial"}},
+		// 已交付且可用的后端模块来自能力注册表（sysconfig.DeliveredModules，模块交付时登记，一致性测试核对）；features 是同一份数据的细化形态。
+		Capabilities:     capabilities{RunMode: fv.RunMode, Modules: fv.ModulesDelivered, Features: map[string]any{"commercial": fv.RunMode == sysconfig.RunModeCommercial}},
+		Features:         fv,
 		CSRFToken:        p.CSRFToken,
 		SessionExpiresAt: ts(p.Session.ExpiresAt),
 	}

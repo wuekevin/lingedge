@@ -128,6 +128,7 @@ func metaOf(method, path string, op *openapi3.Operation) httpx.RouteMeta {
 	m.Audit, _ = op.Extensions["x-audit"].(bool)
 	m.Reauth, _ = op.Extensions["x-reauth"].(bool)
 	m.Phase, _ = op.Extensions["x-phase"].(string)
+	m.Feature, _ = op.Extensions["x-feature"].(string)
 	m.Auth = httpx.AuthRequired
 	if op.Security != nil && len(*op.Security) == 0 { // security: []
 		m.Auth = httpx.AuthPublic
@@ -198,6 +199,9 @@ func (s *Spec) CheckRoutes(routes []httpx.RouteMeta) []string {
 		}
 		if r.Phase != w.Phase {
 			diff("Phase", r.Phase, w.Phase)
+		}
+		if r.Feature != w.Feature {
+			diff("Feature", r.Feature, w.Feature)
 		}
 		if a, b := sortedCopy(r.Permissions), sortedCopy(w.Permissions); strings.Join(a, ",") != strings.Join(b, ",") {
 			diff("Permissions", a, b)

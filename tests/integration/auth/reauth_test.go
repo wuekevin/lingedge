@@ -8,6 +8,8 @@ import (
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
+
+	"github.com/wuekevin/lingedge/internal/platform/audit"
 )
 
 func (s *stack) reauth(realm, token, csrf string, body map[string]string, opts ...reqOpt) resp {
@@ -190,8 +192,9 @@ func TestXReauthOperationsEnforcedInChain(t *testing.T) {
 		if realOps[o.id] {
 			continue
 		}
-		// 占位路由：要求审计（x-audit）却没有在 audit.Catalog 登记动作的，被真实审计钩子 fail-closed 拒绝（500，handler 不执行）；其余应到达 handler。
-		if audited[o.id] {
+		// 占位路由：要求审计（x-audit）却没有在 audit.Catalog 登记动作的，被真实审计钩子 fail-closed 拒绝（500，handler 不执行）；其余应到达 handler
+		// （Story 1.22 起 putRunMode/putSsrfAllowlist 已在 Catalog 登记：审计钩子放行，占位路由同样到达 handler）。
+		if audited[o.id] && !audit.Registered(o.id) {
 			if r.Status != 500 || strings.Contains(string(r.Body), "reached") {
 				t.Errorf("%s 要求审计但未在审计目录登记，应被审计钩子安全拒绝（500）: %d %s", o.id, r.Status, r.Body)
 			}

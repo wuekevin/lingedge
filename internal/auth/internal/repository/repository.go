@@ -251,35 +251,33 @@ func (r *Repo) ListLoginLogsPlatform(ctx context.Context, f LoginLogFilter, limi
 
 // ---- 角色与权限（只读；授权判定属 Story 1.18）----
 
-// UserAccess 读取用户在某一范围内的角色与权限集：tenantID 为 0 表示平台角色（user_roles.tenant_id IS NULL），否则为该租户内的角色。
+// RolesAndMenus 读取用户在某一范围内的角色 code 与菜单键（/auth/me 与权限缓存共用）：scopeID 为 0 = 平台范围（平台角色），否则为该租户内的租户角色
+// （菜单键只取 scope 为 tenant/both 的权限，与 TenantPermissions 同口径）。
 // lingedge:identity-table=user_roles,roles
 // lingedge:platform-table=role_permissions,permissions
-func (r *Repo) UserAccess(ctx context.Context, userID, tenantID uint64) (domain.Access, error) {
-	acc := domain.Access{Roles: []string{}, Permissions: []string{}, MenuKeys: []string{}}
-	var roles []string
-	if err := r.ex(ctx).Select(ctx, &roles, db.Q(`SELECT DISTINCT ro.code FROM user_roles ur JOIN roles ro ON ro.id = ur.role_id
-		WHERE ur.user_id = ? AND ur.tenant_key = ? ORDER BY ro.code`), userID, tenantID); err != nil {
-		return acc, err
+func (r *Repo) RolesAndMenus(ctx context.Context, userID, scopeID uint64) (roles, menus []string, err error) {
+	roleScope := "platform"
+	if scopeID != 0 {
+		roleScope = "tenant"
 	}
-	var perms []struct {
-		Code    string  `db:"code"`
-		MenuKey *string `db:"menu_key"`
+	if err = r.ex(ctx).Select(ctx, &roles, db.Q(`SELECT DISTINCT ro.code FROM user_roles ur JOIN roles ro ON ro.id = ur.role_id AND ro.scope = ?
+		WHERE ur.user_id = ? AND ur.tenant_key = ? ORDER BY ro.code`), roleScope, userID, scopeID); err != nil {
+		return nil, nil, err
 	}
-	if err := r.ex(ctx).Select(ctx, &perms, db.Q(`SELECT DISTINCT p.code, p.menu_key FROM user_roles ur
-		JOIN role_permissions rp ON rp.role_id = ur.role_id JOIN permissions p ON p.id = rp.permission_id
-		WHERE ur.user_id = ? AND ur.tenant_key = ? ORDER BY p.code`), userID, tenantID); err != nil {
-		return acc, err
+	var q db.Query
+	if scopeID == 0 {
+		q = db.Q(`SELECT DISTINCT p.menu_key FROM user_roles ur JOIN roles ro ON ro.id = ur.role_id AND ro.scope = ?
+			JOIN role_permissions rp ON rp.role_id = ro.id JOIN permissions p ON p.id = rp.permission_id
+			WHERE ur.user_id = ? AND ur.tenant_key = ? AND p.menu_key IS NOT NULL ORDER BY p.menu_key`)
+	} else {
+		q = db.Q(`SELECT DISTINCT p.menu_key FROM user_roles ur JOIN roles ro ON ro.id = ur.role_id AND ro.scope = ?
+			JOIN role_permissions rp ON rp.role_id = ro.id JOIN permissions p ON p.id = rp.permission_id AND p.scope IN ('tenant', 'both')
+			WHERE ur.user_id = ? AND ur.tenant_key = ? AND ur.tenant_key <> 0 AND p.menu_key IS NOT NULL ORDER BY p.menu_key`)
 	}
-	acc.Roles = append(acc.Roles, roles...)
-	seen := map[string]bool{}
-	for _, p := range perms {
-		acc.Permissions = append(acc.Permissions, p.Code)
-		if p.MenuKey != nil && !seen[*p.MenuKey] {
-			seen[*p.MenuKey] = true
-			acc.MenuKeys = append(acc.MenuKeys, *p.MenuKey)
-		}
+	if err = r.ex(ctx).Select(ctx, &menus, q, roleScope, userID, scopeID); err != nil {
+		return nil, nil, err
 	}
-	return acc, nil
+	return roles, menus, nil
 }
 
 // ---- system_settings ----

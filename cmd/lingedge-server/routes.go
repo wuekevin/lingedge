@@ -15,6 +15,7 @@ import (
 	"github.com/wuekevin/lingedge/internal/platform/clock"
 	"github.com/wuekevin/lingedge/internal/platform/httpx"
 	"github.com/wuekevin/lingedge/internal/platform/server"
+	"github.com/wuekevin/lingedge/internal/platform/sysconfig"
 	"github.com/wuekevin/lingedge/internal/platform/taskrt/taskapi"
 	"github.com/wuekevin/lingedge/internal/platform/uid"
 	"github.com/wuekevin/lingedge/internal/tenant"
@@ -24,8 +25,8 @@ import (
 // 进程装配（Story 1.13）与 `lingedge-server routes` 共用它，因此导出的清单就是真实会被服务的路由集合。
 //
 // 已注册：租户 /tenants*（Story 1.20，createTenant 属 P5 不在此）；任务中心 listTasks/getTask/listTaskEvents/cancelTask（Story 1.14）；认证 /auth/* 与 /admin/*（Story 1.16–1.19，
-// 含 Story 1.21 的 GET /admin/login-logs）；审计读取 GET /audit-logs、GET /audit-logs/{auditId}（Story 1.21）。其余 M1 业务路由由各 Story 追加，不用 501 占位（NFR-2）；
-// `make openapi-check` 会输出「M1 未实现 operation 清单」。四个钩子均已实现（认证 1.16/1.17/1.19、授权 1.18、Scope 1.20、审计 1.21）。
+// 含 Story 1.21 的 GET /admin/login-logs）；系统设置/运行模式/版本/安装记录/公开站点信息（Story 1.22，sysconfig）；审计读取 GET /audit-logs、GET /audit-logs/{auditId}（Story 1.21）。其余 M1 业务路由由各 Story 追加，不用 501 占位（NFR-2）；
+// `make openapi-check` 会输出「M1 未实现 operation 清单」。四个钩子均已实现（认证 1.16/1.17/1.19、授权 1.18、Scope 1.20、审计 1.21），另有功能开关（1.22）。
 func registerRoutes(r *httpx.Router, deps server.Deps) error {
 	return (&assembly{}).register(r, deps)
 }
@@ -45,6 +46,13 @@ func (a *assembly) register(r *httpx.Router, deps server.Deps) error {
 			return err
 		}
 	}
+	sys := a.sys
+	if sys == nil {
+		var err error
+		if sys, err = sysconfig.New(sysconfig.Options{ManifestOnly: true}); err != nil {
+			return err
+		}
+	}
 	var (
 		auditRepo *auditrepo.Repo
 		rec       audit.Recorder
@@ -53,7 +61,7 @@ func (a *assembly) register(r *httpx.Router, deps server.Deps) error {
 	if a.audit != nil { // nil = 仅导出路由清单：处理函数不会被调用
 		auditRepo, rec, withTx = a.audit.Repo(), a.audit, deps.DB.WithTx
 	}
-	return errors.Join(m.Register(r), t.Register(r), taskapi.Register(r, deps.Tasks, rec, withTx), auditapi.Register(r, auditRepo))
+	return errors.Join(m.Register(r), t.Register(r), taskapi.Register(r, deps.Tasks, rec, withTx), auditapi.Register(r, auditRepo), sys.Register(r))
 }
 
 // routesMain 实现 `lingedge-server routes [-o 文件]`：把路由清单（JSON）写到 stdout 或文件，供 make openapi-check 校验

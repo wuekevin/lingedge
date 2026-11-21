@@ -34,9 +34,16 @@ const (
 	permMsgBatch         = 100
 )
 
+// permEntry 是缓存项：权限码（p）与 /auth/me 所需的角色（r）、菜单键（m）。V=2 起含 r/m（Story 1.22：/auth/me 改走本缓存）；
+// 旧格式（无 V）的项只有 p，读取方遇到时回落到直读 MySQL，随 TTL（≤60 秒）自然淘汰。
 type permEntry struct {
 	P []string `json:"p"`
+	R []string `json:"r,omitempty"`
+	M []string `json:"m,omitempty"`
+	V int      `json:"v,omitempty"`
 }
+
+const permEntryVersion = 2
 
 func (s *Service) permKey(userUID string, scopeID, version uint64) (redisx.Key, error) {
 	return s.ks.Key("auth", "perms", userUID, "s"+strconv.FormatUint(scopeID, 10), "v"+strconv.FormatUint(version, 10))
@@ -44,51 +51,9 @@ func (s *Service) permKey(userUID string, scopeID, version uint64) (redisx.Key, 
 
 // LoadPermissions 取主体的有效权限集（平台主体：平台角色；租户主体：其当前租户内的租户角色，且只含 scope 为 tenant/both 的权限）。
 func (s *Service) LoadPermissions(ctx context.Context, p *domain.Principal) (map[string]struct{}, error) {
-	var scopeID uint64
-	if !p.IsPlatform() {
-		if p.Tenant == nil {
-			return map[string]struct{}{}, nil // 没有租户上下文的租户主体：没有任何权限（fail-closed）
-		}
-		scopeID = p.Tenant.ID
-	}
-	load := func(ctx context.Context) ([]byte, error) {
-		var codes []string
-		var err error
-		if scopeID == 0 {
-			codes, err = s.repo.PlatformPermissions(ctx, p.User.ID)
-		} else {
-			codes, err = s.repo.TenantPermissions(ctx, p.User.ID, scopeID)
-		}
-		if err != nil {
-			return nil, err
-		}
-		if codes == nil {
-			codes = []string{}
-		}
-		return json.Marshal(permEntry{P: codes})
-	}
-	var raw []byte
-	key, kerr := s.permKey(p.User.UID, scopeID, p.Session.PermVersion)
-	// Bearer 主体没有会话，但其创建者的 permission_version 随令牌一起现读（见 AuthenticateAPIToken），所以同样可以用版本化的缓存键。
-	if (!p.Bearer && p.Session.ID == 0) || kerr != nil {
-		if kerr != nil {
-			s.log.Warn("权限缓存键构造失败，直读 MySQL", zap.Error(kerr))
-		}
-		var err error
-		raw, err = load(ctx) // 没有会话（版本未知）的主体不缓存
-		if err != nil {
-			return nil, apierr.Internal(err)
-		}
-	} else {
-		var err error
-		raw, err = s.permCache.GetOrLoad(ctx, key, s.permTTL, load)
-		if err != nil {
-			return nil, apierr.Internal(err)
-		}
-	}
-	var e permEntry
-	if err := json.Unmarshal(raw, &e); err != nil {
-		return nil, apierr.Internal(err)
+	e, err := s.loadEntry(ctx, p)
+	if err != nil {
+		return nil, err
 	}
 	set := make(map[string]struct{}, len(e.P))
 	for _, c := range e.P {
@@ -103,6 +68,104 @@ func (s *Service) LoadPermissions(ctx context.Context, p *domain.Principal) (map
 		}
 	}
 	return set, nil
+}
+
+// LoadAccess 返回 /auth/me 所需的角色、权限集与菜单键：与授权钩子同一缓存（键含 permission_version，TTL ≤60 秒，Redis 不可用直读 MySQL），
+// 因此 /auth/me 看到的权限集与授权判定逐项一致（Story 1.18 遗留：此前 /auth/me 直读 MySQL）。
+func (s *Service) LoadAccess(ctx context.Context, p *domain.Principal) (domain.Access, error) {
+	e, err := s.loadEntry(ctx, p)
+	if err != nil {
+		return domain.Access{}, err
+	}
+	if e.V < permEntryVersion { // 旧格式缓存项没有角色/菜单键：直读一次
+		return s.loadAccessDirect(ctx, p)
+	}
+	return domain.Access{Roles: nonNil(e.R), Permissions: nonNil(e.P), MenuKeys: nonNil(e.M)}, nil
+}
+
+func nonNil(l []string) []string {
+	if l == nil {
+		return []string{}
+	}
+	return l
+}
+
+func (s *Service) scopeOf(p *domain.Principal) (uint64, bool) {
+	if p.IsPlatform() {
+		return 0, true
+	}
+	if p.Tenant == nil {
+		return 0, false // 没有租户上下文的租户主体：没有任何权限（fail-closed）
+	}
+	return p.Tenant.ID, true
+}
+
+func (s *Service) loadAccessDirect(ctx context.Context, p *domain.Principal) (domain.Access, error) {
+	scopeID, ok := s.scopeOf(p)
+	if !ok {
+		return domain.Access{Roles: []string{}, Permissions: []string{}, MenuKeys: []string{}}, nil
+	}
+	e, err := s.queryEntry(ctx, p, scopeID)
+	if err != nil {
+		return domain.Access{}, apierr.Internal(err)
+	}
+	return domain.Access{Roles: nonNil(e.R), Permissions: nonNil(e.P), MenuKeys: nonNil(e.M)}, nil
+}
+
+func (s *Service) queryEntry(ctx context.Context, p *domain.Principal, scopeID uint64) (permEntry, error) {
+	var codes []string
+	var err error
+	if scopeID == 0 {
+		codes, err = s.repo.PlatformPermissions(ctx, p.User.ID)
+	} else {
+		codes, err = s.repo.TenantPermissions(ctx, p.User.ID, scopeID)
+	}
+	if err != nil {
+		return permEntry{}, err
+	}
+	roles, menus, err := s.repo.RolesAndMenus(ctx, p.User.ID, scopeID)
+	if err != nil {
+		return permEntry{}, err
+	}
+	return permEntry{P: nonNil(codes), R: nonNil(roles), M: nonNil(menus), V: permEntryVersion}, nil
+}
+
+func (s *Service) loadEntry(ctx context.Context, p *domain.Principal) (permEntry, error) {
+	scopeID, ok := s.scopeOf(p)
+	if !ok {
+		return permEntry{P: []string{}, R: []string{}, M: []string{}, V: permEntryVersion}, nil
+	}
+	load := func(ctx context.Context) ([]byte, error) {
+		e, err := s.queryEntry(ctx, p, scopeID)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(e)
+	}
+	var raw []byte
+	key, kerr := s.permKey(p.User.UID, scopeID, p.Session.PermVersion)
+	// Bearer 主体没有会话，但其创建者的 permission_version 随令牌一起现读（见 AuthenticateAPIToken），所以同样可以用版本化的缓存键。
+	if (!p.Bearer && p.Session.ID == 0) || kerr != nil {
+		if kerr != nil {
+			s.log.Warn("权限缓存键构造失败，直读 MySQL", zap.Error(kerr))
+		}
+		var err error
+		raw, err = load(ctx) // 没有会话（版本未知）的主体不缓存
+		if err != nil {
+			return permEntry{}, apierr.Internal(err)
+		}
+	} else {
+		var err error
+		raw, err = s.permCache.GetOrLoad(ctx, key, s.permTTL, load)
+		if err != nil {
+			return permEntry{}, apierr.Internal(err)
+		}
+	}
+	var e permEntry
+	if err := json.Unmarshal(raw, &e); err != nil {
+		return permEntry{}, apierr.Internal(err)
+	}
+	return e, nil
 }
 
 // permMessage 是 Pub/Sub 广播的内容：被波及的（用户, 范围）与其「旧」版本（即需要删除的缓存键）。

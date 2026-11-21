@@ -24,6 +24,7 @@ func WithSelfService(h Hooks, isSelf func(operationID string) bool) Hooks {
 		Authorizer:    selfAuthorizer{inner: h.Authorizer, isSelf: isSelf},
 		Scope:         selfScope{inner: h.Scope, isSelf: isSelf},
 		Auditor:       h.Auditor,
+		Features:      h.Features,
 	}
 }
 

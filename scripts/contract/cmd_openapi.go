@@ -85,6 +85,7 @@ func runAllChecks(doc *openapi3T, pinnedReauth []string) []finding {
 	fs = append(fs, checkIdempotencyResponses(doc)...)
 	fs = append(fs, checkTenantLeak(doc)...)
 	fs = append(fs, checkReauthSet(doc, pinnedReauth)...)
+	fs = append(fs, checkFeatureTags(doc, commercialOps)...)
 	fs = append(fs, checkListPagination(doc)...)
 	fs = append(fs, checkNoInternalID(doc)...)
 	return fs

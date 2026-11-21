@@ -8,6 +8,7 @@ import (
 	"github.com/wuekevin/lingedge/internal/platform/audit"
 	"github.com/wuekevin/lingedge/internal/platform/httpx"
 	"github.com/wuekevin/lingedge/internal/platform/server"
+	"github.com/wuekevin/lingedge/internal/platform/sysconfig"
 	"github.com/wuekevin/lingedge/internal/tenant"
 )
 
@@ -17,6 +18,8 @@ type assembly struct {
 	auth   auth.Module
 	tenant tenant.Module
 	audit  *audit.Writer
+	// sys 是系统设置模块（Story 1.22）：/admin/settings*、/admin/system/*、/public/*、功能开关（feature.disabled）与 /auth/me 的 features。
+	sys *sysconfig.Module
 }
 
 // buildHooks 是 REST 认证/授权/租户 Scope/审计四个钩子的唯一装配点（Story 1.12 约定，1.13 接入进程）；具体装配在 auth.Module.Hooks()
@@ -30,6 +33,8 @@ type assembly struct {
 //	Reauth         已实现（Story 1.17，1.18 调整顺序）：x-reauth 路由先权限后再认证，窗口外 403 auth.reauth_required。
 //	Scope          完整实现（Story 1.20）：Scope 只由已认证主体 + 路由元数据 + X-Tenant-ID（经授权钩子放行后）生成；租户模块提供租户目录，
 //	               acting-as 的目标租户须真实存在且状态 active（否则 404，与他租户资源逐字节一致）；自助 operation 只从主体自身推导 Scope（忽略 X-Tenant-ID）。
+//	Features       已实现（Story 1.22）：运行模式 → 功能开关；声明了 x-feature 的路由（商业类）在自用模式 403 feature.disabled，位置在认证之后、授权之前（ADR-018 §11）；
+//	               未装配时默认安全拒绝（DenyFeatures）。
 //	Auditor        已实现（Story 1.21）：audit.Writer。审计行由业务 Service 在**业务事务内**写 audit_logs（失败 = 业务整体回滚，fail-closed，IMP-19）；
 //	               钩子兜底「声明了 x-audit 的成功请求却没有审计行」，未在 audit.Catalog 登记的 x-audit operation 一律 500。
 //
@@ -43,8 +48,13 @@ func (a *assembly) buildHooks(d server.Deps) (httpx.Hooks, error) {
 		return httpx.Hooks{}, err
 	}
 	a.audit = aw
+	sys, err := sysconfig.New(sysconfig.Options{Pool: d.DB, Clock: d.Clock, IDs: d.IDs, Log: d.Logger, Box: d.Secrets, Audit: aw, Migrations: d.Migrations, Redis: d.Redis})
+	if err != nil {
+		return httpx.Hooks{}, err
+	}
+	a.sys = sys
 	m, err := auth.New(context.Background(), auth.Options{
-		Pool: d.DB, Redis: d.Redis, Clock: d.Clock, IDs: d.IDs, Log: d.Logger, Argon2: d.Config.Auth.Argon2, Box: d.Secrets, Audit: aw,
+		Pool: d.DB, Redis: d.Redis, Clock: d.Clock, IDs: d.IDs, Log: d.Logger, Argon2: d.Config.Auth.Argon2, Box: d.Secrets, Audit: aw, Features: sys,
 	})
 	if err != nil {
 		return httpx.Hooks{}, err
@@ -59,12 +69,12 @@ func (a *assembly) buildHooks(d server.Deps) (httpx.Hooks, error) {
 	if d.OnShutdown != nil {
 		d.OnShutdown("认证模块后台写入", func(context.Context) error { m.Flush(); return nil })
 	}
-	return assembleHooks(m, tm, aw), nil
+	return assembleHooks(m, tm, aw, sys), nil
 }
 
-// assembleHooks 把认证模块、租户模块（租户目录）与审计钩子装配成 httpx.Hooks（见 buildHooks 说明）。
-func assembleHooks(m auth.Module, t tenant.Module, aw *audit.Writer) httpx.Hooks {
-	return m.Hooks(auth.HooksOptions{Tenants: t.Resolver(), Auditor: aw.Auditor()})
+// assembleHooks 把认证模块、租户模块（租户目录）、审计钩子与功能开关（sysconfig，运行模式 → x-feature，认证后授权前）装配成 httpx.Hooks（见 buildHooks 说明）。
+func assembleHooks(m auth.Module, t tenant.Module, aw *audit.Writer, sys *sysconfig.Module) httpx.Hooks {
+	return m.Hooks(auth.HooksOptions{Tenants: t.Resolver(), Auditor: aw.Auditor(), Features: sys.Gate()})
 }
 
 // 周期作业的登记点见 cron.go（Story 1.15）。

@@ -53,12 +53,27 @@ type Auditor interface {
 	Begin(r *http.Request, meta RouteMeta) (end func(AuditOutcome), err error)
 }
 
+// FeatureGate 是功能开关钩子（Story 1.22、FR-24、ADR-018 §11）：报告某个功能（RouteMeta.Feature，如 commercial）在当前运行模式下是否启用。
+// 对声明了 Feature 的路由，feature 中间件在**认证之后、授权之前**调用它：未启用 → 403 feature.disabled；返回 error → 500（fail-closed，
+// 不会因为读不到运行模式而放行商业路由）。未声明 Feature 的路由不调用它。
+type FeatureGate interface {
+	Enabled(ctx context.Context, feature string) (bool, error)
+}
+
+// DenyFeatures：一律未启用（默认安全拒绝）——声明了 Feature 的路由在功能开关未装配时全部 403 feature.disabled。
+type DenyFeatures struct{}
+
+// Enabled 实现 FeatureGate。
+func (DenyFeatures) Enabled(context.Context, string) (bool, error) { return false, nil }
+
 // Hooks 是钩子集合；任何为 nil 的项在 NewRouter 时被替换为 Deny* 默认实现。
 type Hooks struct {
 	Authenticator Authenticator
 	Authorizer    Authorizer
 	Scope         ScopeResolver
 	Auditor       Auditor
+	// Features 是功能开关（Story 1.22）；nil = DenyFeatures（商业等受控路由安全拒绝）。位置：认证之后、授权之前。
+	Features FeatureGate
 }
 
 // ErrHookNotConfigured 是默认（拒绝）钩子返回的错误：对应能力尚未装配，请求被安全拒绝。
@@ -112,6 +127,9 @@ func (h Hooks) withDefaults() Hooks {
 	}
 	if h.Auditor == nil {
 		h.Auditor = DenyAuditor{}
+	}
+	if h.Features == nil {
+		h.Features = DenyFeatures{}
 	}
 	return h
 }

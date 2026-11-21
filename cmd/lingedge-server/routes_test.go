@@ -29,13 +29,15 @@ func TestRoutesSubcommandExportsManifest(t *testing.T) {
 		"listRoles", "createRole", "getRole", "updateRole", "deleteRole", "setRolePermissions", "listPermissions",
 		"listApiTokens", "createApiToken", "getApiToken", "revokeApiToken", "rotateApiToken",
 		"listTenants", "getCurrentTenant", "getTenant", "updateTenant", "listTenantMembers", "addTenantMember", "getTenantQuotas", "putTenantQuotas",
-		"listAuditLogs", "getAuditLog", "listLoginLogs"} {
+		"listAuditLogs", "getAuditLog", "listLoginLogs",
+		"getSettings", "patchSettings", "getBrandSettings", "putBrandSettings", "getSsrfAllowlist", "putSsrfAllowlist", "getRunMode", "putRunMode",
+		"getVersionInfo", "listInstallations", "getPublicVersion", "getPublicSiteInfo"} {
 		if !got[id] {
 			t.Errorf("清单缺少路由 %s", id)
 		}
 	}
-	if len(m) != 49 {
-		t.Errorf("当前应恰有 49 条路由（任务中心 4 + 认证 13 + 用户/角色/权限管理 16 + API Token 5 + 租户 8 + 审计/登录日志 3（Story 1.21）；createTenant 属 P5 不在此），实际 %d", len(m))
+	if len(m) != 61 {
+		t.Errorf("当前应恰有 61 条路由（任务中心 4 + 认证 13 + 用户/角色/权限管理 16 + API Token 5 + 租户 8 + 审计/登录日志 3（Story 1.21）+ 系统设置/运行模式/版本/安装记录/公开信息 12（Story 1.22）；createTenant 属 P5 不在此），实际 %d", len(m))
 	}
 	for _, e := range m {
 		if e["operation_id"] == "" {

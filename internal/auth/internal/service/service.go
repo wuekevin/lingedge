@@ -859,15 +859,11 @@ type MeResult struct {
 	RunMode string
 }
 
-// Me 读取当前主体的角色/权限集与运行模式（只读；授权判定属 Story 1.18）。
+// Me 读取当前主体的角色/权限集与运行模式（只读；授权判定属 Story 1.18）。权限集与授权钩子共用 permission_version 缓存（LoadAccess）。
 func (s *Service) Me(ctx context.Context, p *domain.Principal) (MeResult, error) {
-	var tid uint64
-	if p.Tenant != nil {
-		tid = p.Tenant.ID
-	}
-	acc, err := s.repo.UserAccess(ctx, p.User.ID, tid)
+	acc, err := s.LoadAccess(ctx, p)
 	if err != nil {
-		return MeResult{}, apierr.Internal(err)
+		return MeResult{}, err
 	}
 	return MeResult{Access: acc, RunMode: s.settings.get(ctx).RunMode}, nil
 }

@@ -12,43 +12,51 @@ import (
 	"github.com/wuekevin/lingedge/internal/auth/internal/domain"
 	"github.com/wuekevin/lingedge/internal/auth/internal/repository"
 	"github.com/wuekevin/lingedge/internal/platform/clock"
+	"github.com/wuekevin/lingedge/internal/platform/sysconfig"
 )
 
-// 默认值是工程假设 [ASSUMPTION]（UD-27：会话滑动/绝对过期、登录节流窗口与阈值「待基线测试后确定」，均为可配置项，不虚构基线）。
-// 它们只在 system_settings 没有对应键时生效；改值只需写 system_settings（15 秒内生效，无需重启）。
+// 键与默认值的**唯一来源**是 internal/platform/sysconfig 的键注册表（Story 1.22）：这里只是别名，认证模块读取时的取值范围也取自注册表
+// （bounds/countBounds），因此经 PATCH /admin/settings 写入的合法值一定会被这里接受，不会出现「写得进、读时被当作无效回退默认」。
+// 默认值是工程假设 [ASSUMPTION]（UD-27：会话滑动/绝对过期、登录节流窗口与阈值「待基线测试后确定」；UD-29：再认证窗口 300 秒），
+// 只在 system_settings 没有对应键时生效；改值只需写 system_settings（15 秒内生效，无需重启）。
 const (
-	DefaultSessionIdleTTL     = 2 * time.Hour
-	DefaultSessionAbsoluteTTL = 12 * time.Hour
-	DefaultThrottleWindow     = 15 * time.Minute
-	DefaultThrottleAccountMax = 10
-	DefaultThrottleIPMax      = 30
-	DefaultRunMode            = "self_hosted"
-	// DefaultReauthWindow 是 L4 再认证窗口：UD-29 采纳值 300 秒（可配置）。
-	DefaultReauthWindow = 300 * time.Second
-	// DefaultMFAWindow 是「近期 MFA」窗口：基线与 UD 均未规定 [ASSUMPTION]，工程假设 15 分钟；可配置，改默认值只是配置改动。
-	DefaultMFAWindow = 15 * time.Minute
-	// API Token（Story 1.19）：基线与 UD 均未规定有效期 [ASSUMPTION]；工程假设 默认 90 天（创建时不给 expires_at）、系统上限 365 天——
-	// 令牌不应默认永不过期。均为 system_settings 可配置项（UD-27 同口径），改默认值只是配置改动。
-	DefaultAPITokenTTL    = 90 * 24 * time.Hour
-	DefaultAPITokenMaxTTL = 365 * 24 * time.Hour
+	DefaultSessionIdleTTL     = sysconfig.DefaultSessionIdleTTL
+	DefaultSessionAbsoluteTTL = sysconfig.DefaultSessionAbsoluteTTL
+	DefaultThrottleWindow     = sysconfig.DefaultThrottleWindow
+	DefaultThrottleAccountMax = sysconfig.DefaultThrottleAccountMax
+	DefaultThrottleIPMax      = sysconfig.DefaultThrottleIPMax
+	DefaultRunMode            = sysconfig.DefaultRunMode
+	DefaultReauthWindow       = sysconfig.DefaultReauthWindow
+	DefaultMFAWindow          = sysconfig.DefaultMFAWindow
+	DefaultAPITokenTTL        = sysconfig.DefaultAPITokenTTL
+	DefaultAPITokenMaxTTL     = sysconfig.DefaultAPITokenMaxTTL
 
 	settingsCacheTTL = 15 * time.Second
 )
 
 // 设置键（system_settings.setting_key；值为 JSON 数字/字符串）。
 const (
-	KeySessionIdleTTL     = "auth.session_idle_ttl_s"
-	KeySessionAbsoluteTTL = "auth.session_absolute_ttl_s"
-	KeyThrottleWindow     = "login.throttle_window_s"
-	KeyThrottleAccountMax = "login.throttle_account_max"
-	KeyThrottleIPMax      = "login.throttle_ip_max"
-	KeyRunMode            = "system.run_mode"
-	KeyReauthWindow       = "auth.reauth_window_s"
-	KeyMFAWindow          = "auth.mfa_window_s"
-	KeyTOTPRequiredAdmin  = "login.totp_required_for_admin"
-	KeyAPITokenDefaultTTL = "auth.api_token_default_ttl_s"
-	KeyAPITokenMaxTTL     = "auth.api_token_max_ttl_s"
+	KeySessionIdleTTL     = sysconfig.KeySessionIdleTTL
+	KeySessionAbsoluteTTL = sysconfig.KeySessionAbsoluteTTL
+	KeyThrottleWindow     = sysconfig.KeyThrottleWindow
+	KeyThrottleAccountMax = sysconfig.KeyThrottleAccountMax
+	KeyThrottleIPMax      = sysconfig.KeyThrottleIPMax
+	KeyRunMode            = sysconfig.KeyRunMode
+	KeyReauthWindow       = sysconfig.KeyReauthWindow
+	KeyMFAWindow          = sysconfig.KeyMFAWindow
+	KeyTOTPRequiredAdmin  = sysconfig.KeyTOTPRequiredAdmin
+	KeyAPITokenDefaultTTL = sysconfig.KeyAPITokenDefaultTTL
+	KeyAPITokenMaxTTL     = sysconfig.KeyAPITokenMaxTTL
 )
+
+// bounds 返回注册表里某个「秒」类型键的取值范围。
+func bounds(key string) (lo, hi time.Duration) {
+	d, ok := sysconfig.Lookup(key)
+	if !ok {
+		panic("auth: 设置键未在 sysconfig 注册表登记: " + key)
+	}
+	return time.Duration(d.Min) * time.Second, time.Duration(d.Max) * time.Second
+}
 
 type settingsCache struct {
 	repo *repository.Repo
@@ -96,9 +104,9 @@ func (c *settingsCache) get(ctx context.Context) domain.Settings {
 		c.expires = now.Add(2 * time.Second) // 故障期间不要每个请求都打库
 		return c.val
 	}
-	next.SessionIdleTTL = secs(c.log, raw, KeySessionIdleTTL, next.SessionIdleTTL, time.Minute, 30*24*time.Hour)
-	next.SessionAbsoluteTTL = secs(c.log, raw, KeySessionAbsoluteTTL, next.SessionAbsoluteTTL, 5*time.Minute, 90*24*time.Hour)
-	next.ThrottleWindow = secs(c.log, raw, KeyThrottleWindow, next.ThrottleWindow, time.Second, 24*time.Hour)
+	next.SessionIdleTTL = secs(c.log, raw, KeySessionIdleTTL, next.SessionIdleTTL)
+	next.SessionAbsoluteTTL = secs(c.log, raw, KeySessionAbsoluteTTL, next.SessionAbsoluteTTL)
+	next.ThrottleWindow = secs(c.log, raw, KeyThrottleWindow, next.ThrottleWindow)
 	next.ThrottleAccountMax = count(c.log, raw, KeyThrottleAccountMax, next.ThrottleAccountMax)
 	next.ThrottleIPMax = count(c.log, raw, KeyThrottleIPMax, next.ThrottleIPMax)
 	if v, ok := raw[KeyRunMode]; ok {
@@ -107,8 +115,8 @@ func (c *settingsCache) get(ctx context.Context) domain.Settings {
 			next.RunMode = s
 		}
 	}
-	next.ReauthWindow = secs(c.log, raw, KeyReauthWindow, next.ReauthWindow, 10*time.Second, 24*time.Hour)
-	next.MFAWindow = secs(c.log, raw, KeyMFAWindow, next.MFAWindow, 30*time.Second, 24*time.Hour)
+	next.ReauthWindow = secs(c.log, raw, KeyReauthWindow, next.ReauthWindow)
+	next.MFAWindow = secs(c.log, raw, KeyMFAWindow, next.MFAWindow)
 	if v, ok := raw[KeyTOTPRequiredAdmin]; ok {
 		var b bool
 		if json.Unmarshal(v, &b) == nil {
@@ -117,8 +125,8 @@ func (c *settingsCache) get(ctx context.Context) domain.Settings {
 			c.log.Warn("系统设置取值无效，使用默认值", zap.String("key", KeyTOTPRequiredAdmin))
 		}
 	}
-	next.APITokenMaxTTL = secs(c.log, raw, KeyAPITokenMaxTTL, next.APITokenMaxTTL, time.Hour, 3650*24*time.Hour)
-	next.APITokenDefaultTTL = secs(c.log, raw, KeyAPITokenDefaultTTL, next.APITokenDefaultTTL, time.Hour, 3650*24*time.Hour)
+	next.APITokenMaxTTL = secs(c.log, raw, KeyAPITokenMaxTTL, next.APITokenMaxTTL)
+	next.APITokenDefaultTTL = secs(c.log, raw, KeyAPITokenDefaultTTL, next.APITokenDefaultTTL)
 	if next.APITokenDefaultTTL > next.APITokenMaxTTL { // 默认有效期不得超过系统上限
 		next.APITokenDefaultTTL = next.APITokenMaxTTL
 	}
@@ -144,7 +152,8 @@ func number(raw map[string]json.RawMessage, key string) (int64, bool) {
 	return i, err == nil
 }
 
-func secs(log *zap.Logger, raw map[string]json.RawMessage, key string, def, lo, hi time.Duration) time.Duration {
+func secs(log *zap.Logger, raw map[string]json.RawMessage, key string, def time.Duration) time.Duration {
+	lo, hi := bounds(key)
 	n, ok := number(raw, key)
 	if !ok {
 		if _, present := raw[key]; present {

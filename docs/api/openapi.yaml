@@ -19,6 +19,7 @@ info:
     - **`either` 与代租户的授权语义（ADR-018 §10）**：租户主体 → 限定在自己租户；平台主体**不带** `X-Tenant-ID` → 跨租户只读，须具备 operation 的 `x-permissions`；平台主体**带** `X-Tenant-ID` → 视为代租户（acting-as），须**同时**具备 `tenant:impersonate` 与 operation 的 `x-permissions`（这些权限的 scope 须为 `tenant` 或 `both`）。`x-tenant-scope: tenant` 的 operation 平台主体只能经 acting-as 调用。
     - **租户响应脱敏规则 R-T1（NFR-14、ADR-009 §5）**：`x-tenant-scope` 为 `tenant`/`either` 的请求与响应 schema **不得含 node/cluster 的内部标识**（属性名 `node_*`、`cluster_uid/name/id`、`egress_node*`、`targets`(节点列表) 等，以及节点主机名/IP/内部错误全文）；聚合计数（如 `summary.healthy/total/offline`）允许。灰度策略、批次、集群放置仅平台可见/可设。CI 对本文件做静态递归检查（跟随 $ref），隔离测试再对真实响应断言。
     - **再认证（L4 step-up，IMP-12）**：声明 `x-reauth: true` 的 operation（改运行模式、改角色/权限、创建/提权管理员、重置口令、吊销节点证书、改 SSRF 白名单…）要求会话在 `auth.reauth_window_s`（默认 300 秒）内通过 `POST /auth/reauth`，否则 `403 auth.reauth_required`。
+    - **功能开关（`x-feature`，Story 1.22）**：商业类 operation（`billing` 标签下全部、`register`、`listPublicPlans`、`createTenant`）声明 `x-feature: commercial`：运行模式为 `self_hosted` 时，已认证主体访问返回 `403 feature.disabled`（认证之后、授权之前；匿名者先得 401）。CI（`make openapi-check`）强制：商业类 operation 必须声明、未知取值被拒；运行时路由清单的 feature 必须与本文件一致。
     - **权限**：每个操作的 `x-permissions` 是权限串（`resource:action`）列表，调用者须**全部**具备；`x-audit=true` 的操作写 `audit_logs`；`x-phase` 为交付阶段。
     - **错误**：统一 `ErrorResponse`；校验失败统一用 `400 validation.failed`（不使用 422，唯一例外：同一 `Idempotency-Key` 复用于不同请求体返回 `422 idempotency.key_reuse`）；登录节流/锁定统一 `429 rate_limit.exceeded`（无 423）；配置发布前校验失败为 `400 config.validation_failed`；功能未启用（运行模式/阶段）为 `403 feature.disabled`；乐观并发冲突为 `412 resource.precondition_failed`；资源冲突为 `409 resource.conflict` 或模块码（如 `site.domain_conflict`）。
     - **分页**：列表 `?page=1&page_size=20&sort=-created_at`（page_size 默认 20、最大 200）→ `{items,page,page_size,total}`；大体量集合（审计、访问日志、事件、流水）用游标 `?cursor=&limit=` → `{items,next_cursor}`。
@@ -784,6 +785,7 @@ paths:
       x-tenant-scope: public
       x-audit: true
       x-phase: P5
+      x-feature: commercial
       x-public: true
   /admin/users:
     get:
@@ -2065,6 +2067,7 @@ paths:
       x-tenant-scope: platform
       x-audit: true
       x-phase: P5
+      x-feature: commercial
   /tenants/current:
     get:
       tags:
@@ -8943,6 +8946,7 @@ paths:
       x-tenant-scope: public
       x-audit: false
       x-phase: P2
+      x-feature: commercial
       x-public: true
   /meta/constraints:
     get:
@@ -13234,6 +13238,7 @@ paths:
       x-tenant-scope: platform
       x-audit: false
       x-phase: P5
+      x-feature: commercial
     post:
       tags:
       - billing
@@ -13278,6 +13283,7 @@ paths:
       x-tenant-scope: platform
       x-audit: true
       x-phase: P5
+      x-feature: commercial
   /billing/products/{productId}:
     get:
       tags:
@@ -13310,6 +13316,7 @@ paths:
       x-tenant-scope: platform
       x-audit: false
       x-phase: P5
+      x-feature: commercial
     patch:
       tags:
       - billing
@@ -13354,6 +13361,7 @@ paths:
       x-tenant-scope: platform
       x-audit: true
       x-phase: P5
+      x-feature: commercial
     delete:
       tags:
       - billing
@@ -13388,6 +13396,7 @@ paths:
       x-tenant-scope: platform
       x-audit: true
       x-phase: P5
+      x-feature: commercial
   /billing/plans:
     get:
       tags:
@@ -13422,6 +13431,7 @@ paths:
       x-tenant-scope: platform
       x-audit: false
       x-phase: P5
+      x-feature: commercial
     post:
       tags:
       - billing
@@ -13466,6 +13476,7 @@ paths:
       x-tenant-scope: platform
       x-audit: true
       x-phase: P5
+      x-feature: commercial
   /billing/plans/{planId}:
     get:
       tags:
@@ -13498,6 +13509,7 @@ paths:
       x-tenant-scope: platform
       x-audit: false
       x-phase: P5
+      x-feature: commercial
     patch:
       tags:
       - billing
@@ -13542,6 +13554,7 @@ paths:
       x-tenant-scope: platform
       x-audit: true
       x-phase: P5
+      x-feature: commercial
     delete:
       tags:
       - billing
@@ -13576,6 +13589,7 @@ paths:
       x-tenant-scope: platform
       x-audit: true
       x-phase: P5
+      x-feature: commercial
   /billing/pricing-rules:
     get:
       tags:
@@ -13610,6 +13624,7 @@ paths:
       x-tenant-scope: platform
       x-audit: false
       x-phase: P5
+      x-feature: commercial
     post:
       tags:
       - billing
@@ -13654,6 +13669,7 @@ paths:
       x-tenant-scope: platform
       x-audit: true
       x-phase: P5
+      x-feature: commercial
   /billing/pricing-rules/{pricingRuleId}:
     get:
       tags:
@@ -13686,6 +13702,7 @@ paths:
       x-tenant-scope: platform
       x-audit: false
       x-phase: P5
+      x-feature: commercial
     patch:
       tags:
       - billing
@@ -13730,6 +13747,7 @@ paths:
       x-tenant-scope: platform
       x-audit: true
       x-phase: P5
+      x-feature: commercial
     delete:
       tags:
       - billing
@@ -13764,6 +13782,7 @@ paths:
       x-tenant-scope: platform
       x-audit: true
       x-phase: P5
+      x-feature: commercial
   /billing/subscriptions:
     get:
       tags:
@@ -13799,6 +13818,7 @@ paths:
       x-tenant-scope: either
       x-audit: false
       x-phase: P5
+      x-feature: commercial
     post:
       tags:
       - billing
@@ -13844,6 +13864,7 @@ paths:
       x-tenant-scope: either
       x-audit: true
       x-phase: P5
+      x-feature: commercial
   /billing/subscriptions/{subscriptionId}:
     get:
       tags:
@@ -13877,6 +13898,7 @@ paths:
       x-tenant-scope: either
       x-audit: false
       x-phase: P5
+      x-feature: commercial
     patch:
       tags:
       - billing
@@ -13922,6 +13944,7 @@ paths:
       x-tenant-scope: either
       x-audit: true
       x-phase: P5
+      x-feature: commercial
   /billing/orders:
     get:
       tags:
@@ -13957,6 +13980,7 @@ paths:
       x-tenant-scope: either
       x-audit: false
       x-phase: P5
+      x-feature: commercial
     post:
       tags:
       - billing
@@ -14002,6 +14026,7 @@ paths:
       x-tenant-scope: either
       x-audit: true
       x-phase: P5
+      x-feature: commercial
   /billing/orders/{orderId}:
     get:
       tags:
@@ -14035,6 +14060,7 @@ paths:
       x-tenant-scope: either
       x-audit: false
       x-phase: P5
+      x-feature: commercial
     patch:
       tags:
       - billing
@@ -14080,6 +14106,7 @@ paths:
       x-tenant-scope: either
       x-audit: true
       x-phase: P5
+      x-feature: commercial
   /billing/wallet:
     get:
       tags:
@@ -14110,6 +14137,7 @@ paths:
       x-tenant-scope: tenant
       x-audit: false
       x-phase: P5
+      x-feature: commercial
   /billing/wallet/entries:
     get:
       tags:
@@ -14144,6 +14172,7 @@ paths:
       x-tenant-scope: tenant
       x-audit: false
       x-phase: P5
+      x-feature: commercial
   /billing/topups:
     post:
       tags:
@@ -14195,6 +14224,7 @@ paths:
       x-tenant-scope: tenant
       x-audit: true
       x-phase: P5
+      x-feature: commercial
   /billing/usage:
     get:
       tags:
@@ -14247,6 +14277,7 @@ paths:
       x-tenant-scope: either
       x-audit: false
       x-phase: P5
+      x-feature: commercial
   /billing/invoices:
     get:
       tags:
@@ -14282,6 +14313,7 @@ paths:
       x-tenant-scope: either
       x-audit: false
       x-phase: P5
+      x-feature: commercial
   /billing/invoices/{invoiceId}:
     get:
       tags:
@@ -14315,6 +14347,7 @@ paths:
       x-tenant-scope: either
       x-audit: false
       x-phase: P5
+      x-feature: commercial
   /billing/payments:
     get:
       tags:
@@ -14350,6 +14383,7 @@ paths:
       x-tenant-scope: either
       x-audit: false
       x-phase: P5
+      x-feature: commercial
   /billing/payments/manual:
     post:
       tags:
@@ -14394,6 +14428,7 @@ paths:
       x-tenant-scope: platform
       x-audit: true
       x-phase: P5
+      x-feature: commercial
   /billing/payments/callback/{provider}:
     post:
       tags:
@@ -14435,6 +14470,7 @@ paths:
       x-tenant-scope: public
       x-audit: true
       x-phase: P5
+      x-feature: commercial
       x-public: true
   /billing/reconciliation:
     get:
@@ -14466,6 +14502,7 @@ paths:
       x-tenant-scope: platform
       x-audit: false
       x-phase: P5
+      x-feature: commercial
   /billing/resellers:
     get:
       tags:
@@ -14500,6 +14537,7 @@ paths:
       x-tenant-scope: platform
       x-audit: false
       x-phase: P5
+      x-feature: commercial
     post:
       tags:
       - billing
@@ -14544,6 +14582,7 @@ paths:
       x-tenant-scope: platform
       x-audit: true
       x-phase: P5
+      x-feature: commercial
   /billing/resellers/{resellerId}:
     get:
       tags:
@@ -14576,6 +14615,7 @@ paths:
       x-tenant-scope: platform
       x-audit: false
       x-phase: P5
+      x-feature: commercial
     patch:
       tags:
       - billing
@@ -14620,6 +14660,7 @@ paths:
       x-tenant-scope: platform
       x-audit: true
       x-phase: P5
+      x-feature: commercial
     delete:
       tags:
       - billing
@@ -14654,6 +14695,7 @@ paths:
       x-tenant-scope: platform
       x-audit: true
       x-phase: P5
+      x-feature: commercial
   /tickets:
     get:
       tags:
@@ -14689,6 +14731,7 @@ paths:
       x-tenant-scope: either
       x-audit: false
       x-phase: P5
+      x-feature: commercial
     post:
       tags:
       - billing
@@ -14730,6 +14773,7 @@ paths:
       x-tenant-scope: tenant
       x-audit: true
       x-phase: P5
+      x-feature: commercial
   /tickets/{ticketId}:
     get:
       tags:
@@ -14763,6 +14807,7 @@ paths:
       x-tenant-scope: either
       x-audit: false
       x-phase: P5
+      x-feature: commercial
   /tickets/{ticketId}/messages:
     post:
       tags:
@@ -14808,6 +14853,7 @@ paths:
       x-tenant-scope: either
       x-audit: true
       x-phase: P5
+      x-feature: commercial
   /tickets/{ticketId}/status:
     put:
       tags:
@@ -14852,6 +14898,7 @@ paths:
       x-tenant-scope: platform
       x-audit: true
       x-phase: P5
+      x-feature: commercial
   /notifications/channels:
     get:
       tags:
@@ -20743,6 +20790,32 @@ components:
       - email
       - display_name
       - user_type
+    MeFeatures:
+      type: object
+      description: 能力清单（FR-31、NFR-27）：前端据此裁剪菜单，不自行猜测。来自后端能力注册表（代码常量，模块交付时登记）；与 capabilities 同源。
+      properties:
+        run_mode:
+          type: string
+          enum:
+          - self_hosted
+          - commercial
+        modules_delivered:
+          type: array
+          items:
+            type: string
+          description: 已真实交付（路由已注册）的后端模块键，只增不虚报。
+        capability_status:
+          type: object
+          description: 高级能力（http3 | l2_cache | dnssec | edge_compute）的验证状态：独立技术验证前恒为 unverified，不可置为 available（NFR-27）。
+          additionalProperties:
+            type: string
+            enum:
+            - unverified
+            - available
+      required:
+      - run_mode
+      - modules_delivered
+      - capability_status
     Capabilities:
       type: object
       properties:
@@ -20799,6 +20872,8 @@ components:
           description: permissions.menu_key 的并集
         capabilities:
           $ref: '#/components/schemas/Capabilities'
+        features:
+          $ref: '#/components/schemas/MeFeatures'
         csrf_token:
           type: string
         session_expires_at:
@@ -26358,6 +26433,9 @@ components:
           - commercial
         registration_open:
           type: boolean
+        console_installed:
+          type: boolean
+          description: 控制台（Console）是否已安装：存在 installed 状态的 console 组件记录，或已配置 console_url。
         admin_url:
           type:
           - string

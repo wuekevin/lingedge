@@ -379,3 +379,60 @@ func TestNoInternalIDExtended(t *testing.T) {
 		t.Errorf("整型 id 路径参数应被命中: %v", fs)
 	}
 }
+
+func TestFeatureTags(t *testing.T) {
+	t.Run("billing 标签与显式清单的商业类 operation 缺 x-feature 被发现（负向样本）", func(t *testing.T) {
+		doc := mustLoad(t, spec(map[string]string{
+			"/b": opOpts{ID: "billed", Tags: "[billing]"}.yaml("get"),
+			"/r": opOpts{ID: "register"}.yaml("post"),
+			"/n": opOpts{ID: "plain"}.yaml("get"),
+		}, ""))
+		fs := checkFeatureTags(doc, []string{"register"})
+		if len(fs) != 2 {
+			t.Fatalf("应发现 billed 与 register 两处缺失，得到 %v", fs)
+		}
+		joined := fs[0].String() + fs[1].String()
+		if !strings.Contains(joined, "GET /b") || !strings.Contains(joined, "POST /r") || strings.Contains(joined, "/n") {
+			t.Fatalf("命中对象不对: %v", fs)
+		}
+	})
+	t.Run("声明了 x-feature: commercial 通过（正向样本）", func(t *testing.T) {
+		doc := mustLoad(t, spec(map[string]string{
+			"/b": opOpts{ID: "billed", Tags: "[billing]", Feature: "commercial"}.yaml("get"),
+			"/r": opOpts{ID: "register", Feature: "commercial"}.yaml("post"),
+		}, ""))
+		if fs := checkFeatureTags(doc, []string{"register"}); len(fs) != 0 {
+			t.Fatalf("应通过: %v", fs)
+		}
+	})
+	t.Run("未知取值被发现", func(t *testing.T) {
+		doc := mustLoad(t, spec(map[string]string{"/x": opOpts{ID: "x", Feature: "premium"}.yaml("get")}, ""))
+		if fs := checkFeatureTags(doc, nil); len(fs) != 1 {
+			t.Fatalf("应发现未知取值: %v", fs)
+		}
+	})
+	t.Run("真实契约：商业类 operation 全部已标注", func(t *testing.T) {
+		doc := mustLoad(t, []byte(readRepoFile(t, "docs/api/openapi.yaml")))
+		if fs := checkFeatureTags(doc, commercialOps); len(fs) != 0 {
+			t.Fatalf("%v", fs)
+		}
+		have := map[string]bool{}
+		billing := 0
+		for _, o := range operations(doc) {
+			have[o.Op.OperationID] = true
+			for _, tg := range o.Op.Tags {
+				if tg == commercialTag {
+					billing++
+				}
+			}
+		}
+		for _, id := range commercialOps {
+			if !have[id] {
+				t.Errorf("商业入口清单里的 %s 不在契约中（清单陈旧）", id)
+			}
+		}
+		if billing == 0 {
+			t.Error("契约里没有 billing 标签的 operation：商业类判定失效")
+		}
+	})
+}

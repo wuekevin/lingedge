@@ -41,6 +41,7 @@ import (
 	"github.com/wuekevin/lingedge/internal/platform/logx"
 	"github.com/wuekevin/lingedge/internal/platform/migrate"
 	"github.com/wuekevin/lingedge/internal/platform/redisx"
+	"github.com/wuekevin/lingedge/internal/platform/sysconfig"
 	taskrepo "github.com/wuekevin/lingedge/internal/platform/taskrt/repository"
 	"github.com/wuekevin/lingedge/internal/platform/taskrt/taskapi"
 	"github.com/wuekevin/lingedge/internal/platform/uid"
@@ -88,6 +89,8 @@ type World struct {
 	RC     *redisx.Client
 	Auth   auth.Module
 	Tenant tenant.Module
+	// Sys 是系统设置模块（Story 1.22）：设置/运行模式/版本/公开信息路由、功能开关与 /auth/me 的 features（与生产装配同一实现）。
+	Sys *sysconfig.Module
 	// Audit 是真实的审计记录器/钩子（与生产同一实现）；Store 是任务存储。
 	Audit  *audit.Writer
 	Store  *taskrepo.Repo
@@ -108,6 +111,10 @@ type Options struct {
 	Routes func(w *World, r *httpx.Router)
 	// ExtraAuditOps 是额外登记到审计记录器的 operation 与动作（测试专用探针路由用；生产装配不传）。
 	ExtraAuditOps []audit.Op
+	// SysCacheTTL 是设置快照缓存 TTL（<=0 取默认 5 秒）；测试可调小以观察跨实例过期语义。
+	SysCacheTTL time.Duration
+	// SysPublicRateLimit 是公开接口每 IP 每分钟上限（<=0 取默认 120）；测试调小以观察 429。
+	SysPublicRateLimit int
 }
 
 // New 创建被测系统（独立临时 MySQL 库 + 独立临时 Redis + 全部迁移）。
@@ -136,7 +143,17 @@ func New(t *testing.T, opts ...Options) *World {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w.Auth, err = auth.New(context.Background(), auth.Options{Pool: w.App, Redis: w.RC, Clock: clock.System(), IDs: gen, Log: lg, Argon2: testArgon, Box: newBox(t), Audit: w.Audit})
+	set, findings, err := migrate.Load(migrations.FS)
+	if err != nil || len(findings) > 0 {
+		t.Fatalf("内嵌迁移集合: %v %v", err, findings)
+	}
+	box := newBox(t)
+	w.Sys, err = sysconfig.New(sysconfig.Options{Pool: w.App, Clock: clock.System(), IDs: gen, Log: lg, Box: box, Audit: w.Audit,
+		Migrations: httpx.MigrationProbeFromApp(w.App, set), Redis: w.RC, CacheTTL: o.SysCacheTTL, PublicRateLimit: o.SysPublicRateLimit})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Auth, err = auth.New(context.Background(), auth.Options{Pool: w.App, Redis: w.RC, Clock: clock.System(), IDs: gen, Log: lg, Argon2: testArgon, Box: box, Audit: w.Audit, Features: w.Sys})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,12 +170,12 @@ func New(t *testing.T, opts ...Options) *World {
 		t.Fatal(err)
 	}
 	w.Store = store
-	hooks := w.Auth.Hooks(auth.HooksOptions{Tenants: w.Tenant.Resolver(), Auditor: w.Audit.Auditor()})
+	hooks := w.Auth.Hooks(auth.HooksOptions{Tenants: w.Tenant.Resolver(), Auditor: w.Audit.Auditor(), Features: w.Sys.Gate()})
 	w.Router, err = httpx.NewRouter(httpx.Options{Logger: lg, IDs: gen, Hooks: hooks, Idempotency: idem})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, reg := range []func(*httpx.Router) error{w.Auth.Register, w.Tenant.Register, func(r *httpx.Router) error { return taskapi.Register(r, store, w.Audit, w.App.WithTx) }, func(r *httpx.Router) error { return auditapi.Register(r, w.Audit.Repo()) }} {
+	for _, reg := range []func(*httpx.Router) error{w.Auth.Register, w.Tenant.Register, func(r *httpx.Router) error { return taskapi.Register(r, store, w.Audit, w.App.WithTx) }, func(r *httpx.Router) error { return auditapi.Register(r, w.Audit.Repo()) }, w.Sys.Register} {
 		if err := reg(w.Router); err != nil {
 			t.Fatal(err)
 		}
