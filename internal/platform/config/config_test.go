@@ -723,3 +723,77 @@ func TestAuthArgon2Config(t *testing.T) {
 		}
 	}
 }
+
+// Story 1.22b：metrics.listen 只允许回环（此前只告警）；架构文档没有受控的非回环场景，故无放开开关。
+func TestMetricsListenMustBeLoopback(t *testing.T) {
+	reject := []string{"0.0.0.0:9180", "':9180'", "'[::]:9180'", "203.0.113.5:9180", "10.0.0.5:9180", "192.168.1.2:9180", "'[2001:db8::1]:9180'", "localhost:9180", "metrics.example.com:9180"}
+	for _, l := range reject {
+		_, err := Parse([]byte("metrics:\n  listen: "+l+"\n"), Options{Environ: []string{}})
+		if err == nil || !hasProblem(problems(t, err), "metrics.listen", "") {
+			t.Errorf("metrics.listen=%s 应被拒绝: %v", l, err)
+		}
+	}
+	for _, l := range []string{"127.0.0.1:9180", "127.0.0.2:9180", "'[::1]:9180'"} {
+		if _, err := Parse([]byte("metrics:\n  listen: "+l+"\n"), Options{Environ: []string{}}); err != nil {
+			t.Errorf("metrics.listen=%s 应允许: %v", l, err)
+		}
+	}
+	// 环境变量覆盖同样被校验；错误文本不回显取值。
+	_, err := Parse(nil, Options{Environ: []string{"LINGEDGE_METRICS__LISTEN=198.51.100.7:9180"}})
+	if err == nil || !hasProblem(problems(t, err), "metrics.listen", "回环") || strings.Contains(err.Error(), "198.51.100.7") {
+		t.Errorf("环境变量设置公网 metrics 地址应被拒绝且不回显取值: %v", err)
+	}
+	// 直接构造的 Config 经 Validate 同样拒绝。
+	c := Defaults()
+	c.Metrics.Listen = "0.0.0.0:9180"
+	if err := c.Validate(); err == nil {
+		t.Error("Validate 应拒绝通配 metrics 地址")
+	}
+	if !IsLoopbackListen("127.0.0.1:1") || IsLoopbackListen("0.0.0.0:1") || IsLoopbackListen("localhost:1") || IsLoopbackListen("bad") {
+		t.Error("IsLoopbackListen 判定错误")
+	}
+}
+
+// Story 1.22b：server.trusted_proxies（缺省仅 127.0.0.1/::1；校验；环境变量逗号分隔）。
+func TestTrustedProxiesConfig(t *testing.T) {
+	cfg, err := Parse(nil, Options{Environ: []string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(cfg.Server.TrustedProxies, ","); got != "127.0.0.1,::1" {
+		t.Errorf("缺省应仅信任本机反代: %q", got)
+	}
+	cfg, err = Parse([]byte("server:\n  trusted_proxies: ['10.0.0.0/8', '192.0.2.7', '2001:db8::/32']\n"), Options{Environ: []string{}})
+	if err != nil || len(cfg.Server.TrustedProxies) != 3 {
+		t.Fatalf("合法列表应通过: %v %v", cfg, err)
+	}
+	cfg, err = Parse(nil, Options{Environ: []string{"LINGEDGE_SERVER__TRUSTED_PROXIES=10.1.0.0/16, 127.0.0.1"}})
+	if err != nil || strings.Join(cfg.Server.TrustedProxies, "|") != "10.1.0.0/16|127.0.0.1" {
+		t.Fatalf("环境变量逗号分隔: %v %v", cfg, err)
+	}
+	for name, y := range map[string]string{
+		"/0":           "['0.0.0.0/0']",
+		"::/0":         "['::/0']",
+		"未指定":          "['0.0.0.0']",
+		"IPv4 过短":      "['10.0.0.0/7']",
+		"IPv6 过短":      "['2001:db8::/31']",
+		"非法":           "['not-an-ip']",
+		"主机名":          "['proxy.example.com']",
+		"空串":           "['']",
+		"带空白":          "[' 10.0.0.1']",
+		"zone":         "['fe80::1%eth0']",
+		"空列表":          "[]",
+		"IPv4 映射 CIDR": "['::ffff:10.0.0.0/104']",
+	} {
+		_, err := Parse([]byte("server:\n  trusted_proxies: "+y+"\n"), Options{Environ: []string{}})
+		ok := false
+		if err != nil {
+			for _, p := range problems(t, err) {
+				ok = ok || strings.HasPrefix(p.Path, "server.trusted_proxies")
+			}
+		}
+		if !ok {
+			t.Errorf("%s: 应被拒绝: %v", name, err)
+		}
+	}
+}

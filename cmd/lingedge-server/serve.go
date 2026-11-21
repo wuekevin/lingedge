@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/wuekevin/lingedge/cmd/lingedge-server/assembly"
 	"github.com/wuekevin/lingedge/internal/platform/config"
 	"github.com/wuekevin/lingedge/internal/platform/logx"
 	"github.com/wuekevin/lingedge/internal/platform/server"
@@ -82,10 +83,10 @@ func serveMain(args []string, stderr io.Writer, environ []string) int {
 		_, _ = fmt.Fprintf(stderr, "%s: 拒绝启动：任务类型注册表无效: %v\n", name, err)
 		return 1
 	}
-	asm := &assembly{}
+	asm := assembly.New()
 	err = server.Run(ctx, server.Options{
 		Config: cfg, Roles: rs, Logger: logger,
-		Register: asm.register, BuildHooks: asm.buildHooks, Tasks: tasks, Cron: registerCron, OpenMaint: openMaint, ShutdownTimeout: *timeout,
+		Register: asm.Register, BuildHooks: asm.BuildHooks, Tasks: tasks, Cron: registerCron, OpenMaint: openMaint, ShutdownTimeout: *timeout,
 	})
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "%s: %v\n", name, err)

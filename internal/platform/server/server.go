@@ -147,6 +147,10 @@ func Run(ctx context.Context, o Options) error {
 	if o.Logger == nil {
 		return errors.New("server: 缺少 Logger")
 	}
+	// 纵深防御（Story 1.22b）：config.Parse 已拒绝非回环的 metrics.listen；绕过 Parse 直接构造的 Config 在此同样拒绝启动（不再只告警）。
+	if !config.IsLoopbackListen(o.Config.Metrics.Listen) {
+		return errors.New("server: metrics.listen 必须是回环地址（127.0.0.0/8 或 ::1）：指标端口仅本机可达（architecture §7）")
+	}
 	if o.Clock == nil {
 		o.Clock = clock.System()
 	}
@@ -270,9 +274,6 @@ func Run(ctx context.Context, o Options) error {
 	}
 	closers = append(closers, closer{"metrics 监听", func(context.Context) error { _ = mln.Close(); return nil }})
 	info.MetricsAddr = mln.Addr().String()
-	if host, _, _ := net.SplitHostPort(cfg.Metrics.Listen); !isLoopbackHost(host) {
-		log.Warn("metrics 监听在非回环地址：指标端口应仅本机可达（architecture §7）", zap.String("listen", cfg.Metrics.Listen))
-	}
 	servers = append(servers, served{"metrics", httpx.NewMetricsServer(cfg.Metrics.Listen, metrics), mln})
 
 	if o.Roles.Has(RoleAPI) {
@@ -284,7 +285,8 @@ func Run(ctx context.Context, o Options) error {
 		}
 		router, err := httpx.NewRouter(httpx.Options{
 			Logger: o.Logger, Clock: o.Clock, IDs: ids, Hooks: hooks, Metrics: metrics, Idempotency: idem,
-			Health: httpx.HealthOptions{DB: app, Migrations: probe, Redis: rc},
+			TrustedProxies: cfg.Server.TrustedProxies, // 来源 IP 的唯一来源（httpx.ClientIPFrom），不得在别处另行解析 X-Forwarded-For
+			Health:         httpx.HealthOptions{DB: app, Migrations: probe, Redis: rc},
 		})
 		if err != nil {
 			return fail(err)
@@ -399,11 +401,6 @@ func Run(ctx context.Context, o Options) error {
 	}
 	log.Info("优雅停机完成")
 	return nil
-}
-
-func isLoopbackHost(h string) bool {
-	ip := net.ParseIP(h)
-	return h == "localhost" || (ip != nil && ip.IsLoopback())
 }
 
 // skeletonOwner 登记各骨架角色由哪个 Story 实现（文档与日志都引用它，避免「假装有功能」）。

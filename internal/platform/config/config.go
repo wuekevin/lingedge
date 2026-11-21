@@ -17,6 +17,7 @@ import (
 	"io"
 	"io/fs"
 	"net"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -55,6 +56,10 @@ type Server struct {
 	Env string `yaml:"env"`
 	// DataDir 是数据目录（tools-design §5：/var/lib/lingedge/server）。
 	DataDir string `yaml:"data_dir"`
+	// TrustedProxies 是可信反代（IP 或 CIDR 列表）：只有 TCP 对端属于这些范围时才采信 X-Forwarded-For（取链上最右侧的非可信地址）。
+	// 它是 REST 来源 IP 的唯一来源——访问日志、登录日志/节流、API Token 的 allowed_cidrs、审计的 ip 全部经 httpx.ClientIPFrom 取同一个值（Story 1.22b）。
+	// 缺省仅 127.0.0.1 与 ::1（同机 Nginx 反代，tools-design §10.4）；环境变量用逗号分隔。
+	TrustedProxies []string `yaml:"trusted_proxies"`
 }
 
 // HTTP 是 REST 监听。
@@ -156,7 +161,7 @@ type Release struct {
 // Defaults 返回缺省配置：仅含架构文档已明确的监听/路径/日志取值，不含任何口令或待基线的参数。
 func Defaults() Config {
 	return Config{
-		Server:   Server{DataDir: "/var/lib/lingedge/server"},
+		Server:   Server{DataDir: "/var/lib/lingedge/server", TrustedProxies: []string{"127.0.0.1", "::1"}},
 		HTTP:     HTTP{Listen: "127.0.0.1:8080"},
 		GRPC:     GRPC{Listen: "0.0.0.0:9443", EnrollListen: "0.0.0.0:9444"},
 		Metrics:  Metrics{Listen: "127.0.0.1:9180"},
@@ -380,6 +385,14 @@ func setLeaf(v reflect.Value, s string) error {
 			return errors.New("必须是整数")
 		}
 		v.SetInt(int64(n))
+	case v.Kind() == reflect.Slice && v.Type().Elem().Kind() == reflect.String:
+		var items []string
+		for _, it := range strings.Split(s, ",") {
+			if it = strings.TrimSpace(it); it != "" {
+				items = append(items, it)
+			}
+		}
+		v.Set(reflect.ValueOf(items))
 	case v.Kind() == reflect.Bool:
 		b, err := strconv.ParseBool(strings.TrimSpace(s))
 		if err != nil {
@@ -506,6 +519,62 @@ func validListen(addr string) bool {
 	return validPort(port)
 }
 
+// IsLoopbackListen 报告 <IP>:<端口> 的主机部分是否为回环 IP 字面量（127.0.0.0/8、::1）。空主机（通配）、0.0.0.0、::、主机名、无法解析一律为 false。
+// 配置校验与 server 启动共用它（后者是对「绕过 Parse 直接构造 Config」的纵深防御）。
+func IsLoopbackListen(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// validateTrustedProxies 校验 server.trusted_proxies：每项是 IP 或 CIDR；拒绝未指定地址、/0 与过短前缀（IPv4 < /8、IPv6 < /32，与 ADR-006 §5 同口径）、
+// 带 zone 的地址；至少一项（空列表会让「可信」语义含糊——要不信任任何代理请只列一个不会出现的地址，而不是留空）。
+func (c *Config) validateTrustedProxies(add func(path, reason string)) {
+	if len(c.Server.TrustedProxies) == 0 {
+		add("server.trusted_proxies", "不得为空：至少列出一个可信反代 IP/CIDR（缺省 127.0.0.1 与 ::1）")
+		return
+	}
+	for i, raw := range c.Server.TrustedProxies {
+		path := fmt.Sprintf("server.trusted_proxies[%d]", i)
+		s := strings.TrimSpace(raw)
+		if s == "" || s != raw || strings.Contains(s, "%") {
+			add(path, "必须是 IP 或 CIDR（不得含空白或 zone）")
+			continue
+		}
+		var ip net.IP
+		bits, total := -1, 0
+		if strings.Contains(s, "/") {
+			p, err := netip.ParsePrefix(s)
+			if err != nil {
+				add(path, "必须是合法的 IP 或 CIDR")
+				continue
+			}
+			ip, bits, total = net.IP(p.Addr().AsSlice()), p.Bits(), p.Addr().BitLen()
+			if p.Addr().Is4In6() {
+				add(path, "不接受 IPv4 映射的 IPv6 CIDR；请直接写 IPv4 CIDR")
+				continue
+			}
+		} else {
+			a, err := netip.ParseAddr(s)
+			if err != nil {
+				add(path, "必须是合法的 IP 或 CIDR")
+				continue
+			}
+			ip = net.IP(a.AsSlice())
+		}
+		if ip.IsUnspecified() || bits == 0 {
+			add(path, "不得是未指定地址或 /0：这会让任何人都能伪造来源 IP")
+			continue
+		}
+		if bits >= 0 && ((total == 32 && bits < 8) || (total == 128 && bits < 32)) {
+			add(path, "前缀过短（IPv4 至少 /8、IPv6 至少 /32）：范围过大会让不可信主机伪造来源 IP")
+		}
+	}
+}
+
 func validPort(p string) bool {
 	n, err := strconv.Atoi(p)
 	return err == nil && n >= 1 && n <= 65535
@@ -527,6 +596,9 @@ func (c *Config) validateProblems() []Problem {
 		add("server.data_dir", "必须是规范化的绝对路径（不得含 .. 或多余分隔符，且不得为 /）")
 	}
 
+	// 可信反代：IP 或 CIDR；拒绝会让任何人伪造来源 IP 的范围。
+	c.validateTrustedProxies(add)
+
 	// 监听地址：格式 + 互不冲突
 	listens := []struct{ path, val string }{
 		{"http.listen", c.HTTP.Listen}, {"grpc.listen", c.GRPC.Listen},
@@ -543,6 +615,12 @@ func (c *Config) validateProblems() []Problem {
 			continue
 		}
 		seen[normalizeListen(l.val)] = l.path
+	}
+
+	// metrics.listen 只允许回环（architecture §7、tools-design §10.4：指标端口仅本机可达，由本机 Prometheus/Agent 抓取）。
+	// 架构文档没有任何「受控的非回环」场景，因此没有放开开关：通配/公网/内网地址一律拒绝启动（Story 1.22b；此前仅告警）。
+	if validListen(c.Metrics.Listen) && !IsLoopbackListen(c.Metrics.Listen) {
+		add("metrics.listen", "必须是回环地址（127.0.0.0/8 或 ::1）：指标端口仅本机可达（architecture §7）；通配地址、公网/内网地址一律拒绝，需要远程抓取请经本机 Prometheus/Nginx 转发")
 	}
 
 	// database（字段为空表示「尚未配置」，必需性由 ValidateRuntime 判定）

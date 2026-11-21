@@ -417,6 +417,24 @@ func TestServerRefusesToStart(t *testing.T) {
 			t.Error("输出泄露了口令")
 		}
 	})
+	t.Run("metrics 监听非回环被拒（Story 1.22b）", func(t *testing.T) {
+		b, _ := os.ReadFile(e.cfgPath)
+		p2 := filepath.Join(e.dir, "metricscfg.yaml")
+		bad := bytes.Replace(b, []byte("metrics:\n  listen: 127.0.0.1:"), []byte("metrics:\n  listen: 0.0.0.0:"), 1)
+		if bytes.Equal(b, bad) {
+			t.Fatal("测试配置里没有 metrics 监听行（格式变化？）")
+		}
+		if err := os.WriteFile(p2, bad, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command(buildServer(t), "--config", p2)
+		cmd.Env = e.environ()
+		out, err := cmd.CombinedOutput()
+		var ee *exec.ExitError
+		if !errors.As(err, &ee) || ee.ExitCode() != 1 || !strings.Contains(string(out), "metrics.listen") || !strings.Contains(string(out), "回环") {
+			t.Fatalf("非回环 metrics 监听应在配置阶段拒绝启动: %v\n%s", err, out)
+		}
+	})
 	t.Run("配置里写了数据库口令被拒", func(t *testing.T) {
 		b, _ := os.ReadFile(e.cfgPath)
 		p2 := filepath.Join(e.dir, "badcfg.yaml")

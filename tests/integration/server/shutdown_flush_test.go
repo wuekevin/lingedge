@@ -10,8 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wuekevin/lingedge/internal/auth"
-	"github.com/wuekevin/lingedge/internal/platform/audit"
+	"github.com/wuekevin/lingedge/cmd/lingedge-server/assembly"
 	"github.com/wuekevin/lingedge/internal/platform/clock"
 	"github.com/wuekevin/lingedge/internal/platform/httpx"
 	"github.com/wuekevin/lingedge/internal/platform/logx"
@@ -21,8 +20,8 @@ import (
 )
 
 // Story 1.16 遗留（Story 1.17 接入）：server 优雅停机流程要调用 auth Module.Flush，使异步的「DB 兜底失败计数」在 MySQL 关闭前落库。
-// 本测试在进程内用真实 server.Run（真实 MySQL/Redis/主密钥）装配真实认证模块，其接线方式与 cmd/lingedge-server/assembly.go 相同：
-// 经 Deps.OnShutdown 登记 Flush。断言：①停机钩子被调用；②调用时监听已关闭（在途请求已排空）而 MySQL 仍可用（钩子在资源关闭之前）；
+// 本测试在进程内用真实 server.Run（真实 MySQL/Redis/主密钥）装配真实认证模块，其装配与生产进程是同一个装配根（cmd/lingedge-server/assembly，Story 1.22b）：
+// Flush 经 Deps.OnShutdown 登记。断言：①停机钩子被调用；②调用时监听已关闭（在途请求已排空）而 MySQL 仍可用（钩子在资源关闭之前）；
 // ③失败登录的异步计数在 Run 返回后已全部落库；④Deps 带有信封加密（Secrets）。
 func TestShutdownFlushesAuthBackgroundWrites(t *testing.T) {
 	e := newEnv(t, all)
@@ -42,7 +41,9 @@ func TestShutdownFlushesAuthBackgroundWrites(t *testing.T) {
 	e.root(t, "INSERT INTO §.users (uid, user_type, email, display_name, password_hash, status) VALUES (?, 'platform', ?, 'u', ?, 'active')",
 		ids.MustNew(), email, "$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHRzYWx0c2FsdA$"+strings.Repeat("A", 43)) // 哈希格式合法即可：本测试只发错误口令
 
-	var m auth.Module
+	// 与生产同一个装配根（Story 1.22b）：Flush 钩子由 assembly.BuildHooks 经 Deps.OnShutdown 登记；本测试只在其后追加探针钩子
+	// （停机按登记的相反顺序执行，探针先于 Flush 运行，用来观察「监听已关闭、MySQL 仍可用」）。
+	asm := assembly.New()
 	var hookRan, listenerClosedAtHook, dbUpAtHook bool
 	var addr string
 	opts := server.Options{
@@ -51,27 +52,21 @@ func TestShutdownFlushesAuthBackgroundWrites(t *testing.T) {
 			if d.Secrets == nil || d.OnShutdown == nil {
 				return httpx.Hooks{}, fmt.Errorf("Deps 应带 Secrets 与 OnShutdown")
 			}
-			var err error
-			aw, aerr := audit.New(audit.Options{Pool: d.DB, IDs: d.IDs, Clock: d.Clock, Log: d.Logger})
-			if aerr != nil {
-				return httpx.Hooks{}, aerr
-			}
-			m, err = auth.New(context.Background(), auth.Options{Pool: d.DB, Redis: d.Redis, Clock: d.Clock, IDs: d.IDs, Log: d.Logger, Argon2: cfg.Auth.Argon2, Box: d.Secrets, Audit: aw})
+			hooks, err := asm.BuildHooks(d)
 			if err != nil {
 				return httpx.Hooks{}, err
 			}
 			pool := d.DB
-			d.OnShutdown("认证模块后台写入", func(ctx context.Context) error {
+			d.OnShutdown("探针：监听已关闭、MySQL 仍可用", func(ctx context.Context) error {
 				hookRan = true
 				_, cerr := http.Get("http://" + addr + "/healthz") //nolint:noctx // 探测监听是否已关闭
 				listenerClosedAtHook = cerr != nil
 				dbUpAtHook = pool.Ping(ctx) == nil
-				m.Flush()
 				return nil
 			})
-			return httpx.WithSelfService(httpx.Hooks{Authenticator: m.Authenticator(), Auditor: aw.Auditor()}, m.SelfService), nil
+			return hooks, nil
 		},
-		Register: func(r *httpx.Router, _ server.Deps) error { return m.Register(r) },
+		Register: asm.Register,
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	ready := make(chan server.Info, 1)
@@ -111,7 +106,7 @@ func TestShutdownFlushesAuthBackgroundWrites(t *testing.T) {
 		t.Fatal("停机超时")
 	}
 	if !hookRan {
-		t.Fatal("停机流程必须调用已登记的 auth Flush 钩子")
+		t.Fatal("停机流程必须调用已登记的停机钩子")
 	}
 	if !listenerClosedAtHook || !dbUpAtHook {
 		t.Errorf("钩子应在监听排空之后、MySQL 关闭之前运行: listenerClosed=%v dbUp=%v", listenerClosedAtHook, dbUpAtHook)

@@ -6,7 +6,7 @@
 // （auth.Module.Hooks，含完整租户 Scope 钩子与租户目录）+ 真实 HTTP 监听。没有任何 Mock；用后清理；本机常驻 mysqld/redis 不受影响。
 //
 // 口令、令牌、会话 Cookie、CSRF 令牌全部在运行期生成（G-6：仓库内没有固定口令），并登记到 World.Secrets，供日志脱敏扫描（G-5）。
-// 装配与 cmd/lingedge-server 的 registerRoutes/buildHooks 保持同一组成（auth + tenant + taskapi + audit）；漂移由隔离矩阵的「路由清单一致」用例核对。
+// 钩子与路由由生产同一个装配根构造（cmd/lingedge-server/assembly：BuildHooks/Register，Story 1.22b 起不再各写一份镜像）；路由清单一致性由隔离矩阵与 TestRegisteredRoutesMatchServerBinary 核对。
 package apistack
 
 import (
@@ -29,9 +29,9 @@ import (
 
 	"golang.org/x/crypto/argon2"
 
+	"github.com/wuekevin/lingedge/cmd/lingedge-server/assembly"
 	"github.com/wuekevin/lingedge/internal/auth"
 	"github.com/wuekevin/lingedge/internal/platform/audit"
-	"github.com/wuekevin/lingedge/internal/platform/audit/auditapi"
 	"github.com/wuekevin/lingedge/internal/platform/clock"
 	"github.com/wuekevin/lingedge/internal/platform/config"
 	"github.com/wuekevin/lingedge/internal/platform/db"
@@ -41,9 +41,9 @@ import (
 	"github.com/wuekevin/lingedge/internal/platform/logx"
 	"github.com/wuekevin/lingedge/internal/platform/migrate"
 	"github.com/wuekevin/lingedge/internal/platform/redisx"
+	"github.com/wuekevin/lingedge/internal/platform/server"
 	"github.com/wuekevin/lingedge/internal/platform/sysconfig"
 	taskrepo "github.com/wuekevin/lingedge/internal/platform/taskrt/repository"
-	"github.com/wuekevin/lingedge/internal/platform/taskrt/taskapi"
 	"github.com/wuekevin/lingedge/internal/platform/uid"
 	"github.com/wuekevin/lingedge/internal/tenant"
 	"github.com/wuekevin/lingedge/migrations"
@@ -139,27 +139,9 @@ func New(t *testing.T, opts ...Options) *World {
 	t.Cleanup(func() { _ = w.RC.Close() })
 
 	gen := uid.NewGenerator(clock.System())
-	w.Audit, err = audit.New(audit.Options{Pool: w.App, IDs: gen, Clock: clock.System(), Log: lg, ExtraOps: o.ExtraAuditOps})
-	if err != nil {
-		t.Fatal(err)
-	}
 	set, findings, err := migrate.Load(migrations.FS)
 	if err != nil || len(findings) > 0 {
 		t.Fatalf("内嵌迁移集合: %v %v", err, findings)
-	}
-	box := newBox(t)
-	w.Sys, err = sysconfig.New(sysconfig.Options{Pool: w.App, Clock: clock.System(), IDs: gen, Log: lg, Box: box, Audit: w.Audit,
-		Migrations: httpx.MigrationProbeFromApp(w.App, set), Redis: w.RC, CacheTTL: o.SysCacheTTL, PublicRateLimit: o.SysPublicRateLimit})
-	if err != nil {
-		t.Fatal(err)
-	}
-	w.Auth, err = auth.New(context.Background(), auth.Options{Pool: w.App, Redis: w.RC, Clock: clock.System(), IDs: gen, Log: lg, Argon2: testArgon, Box: box, Audit: w.Audit, Features: w.Sys})
-	if err != nil {
-		t.Fatal(err)
-	}
-	w.Tenant, err = tenant.New(context.Background(), tenant.Options{Pool: w.App, Clock: clock.System(), Log: lg, Audit: w.Audit})
-	if err != nil {
-		t.Fatal(err)
 	}
 	store, err := taskrepo.New(w.App, gen)
 	if err != nil {
@@ -170,15 +152,23 @@ func New(t *testing.T, opts ...Options) *World {
 		t.Fatal(err)
 	}
 	w.Store = store
-	hooks := w.Auth.Hooks(auth.HooksOptions{Tenants: w.Tenant.Resolver(), Auditor: w.Audit.Auditor(), Features: w.Sys.Gate()})
-	w.Router, err = httpx.NewRouter(httpx.Options{Logger: lg, IDs: gen, Hooks: hooks, Idempotency: idem})
+	// 与生产进程同一个装配根（cmd/lingedge-server/assembly）：钩子与路由都由它构造，测试只调小缓存 TTL/限流、追加探针审计动作（Story 1.22b）。
+	cfg := config.Defaults()
+	cfg.Auth.Argon2 = testArgon
+	asm := assembly.New(assembly.Options{ExtraAuditOps: o.ExtraAuditOps, SysCacheTTL: o.SysCacheTTL, SysPublicRateLimit: o.SysPublicRateLimit})
+	deps := server.Deps{Tasks: store, DB: w.App, Redis: w.RC, Clock: clock.System(), IDs: gen, Logger: lg, Config: &cfg, Secrets: newBox(t),
+		Migrations: httpx.MigrationProbeFromApp(w.App, set)}
+	hooks, err := asm.BuildHooks(deps)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, reg := range []func(*httpx.Router) error{w.Auth.Register, w.Tenant.Register, func(r *httpx.Router) error { return taskapi.Register(r, store, w.Audit, w.App.WithTx) }, func(r *httpx.Router) error { return auditapi.Register(r, w.Audit.Repo()) }, w.Sys.Register} {
-		if err := reg(w.Router); err != nil {
-			t.Fatal(err)
-		}
+	w.Auth, w.Tenant, w.Audit, w.Sys = asm.Auth, asm.Tenant, asm.Audit, asm.Sys
+	w.Router, err = httpx.NewRouter(httpx.Options{Logger: lg, IDs: gen, Hooks: hooks, Idempotency: idem, TrustedProxies: cfg.Server.TrustedProxies})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := asm.Register(w.Router, deps); err != nil {
+		t.Fatal(err)
 	}
 	if o.Routes != nil {
 		o.Routes(w, w.Router)
