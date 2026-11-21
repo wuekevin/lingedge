@@ -49,7 +49,7 @@ source: docs/bmad/epics.md「待用户决策清单（UD）」
 | UD-30 | P5 是否提供「线路/区域套餐」（**新增**，源自 Q-10） | 不提供；集群放置由平台 `placement.default_cluster_uids` 决定，租户不选集群、不可见集群（`available-clusters` 不采纳） | **采纳**。与 NFR-14 与 R-T1 一致 | 3.3、3.9、3.35、6.2：若要提供，需新增不暴露集群身份的 `placement_profile`（ADR-009 §5 可被推翻处）并改租户 API | P5 前 |
 | UD-31 | 数据库凭据交接与生命周期（**新增**，源自 AA-7 定稿，ADR-026） | 向导在 setup mode 内进程内迁移，migrate 口令仅内存、用后清零、绝不持久化；`lingedge_app`/`lingedge_maint`/Redis 口令与 DB 连接目标经 secretbox 信封加密存 `<data_dir>/secrets/runtime-credentials.json`（`lingedge:lingedge` 0600）；`lingedge_migrate` 运行/升级期口令存 `/etc/lingedge/server/migrate.yaml`（root:root 0400，root 侧 `migrate credential init/reset` 写入，升级时无文件则交互输入）；root 侧 migrate 的连接目标不取自 `lingedge` 可写文件 | **采纳（默认采纳、可推翻）**。与 epics 建议默认的**唯一差异**：app/maint 密文文件不是 root:lingedge 0440（向导无权创建 root 属主文件，也无提权通道），改为数据目录内 `lingedge` 属主 0600，机密性由信封加密保证；其余完全采纳。契约加法见 CC-11 | **推翻影响**：①要求 app/maint 口令放 root 属主文件 → 需新增 root 侧交接通道（Tools 命令/systemd `.path`）与两阶段落盘，1.24 AC3/AC7/AC9、1.35 联调增加提权环节，`--from-file` 须由 root 运行；②不允许完成页一次性展示 migrate 口令 → 删 `one_time_secrets` 与自动生成分支（CC-11 缩减，属收紧，须走 ADR-017 §10）；③升级不保存 migrate 口令 → `migrate.yaml` 变可选，1.43 非交互升级需口令文件。不影响 1.1–1.23 与迁移 | 1.24 开工前确认（不阻塞 1.1–1.23） |
 
-### 1.1 UD-27 补充：Story 1.24–1.27 引入的工程取值默认值（`[ASSUMPTION]`，登记于 Story 1.27b）
+### 1.1 UD-27 补充：Story 1.24–1.28 引入的工程取值默认值（`[ASSUMPTION]`，登记于 Story 1.27b，1.28 追加）
 
 基线与 UD 均未规定下列数值；它们是实现时的保守工程取值，均为代码常量或调用方可收紧的参数，**不是产品承诺**，基线/验收后再定，不改结构：
 
@@ -60,6 +60,8 @@ source: docs/bmad/epics.md「待用户决策清单（UD）」
 | `SafeExtract` 限额（1.26，`security/extract.go`） | 缺省 5 万文件 / 2 GiB 总量 / 1 GiB 单文件 / 路径 512 字符 / 深度 16；绝对上限 20 万 / 8 GiB / 4 GiB / 1024 / 32 | 实际限额取自清单 `files_count/unpacked_size` 并被绝对上限收紧（tools-design §18.1） |
 | `safeexec`（1.26） | 5 分钟超时、输出 1 MiB、最多 1024 个参数、单参数 128 KiB | 调用方可收紧 |
 | 清单解析（1.27，`manifest.go`/`keys.go`） | 清单 8 MiB、JSON 嵌套 24 层、keys 文件 256 KiB；`size ∈ [1, 8 GiB]` | tools-design §9.2 已写明 schema 规则 |
+| 下载器传输（1.28，`downloader/client.go`） | 连接 10s、TLS 握手 10s、响应头 30s、响应体空闲 30s、单次尝试 30 分钟、含重试总时长 2 小时；最多 4 次尝试，退避 1s/2s/4s（上限 8s）；重定向 ≤5 次；TLS ≥1.2 | 均可经 `downloader.Config` 收紧；无 `--insecure` |
+| 离线 bundle 与包前部读取（1.28，`bundle.go`/`acquire.go`） | bundle 索引 ≤4096 个条目；`manifest.json` ≤8 MiB、`.sig` ≤4 KiB；解压前读取的 META：`package.json` ≤64 KiB、`SHA256SUMS` ≤16 MiB、`.sig` ≤4 KiB，且 META 必须位于归档前部（先于任何 `payload/` 条目） | tools-design §9.3/§9.4 已写明 |
 
 ## 2. 与架构开放项 Q-1…Q-10 的对应
 

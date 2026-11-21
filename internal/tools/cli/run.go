@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
+	"github.com/wuekevin/lingedge/internal/tools/downloader"
 	"github.com/wuekevin/lingedge/internal/tools/manifest"
 )
 
@@ -94,10 +95,11 @@ func jsonAfterParseFailure(cmd *cobra.Command, args []string) bool {
 func isParseStageError(err error) bool {
 	var ce *Error
 	var me *manifest.Error
+	var de *downloader.Error
 	switch {
 	case errors.As(err, &ce):
 		return ce.Code == "usage.invalid_flag"
-	case errors.As(err, &me), errors.Is(err, context.Canceled):
+	case errors.As(err, &me), errors.As(err, &de), errors.Is(err, context.Canceled):
 		return false
 	}
 	return true
@@ -128,6 +130,7 @@ func (r *Run) finish(cmd *cobra.Command, err error) int {
 	exit := ExitOK
 	var ce *Error
 	var me *manifest.Error
+	var de *downloader.Error
 	if err == nil && r.ctx.Err() != nil && r.result == nil && !r.helpDone {
 		err = context.Canceled
 	}
@@ -142,6 +145,10 @@ func (r *Run) finish(cmd *cobra.Command, err error) int {
 		case errors.As(err, &me):
 			// 发行信任域①的验证失败（验签/sequence/吊销/过期/轮换/包内签名）：退出码 5 的真实生产者。
 			ce = VerifyError(me)
+			exit = ce.Exit
+		case errors.As(err, &de):
+			// 下载器（Story 1.28）：传输策略/大小/外层 SHA256/解压校验/离线 bundle 失败，映射见 DownloadError。
+			ce = DownloadError(de)
 			exit = ce.Exit
 		case errors.Is(err, context.Canceled):
 			ce = newErr(ExitSigint, "interrupt.sigint", "已被用户中断（SIGINT）", "再次运行以继续；若有未完成事务，先运行 lingedge recover")

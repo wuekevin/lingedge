@@ -405,6 +405,11 @@ META/SHA256SUMS.sig      {"key_id":…, "alg":"ed25519", "sig":…}；签名对�
 payload/…                实际文件（二进制、模板、迁移、默认配置模板、前端静态产物…）
 ```
 
+**格式规则（Story 1.28 落定，CF-6 的 schema 文件不变；下列是对既有字段的语义澄清，发行流水线 1.34 按此产出）**：
+- `META/` 的三个文件必须出现在归档**前部**（先于任何 `payload/` 条目）：下载器在解压前只扫描归档开头取出它们（§9.5 第 6 步），不为找 META 而解压整个包；META 出现在 payload 之后即拒绝。
+- `SHA256SUMS` 只列 `payload/` 下的文件（不列 META 自身）；`files_count` = `payload/` 下普通文件数（必须等于 `SHA256SUMS` 行数，`SHA256SUMS` 已被签名）；`unpacked_size` = `payload/` 下全部文件内容字节之和（解压后必须相等）。二者同时作为解压限额的来源（条目上限 = 2×files_count+16，总量上限 = unpacked_size + META 三个文件大小），仍受 SafeExtract 绝对上限收紧。
+- 归档内只允许普通文件与目录（§18.1）；`META/package.json` 无「可执行文件」字段，包内权限位被忽略，需要 0755 的路径由安装器（Story 1.33）按组件约定提供。
+
 ### 9.4 离线 bundle（`--offline <bundle.tar>`）
 
 外层 tar 包含：`manifest.json`、`manifest.json.sig`、以及清单引用的若干包文件（文件名 = URL 末段）。布局：
@@ -418,6 +423,11 @@ offline-bundle/
 
 验证流程与在线完全一致（9.5），仅「下载」替换为「从 bundle 读取」；同样做 sequence/valid_until/吊销检查。bundle 本身不被信任，只信任其中经签名链验证的内容。
 
+实现要点（Story 1.28，`internal/tools/downloader/bundle.go`）：
+- **路径**：`--offline` 的路径先 `Lstat`（末级为符号链接一律拒绝），再 `EvalSymlinks` 取 realpath，必须是普通文件（目录/设备/FIFO/套接字拒绝）；随后以 `O_NOFOLLOW|O_NONBLOCK` 打开并对打开后的句柄 `fstat` 复核与校验时是同一个普通文件。路径中间的目录符号链接（如 `/var`→`/private/var`）是正常的。文件不存在是用法错误（退出码 2），其余一律退出码 5。
+- **索引**：bundle 先被受限地顺序扫描建立索引（`security.IndexTar`：仅普通文件/目录，拒绝链接/设备/稀疏文件，名称经 `CleanEntryName`，重复/仅大小写不同拒绝，条目数 ≤4096，整个流不得超过文件实际大小），条目只能是 `manifest.json`、`manifest.json.sig`、`packages/<文件名>`（整体可带单一前缀目录 `offline-bundle/`），其他任何条目拒绝；条目顺序任意；清单未引用的包被忽略（不读取）。
+- **取包**：`packages/<URL 末段文件名>` 的条目大小必须等于清单 `size`，复制到 staging 时流式 SHA256 必须等于清单 `sha256`，之后与在线路径走同一段代码（§9.5 第 6、7 步）。离线路径不构造任何网络客户端。
+
 ### 9.5 校验顺序（安装与升级共用，任一步失败即退出码 5）
 
 1. 读取内置 `keys.json` 与 `trust/keys.d/`，构建可信公钥集（排除 `revoked_key_ids`）。
@@ -428,7 +438,7 @@ offline-bundle/
 6. 解压前读取 `META/SHA256SUMS(.sig)`，验证其签名；解压时逐文件边写边校验 SHA256（§18.1 的安全解压）。
 7. 校验 `META/package.json` 的 component/version/platform 与清单一致。
 
-校验顺序的代码落点：步骤 1–4 在 `internal/tools/manifest`（`LoadTrust` → `Verifier.Verify` → `Manifest.CheckTarget`），步骤 6 的包内签名在 `Verifier.VerifyPackageSums`，步骤 7 在 `PackageMeta.Matches`；步骤 5 与解压（`security.SafeExtract`）属 downloader（Story 1.28）。失败映射：验证失败一律退出码 5，本地信任库损坏退出码 3，参数不合法退出码 2（`cli.VerifyError`）。
+校验顺序的代码落点：步骤 1–4 在 `internal/tools/manifest`（`LoadTrust` → `Verifier.Verify` → `Manifest.CheckTarget`），步骤 6 的包内签名在 `Verifier.VerifyPackageSums`，步骤 7 在 `PackageMeta.Matches`；步骤 5 与解压（`security.SafeExtract`）属 downloader（Story 1.28，入口 `downloader.Acquire`：校验链全部成功后才调用 `Verifier.Commit` 推进 sequence/落盘轮换公钥；任一步失败整个 `staging/<tx>` 删除、信任库不变）。失败映射：验证失败一律退出码 5，本地信任库损坏退出码 3，参数不合法退出码 2（`cli.VerifyError`）；下载器自身的失败经 `cli.DownloadError`：重定向到非 HTTPS、服务器证书不被信任、声明/实际大小超过清单 `size` 或截断、外层 SHA256 不符、包解压/逐文件校验失败、离线 bundle 非法一律退出码 5；纯传输失败（DNS/连接/超时/空闲超时/HTTP 状态，重试耗尽）退出码 1（网络问题而非校验问题，脚本可据此区分「重试」与「告警」）；bundle 文件不存在、清单中没有所请求的版本/变体/平台为退出码 2；组件 `unreleased`/`builtin` 为 7/8。
 
 **签名对象一览（唯一规范，ADR-012 引用本节）**：清单 = 对 `manifest.json` **文件原始字节**（不做 canonical JSON）加域前缀签名；吊销 = 内置/`trust/keys.d/` 的 `keys.json.revoked_key_ids` ∪ 清单 `revoked_versions`（清单内**不含** `revoked_key_ids`）；包 = `.tar.gz`；包内签名对象见 §9.3；`key_rotation` 背书对象见 §9.1（域前缀 `LINGEDGE-KEYROT-V1\n`，与 Server 的 `LINGEDGE-REVISION-V1`/`LINGEDGE-KEYSET-V1` 互不相同）。机器可读 schema 与 CF-6 冻结记录：`internal/tools/manifest/schema/*.json`、`docs/bmad/contract-changes/CF-6.md`。
 
@@ -968,6 +978,8 @@ LockPersonality=yes
 - **更新自身**：`update self` 同样验签；先写 `lingedge.new` 并 `--version` 自检，再 `rename`。
 - **供应链**：Tools 构建物纳入发行清单（组件 `tools`）；依赖锁定于 `go.sum`（NFR-15）；发行流水线产出清单签名（私钥离线，ADR-012）。
 - **TLS**：下载仅 HTTPS，系统根证书；禁止重定向到非 HTTPS；可选 `release.ca_file` 追加根；不提供 `--insecure`（唯一例外是显式离线 bundle）。
+  - 实现（Story 1.28，`downloader.Config`）：TLS ≥1.2，系统根 + `CAFile`（须为 1 MiB 内、group/other 不可写的非空 PEM 普通文件，否则拒绝）；`CheckRedirect` 拒绝非 HTTPS 目标（不访问明文端，不重试）；禁用传输层透明解压（SHA256 针对原始字节）；**大小上限 = 清单 `size`**：`Content-Length` 声明大于上限在读取任何内容前即中止，实际流超过上限即中止（分块传输亦然）；**流式 SHA256**；**断点续传**：失败后以 `Range` 续传，已有 `.part` 先从磁盘重新计算哈希，续传响应的 `Content-Range` 必须与请求/清单一致，服务器无视 Range（200）或 416 则整包重来；整个文件的长度与 SHA256 全部通过后才把 `.part` 改名为最终文件（任何一段被篡改，含续传的后半段，都使整体失败并删除）；超时分层（连接/TLS/响应头/响应体空闲/单次尝试/总时长）、有限重试（5xx、408、429、传输错误可重试；策略类失败不重试）、代理（`ProxyURL` 显式或 `HTTPS_PROXY/NO_PROXY`，错误文本不含代理口令）。
+
 
 ## 19. doctor 检查项（FR-15）
 
@@ -1043,3 +1055,9 @@ LockPersonality=yes
 - **§6 envelope**：`errors[]` 增可选字段 `system_state`（`unchanged|rolled_back|partial|needs_manual`，沿用 cli-tui §4 的「系统状态」语义；只增字段，向前兼容）。`command` 对带组件的命令包含合法组件名（如 `install node`），非法输入不回显进 `command`。
 - **未实现命令的约定**：命令树按 §3 全量注册，未交付的命令 Hidden；被调用时先做参数/root/确认校验，最后以退出码 1、错误码 `cli.not_implemented` 失败，绝不假成功。
 - **JSON 约定唯一事实源**：`docs/ux/cli-tui.md` §7 已改为引用本文 §5/§6（原 `schema_version`/单个 `error`/`--stream` 写法废止）。
+
+## 修订记录 2026-11-21（Story 1.28：downloader 与离线 bundle）
+
+- **§9.3 格式规则**（语义澄清，不改 CF-6 的 schema 文件与哈希、不改签名域前缀）：META 三个文件必须先于 payload；`SHA256SUMS` 只列 `payload/`；`files_count`/`unpacked_size` 的口径与解压限额来源；包内权限位忽略。发行流水线（1.34）须按此产出。
+- **§9.4/§9.5/§18.3**：补充离线 bundle 路径与索引规则、`Acquire` 与 `Commit` 的衔接、`cli.DownloadError` 的退出码映射、TLS/续传/大小上限的实现口径（见各节「实现」段）。
+- **校验顺序的一处实现取舍**：§9.5 第 6 步「解压前读取 SHA256SUMS(.sig)」与第 7 步「package.json 与清单一致」之间，下载器为得到解压限额需在解压前**解析**（但尚未据以放行）`package.json`；第 7 步的一致性比较仍在解压之后执行，失败同样退出码 5 并清理 staging。
