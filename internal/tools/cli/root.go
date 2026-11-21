@@ -199,10 +199,13 @@ func versionToolsResult() *Result {
 }
 
 // Main 是 cmd/lingedge 的入口：绑定真实环境与 SIGINT，返回进程退出码。
-func Main(args []string) int {
+func Main(args []string) int { return MainEnv(DefaultEnv(), args) }
+
+// MainEnv 是 Main 的可注入版本：绑定真实 SIGINT 处理（退出码 130），环境由调用方给出（测试用真实子进程 + SIGINT 验证回滚）。
+func MainEnv(env Env, args []string) int {
 	ctx, stop := notifyInterrupt()
 	defer stop()
-	return Execute(ctx, DefaultEnv(), args)
+	return Execute(ctx, env, args)
 }
 
 // localizeHelpFlags 给每个命令补上中文的 -h/--help 说明（Cobra 默认是英文）。

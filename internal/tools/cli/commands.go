@@ -104,8 +104,8 @@ func commandSpecs() []*cmdSpec {
 	statusSpec := &cmdSpec{Use: "status", Short: "汇总已装组件状态", Args: cobra.NoArgs, Run: runStatus}
 
 	install := &cmdSpec{
-		Use: "install [组件]", Short: "安装组件", Story: "Story 1.35（install server）/1.40（静态前端）/1.33（编排）",
-		Args: cobra.MaximumNArgs(1), NeedsRoot: true, Locks: argLocks,
+		Use: "install [组件]", Short: "安装组件", Story: "Story 1.44（无组件名时的多选安装界面）",
+		Args: cobra.MaximumNArgs(1), NeedsRoot: true, Locks: argLocks, Run: runInstall,
 		Flags: func(fs *pflag.FlagSet) {
 			str(fs, "version", "", "组件版本（semver）；缺省为通道内满足约束的最高稳定版")
 			str(fs, "channel", "stable", "发行通道 stable|beta")
@@ -372,7 +372,7 @@ func commandSpecs() []*cmdSpec {
 	}
 
 	recoverSpec := &cmdSpec{
-		Use: "recover", Short: "处理被中断的事务", Story: "Story 1.33", Args: cobra.NoArgs, NeedsRoot: true,
+		Use: "recover", Short: "处理被中断的事务", Args: cobra.NoArgs, NeedsRoot: true, Run: runRecover,
 		Flags: func(fs *pflag.FlagSet) {
 			fs.Bool("resume", false, "继续被中断的事务")
 			fs.Bool("rollback", false, "回滚被中断的事务")

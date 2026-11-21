@@ -137,7 +137,7 @@ func (s *cmdSpec) build(r *Run) *cobra.Command {
 				return err
 			}
 			var ce *Error
-			if !errors.As(err, &ce) {
+			if !errors.As(err, &ce) && !isStructured(err) {
 				return &Error{Exit: ExitGeneral, Code: "general.unexpected", Message: "未预期的错误", Cause: err, Hint: "详见日志"}
 			}
 			return err

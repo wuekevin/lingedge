@@ -3,6 +3,7 @@ package cli
 import (
 	"io"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/oklog/ulid/v2"
@@ -41,6 +42,9 @@ type Env struct {
 	BuiltinKeys func() ([]byte, error)
 	// State 缺省为读取 StatePath 的 FileState（见 state.go）。
 	State StateSource
+	// Install 是安装编排（install/recover）的外部依赖装配；零值 = 生产：真实系统、真实探测、installer.ProductionSpecs()（当前为空，
+	// 所以 install 对尚未交付规格的组件以明确的错误失败）。测试注入临时根目录、伪二进制 Runner 与（只存在于 _test.go 的）假组件。
+	Install InstallEnv
 }
 
 // DefaultEnv 返回绑定到真实进程环境的 Env。
@@ -95,7 +99,8 @@ func (e Env) withDefaults() Env {
 		e.State = FileState{Path: e.StatePath}
 	}
 	if e.TrustDir == "" {
-		e.TrustDir = DefaultTrustDir
+		// 信任库位于状态目录下（registry.Layout.TrustDir）：缺省随 StatePath 推出（生产即 DefaultTrustDir），使 installer 的 Layout 与 Verifier 指向同一处。
+		e.TrustDir = filepath.Join(filepath.Dir(e.StatePath), "trust")
 	}
 	if e.BuiltinKeys == nil {
 		e.BuiltinKeys = manifest.BuiltinKeys

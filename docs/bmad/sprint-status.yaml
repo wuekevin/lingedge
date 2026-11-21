@@ -72,7 +72,7 @@ development_status:
   1-31-系统与宝塔只读探测-baota-端口-依赖: review   # 开发完成、本机门禁见 docs/bmad/stories/1-31-*.md：internal/tools/baota（只读 FS 视图+readGuard 不读宝塔存储的 MySQL root 密码；三类证据任两类判定+置信度+证据列表、单类不判定；Nginx/OpenResty/MySQL/Redis/PHP 仅识别、vhost 只读解析 server_name/listen、防火墙/WAF/插件、畸形配置不 panic）+ internal/tools/probe（Collect→resolver.System 直接产出；ss -H -lntup 解析与 /proc/net+/proc/<pid>/fd 回退、同地址/通配冲突 Assess 并给占用者 pid/name/属主、ListenersKnown=false 不当作无冲突；MySQL 免凭据握手/认证 SELECT VERSION()、Redis PING/AUTH/INFO、口令只发环回、只读 argv 表；内存/磁盘/systemctl 服务识别；linux 采集 build tag 隔离、darwin 降级）；state.json schema 2（host.baota，v1 兼容读取）+ registry.RecordHostBaota；真实临时 MySQL/Redis 测试；fuzz 3 个；变异验证 72 条 70 检出（2 条等价）；等待环境验证：ENV-LNX（真实 ss//proc/statfs/systemctl）、ENV-BT（真实宝塔面板布局与版本来源文件）；后续：1.33 编排接线、1.42 doctor、Server 向导
   1-31b-遗留项清理: review   # 1.31 遗留清理（本机可做项全部完成并测试）：baota.Includer 受控 include 跟随（白名单根/相对 nginx 前缀/glob 上限/include 链防环/符号链接逐级不越界/readGuard 两处/文件·字节·深度·节点上限）；MySQL/Redis unix socket 端点（probe.Endpoint 追加 type/socket、Lstat 检查、免凭据握手、mysql --protocol=socket 认证、默认候选+/proc/net/unix 发现、凭据仅发往属主受信的 socket；真实临时 mysqld/redis-server 的 socket 测通）；nvm/fnm/volta/n/asdf/宝塔 Node 项目管理器只读识别（不执行）；无迁移/契约/CF-6/schema 变更；变异验证与 fuzz 见 docs/bmad/stories/1-31b-遗留项清理.md；等待环境验证：ENV-BT/ENV-LNX（真实宝塔 vhost include 样式与 socket 属主账号、/proc/net/unix、Node 目录）；后续：1.33、1.42、Server 向导
   1-32-service-包-systemd-unit-渲染-运行用户-目录-systemctl-封装: review   # 开发完成、本机门禁见 docs/bmad/stories/1-32-*.md：internal/tools/service（go:embed 模板 lingedge-server/node/openresty/.path/upgrade.path·.service + Server 降级变体；golden 人工对照 §15/ADR-024 逐字节比对 + 独立 INI 属性测试逐条断言加固项；所有变量经 ValidateUnitValue/ValidateUnitPath，注入向量表与 2 个 fuzz；OpenResty ExecStartPre/ExecStart 同一子模板同一对 -p/-c；运行用户 id/getent/useradd 经 safeexec 仅不存在才创建并记 Created；目录按 §8/ADR-020 §2 总表，创建即最终权限（umask 无关）、先 chown 后写内容、master.key O_EXCL 不覆盖；systemctl 参数数组+单元白名单；单元已存在不覆盖写 .new 内容一致幂等；LoadCredential ≥247/单元 ≥235 版本解析+降级变体(root:组 0440 密钥文件)+doctor 检查函数，ADR-027；Undoer 执行本包 undo；cli.ServiceError）；变异验证 72/72 检出；等待环境验证：ENV-LNX（真实 systemctl/systemd-analyze verify/LoadCredential/useradd/chown、Agent 内 openresty -t 一致性）；后续：1.33 编排、1.42 doctor
-  1-33-installer-编排-22-步安装状态机-journal-回滚-dry-run-recover: backlog
+  1-33-installer-编排-22-步安装状态机-journal-回滚-dry-run-recover: review   # 开发完成、本机门禁见 docs/bmad/stories/1-33-*.md：internal/tools/installer（22 步状态机：预检 1–9 只读求值→取包 10–13 经 downloader.Acquire(DeferCommit+Finish，OnStage 映射 journal 步)→物化 14–18→激活 19–20→提交 21–22；每步先写 undo（Created 动手前只读判定）再执行；逆序撤销幂等可续做，退出码 3/4/7/8·5·10·12·130；--dry-run 对整棵根目录零变化；冲突（配置/单元/目录权限/ListenersKnown=false）停下确认、既有内容绝不覆盖写 .new；提交点 state.json 原子写（含 host.baota），提交点之后 journal 故障不回滚；recover --resume/--rollback；installer.Event 非阻塞通道，UI 不影响业务；tools.yaml release.*/install.*；--set 解析（fuzz）；server.yaml 经真实 config.Parse 校验、master.key/setup-token）+ cli install/recover 真实命令（classify 汇总全部错误映射）；ComponentSpec 仅接口、生产 ProductionSpecs 为空、假组件只在 tests/toolsworld（二进制符号扫描证明）；真实子进程 22 步×4 点 kill -9 后 resume/rollback 两条路与真实 SIGINT=130；变异验证 29 条全部检出；fuzz 4 个；等待环境验证：真实 Linux/systemd 安装、真实组件、ss//proc、宝塔（ENV-LNX/ENV-BT，1.45）；后续：1.35 server 规格、1.40、1.42、1.43 升级执行、1.44 多选界面
   1-34-发行流水线与离线签名流程-待签清单-包-sbom: backlog
   1-35-lingedge-install-server-tools-侧-server-安装-第一批终点: backlog
   1-36-前端-workspace-基座-shared-tokens-三态-i18n-类型生成-门禁: backlog
@@ -779,9 +779,11 @@ environment_verification:   # 『等待环境验证』登记（验证人/日期�
     verified_by: ""
     verified_on: ""
   1-33-installer-编排-22-步安装状态机-journal-回滚-dry-run-recover:
-    status: not_started
+    status: partial
     required_env: "本机（fake 组件，限 testdouble）；真实安装见 1.35/1.45"
     condition: "编排逻辑本机以 fake 组件完成；真实 Linux 安装验证标「等待环境验证」，不得因 fake 组件通过而标完成。"
+    done_locally: "make lint security gate-selftest race vuln contract-check build verify-build migrate-test 全绿：见 docs/bmad/stories/1-33-*.md。本机真实：22 步状态机与 journal（真实 registry/downloader/manifest/resolver/service，伪的只有 OS 二进制与组件）、88 个点真实子进程 kill -9 后 resume/rollback、真实 SIGINT=130、dry-run 整树零变化、冲突不覆盖、撤销失败 12 保留 journal、事件通道不影响结果、server.yaml 经真实 config.Parse 与 master.key 经真实 FileKeyProvider 校验、生产二进制不含 fake 组件（符号扫描）。"
+    pending: "ENV-LNX/ENV-BT（Story 1.45）：真实 Linux+systemd 完整安装（含 LoadCredential 与降级两路径）、真实 useradd/chown/systemctl、真实组件 Start/Health（1.35/Epic 3）、真实 ss//proc 端口占用与宝塔冲突、真实发行源（UD-3）。"
     verified_by: ""
     verified_on: ""
   1-34-发行流水线与离线签名流程-待签清单-包-sbom:

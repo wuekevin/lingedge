@@ -143,7 +143,7 @@ func TestExitCodeMapping(t *testing.T) {
 		wantCode string
 	}{
 		{"成功 version", nil, []string{"version"}, ExitOK, ""},
-		{"未实现命令 → 1", []hopt{asRoot()}, []string{"install", "server"}, ExitGeneral, "cli.not_implemented"},
+		{"未实现命令 → 1", []hopt{asRoot()}, []string{"update", "server"}, ExitGeneral, "cli.not_implemented"},
 		{"未知组件 → 2", nil, []string{"install", "nope"}, ExitUsage, "usage.invalid_component"},
 		{"未知命令 → 2", nil, []string{"frobnicate"}, ExitUsage, "usage.invalid"},
 		{"未知标志 → 2", nil, []string{"version", "--nope"}, ExitUsage, "usage.invalid_flag"},

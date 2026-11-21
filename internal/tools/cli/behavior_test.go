@@ -89,8 +89,8 @@ func TestConfirmationRules(t *testing.T) {
 	})
 	t.Run("交互：y 通过 / n 拒绝（提问走 stderr）", func(t *testing.T) {
 		h := newHarness(t, asRoot(), withTTY(), withStdin("y\n"))
-		if code := h.run("recover"); code != 1 { // recover 无确认，作对照：交互模式不提问
-			t.Fatalf("recover 退出码 %d", code)
+		if code := h.run("update", "node"); code != 1 { // update node 无确认，作对照：交互模式不提问（Story 1.33 起 recover 已实现，改用仍未实现的 update）
+			t.Fatalf("update 退出码 %d", code)
 		}
 		h = newHarness(t, asRoot(), withTTY(), withStdin("y\n"))
 		if code := h.run("backup", "restore", "x.tar", "--non-interactive=false"); code != 1 {
@@ -174,7 +174,7 @@ func TestNonRootHintsSudo(t *testing.T) {
 	}
 	// 需 root 的全集：全部返回 3（而不是 1 假装可用）。
 	for _, args := range [][]string{
-		{"install", "server"}, {"update", "node"}, {"update", "self"}, {"service", "start", "node"}, {"service", "stop", "node"},
+		{"update", "node"}, {"update", "self"}, {"service", "start", "node"}, {"service", "stop", "node"},
 		{"backup", "create"}, {"backup", "restore", "f.tar"}, {"node", "enroll"}, {"rollback", "node"}, {"uninstall", "node"},
 		{"recover"}, {"config", "edit", "server"},
 	} {
@@ -270,22 +270,22 @@ func TestHiddenCommandsAndNoFakeSuccess(t *testing.T) {
 		t.Fatalf("退出码 %d", code)
 	}
 	out := h.stdout.String()
-	for _, vis := range []string{"version", "list", "status"} {
+	for _, vis := range []string{"version", "list", "status", "install", "recover"} { // install/recover 自 Story 1.33 起已交付
 		if !regexp.MustCompile(`(?m)^\s+` + vis + `\s`).MatchString(out) {
 			t.Errorf("--help 应列出已交付命令 %s:\n%s", vis, out)
 		}
 	}
-	for _, hid := range []string{"install", "update", "service", "logs", "doctor", "config", "node", "backup", "rollback", "uninstall", "recover"} {
+	for _, hid := range []string{"update", "service", "logs", "doctor", "config", "node", "backup", "rollback", "uninstall"} {
 		if regexp.MustCompile(`(?m)^\s+` + hid + `\s`).MatchString(out) {
 			t.Errorf("未实现命令 %s 不应出现在 --help", hid)
 		}
 	}
 	// 全部未实现的叶子命令（root 身份、满足其校验与确认）都不得以 0 退出。
 	for _, args := range [][]string{
-		{"install", "server"}, {"update", "node"}, {"update", "check"}, {"update", "self"}, {"service", "status"}, {"service", "start", "node"},
+		{"update", "node"}, {"update", "check"}, {"update", "self"}, {"service", "status"}, {"service", "start", "node"},
 		{"logs", "node"}, {"doctor"}, {"config", "validate"}, {"config", "show", "server"}, {"config", "edit", "server"}, {"config", "setup-token"},
 		{"node", "enroll"}, {"backup", "create"}, {"backup", "list"}, {"backup", "verify", "f"}, {"backup", "restore", "f", "--yes"},
-		{"rollback", "node", "--yes"}, {"uninstall", "node", "--yes"}, {"recover"},
+		{"rollback", "node", "--yes"}, {"uninstall", "node", "--yes"},
 		{"version", "--check"}, {"list", "--available"},
 	} {
 		h := newHarness(t, asRoot())

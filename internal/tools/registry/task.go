@@ -3,6 +3,7 @@ package registry
 import (
 	"context"
 	"os"
+	"sort"
 	"sync"
 )
 
@@ -58,6 +59,52 @@ func (r *Registry) Check(ctx context.Context, components []string) error {
 		return err
 	}
 	t.Release()
+	return nil
+}
+
+// Extend 为任务追加组件锁：安装/升级要到求解出依赖闭包之后才知道还要操作哪些组件（如 install node 会带上 openresty）。
+// 新锁同样 LOCK_EX|LOCK_NB（非阻塞，所以不存在互等：别的任务持有则立即返回 *LockedError，任务原有的锁保持不变）；已持有的组件忽略。
+// 必须在 OpenTx 之前调用——journal 的 open 记录在创建时登记涉及的组件，之后追加会让 journal 头与实际持锁不一致。
+func (t *Task) Extend(components []string) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.done {
+		return newErr(KindJournalClosed, "任务已释放")
+	}
+	if t.journal != nil {
+		return newErr(KindJournalProtocol, "事务日志已打开，不能再追加组件锁")
+	}
+	names, err := normalizeComponents(components)
+	if err != nil {
+		return err
+	}
+	have := map[string]bool{}
+	for _, n := range t.locks.names {
+		have[n] = true
+	}
+	var added []*FileLock
+	var addedNames []string
+	for _, n := range names {
+		if have[n] {
+			continue
+		}
+		if t.r.opt.onAcquire != nil {
+			t.r.opt.onAcquire(n)
+		}
+		lk, err := t.r.tryLock(t.r.L.ComponentLockFile(n), n)
+		if err != nil {
+			for i := len(added) - 1; i >= 0; i-- {
+				added[i].Release()
+			}
+			return err
+		}
+		added = append(added, lk)
+		addedNames = append(addedNames, n)
+	}
+	t.locks.locks = append(t.locks.locks, added...)
+	t.locks.names = append(t.locks.names, addedNames...)
+	sort.Strings(t.locks.names)
+	t.comps = t.locks.Names()
 	return nil
 }
 

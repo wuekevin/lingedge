@@ -204,15 +204,14 @@ func TestAllowExpiredManifestRequiresOffline(t *testing.T) {
 			t.Fatalf("%v：错误码 %q", args, got)
 		}
 	}
-	// 带 --offline 时通过用法校验，落到「尚未实现」（退出码 1，不是假成功）。
-	for _, args := range [][]string{
-		{"install", "server", "--offline", "/tmp/b.tar", "--allow-expired-manifest"},
-		{"update", "node", "--offline", "/tmp/b.tar", "--allow-expired-manifest"},
-	} {
-		h := newHarness(t, asRoot())
-		if code := h.run(append(args, "--json")...); code != 1 {
-			t.Fatalf("%v：退出码 %d，期望 1（尚未实现）", args, code)
-		}
+	// 带 --offline 时通过用法校验：update 仍是桩（退出码 1，不是假成功）；install（Story 1.33）进入 bundle 打开，/tmp/b.tar 不存在 → 2（用法错误）。
+	h := newHarness(t, asRoot())
+	if code := h.run("update", "node", "--offline", "/tmp/b.tar", "--allow-expired-manifest", "--json"); code != 1 {
+		t.Fatalf("update：退出码 %d，期望 1（尚未实现）", code)
+	}
+	h = newHarness(t, asRoot())
+	if code := h.run("install", "server", "--offline", "/nonexistent/b.tar", "--allow-expired-manifest", "--json"); code != 2 && code != 5 {
+		t.Fatalf("install：退出码 %d，期望 2（bundle 不存在）或 5", code)
 	}
 }
 

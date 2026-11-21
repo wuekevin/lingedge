@@ -88,8 +88,8 @@ func TestWriteCommandLockedExit6AndKill9Releases(t *testing.T) {
 	if code := h.run("install", "server", "--non-interactive"); code != 6 || !strings.Contains(h.stderr.String(), "run-holder-1") || !strings.Contains(h.stderr.String(), "LOCKED") {
 		t.Fatalf("人类输出: %d %s", code, h.stderr)
 	}
-	// 不同组件不受影响（走到「尚未实现」= 1，而不是 6）。
-	if code := h.run("install", "node", "--non-interactive"); code != 1 {
+	// 不同组件不受影响（走到「尚未实现」= 1，而不是 6）。Story 1.33 起 install 已实现，改用仍是桩的 update 作为「写命令桩」。
+	if code := h.run("update", "node", "--non-interactive"); code != 1 {
 		t.Fatalf("不同组件应不被锁拦：%d", code)
 	}
 	// 读命令永不取锁。
@@ -107,7 +107,7 @@ func TestWriteCommandLockedExit6AndKill9Releases(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = holder.Wait()
-	if code := h.run("install", "server", "--non-interactive"); code != 1 {
+	if code := h.run("update", "server", "--non-interactive"); code != 1 {
 		t.Fatalf("kill -9 之后锁应已被内核释放（期望走到尚未实现=1），得到 %d\n%s", code, h.stderr)
 	}
 }
@@ -117,7 +117,7 @@ func TestWriteCommandUnfinishedExit13(t *testing.T) {
 	h := newHarness(t, asRoot())
 	holder := startHolder(t, toolsRoot(h), "node", true) // 持有 node 并打开了 journal
 	// 事务仍活着：另一个组件的写命令不被拦（它是合法的并行操作）。
-	if code := h.run("install", "server", "--non-interactive"); code != 1 {
+	if code := h.run("update", "server", "--non-interactive"); code != 1 {
 		t.Fatalf("活事务不应让无关组件的写命令得 13: %d", code)
 	}
 	if err := holder.Process.Signal(syscall.SIGKILL); err != nil {
@@ -139,13 +139,13 @@ func TestWriteCommandUnfinishedExit13(t *testing.T) {
 			t.Fatalf("%v: %v", args, txs)
 		}
 	}
-	h.run("install", "server", "--non-interactive")
+	h.run("update", "server", "--non-interactive")
 	if !strings.Contains(h.stderr.String(), "lingedge recover") {
 		t.Errorf("人类输出应提示 lingedge recover: %s", h.stderr)
 	}
-	// recover 不被自己拦截（它是处理者）；读命令也不受影响。
-	if code := h.run("recover", "--non-interactive"); code != 1 || errCode(func() map[string]any { h.run("recover", "--json", "--non-interactive"); return h.envelope() }()) != "cli.not_implemented" {
-		t.Errorf("recover 应走到其自身（尚未实现=1）而不是被 13 拦截")
+	// recover 不被自己拦截（它是处理者）；Story 1.33 起它是真实命令：非交互且未给 --rollback/--resume → 9（需要明确的处理方式），而不是被 13 拦截。
+	if code := h.run("recover", "--non-interactive"); code != 9 || errCode(func() map[string]any { h.run("recover", "--json", "--non-interactive"); return h.envelope() }()) != "confirm.required" {
+		t.Errorf("recover 应走到其自身（9）而不是被 13 拦截")
 	}
 	for _, c := range []string{"list", "status", "version"} {
 		if code := h.run(c); code != 0 {
@@ -170,7 +170,7 @@ func TestWriteCommandUnfinishedExit13(t *testing.T) {
 		t.Fatal(err)
 	}
 	rt.Release()
-	if code := h.run("install", "server", "--non-interactive"); code != 1 {
+	if code := h.run("update", "server", "--non-interactive"); code != 1 {
 		t.Fatalf("事务结束后应放行（走到尚未实现=1）: %d", code)
 	}
 }
@@ -178,7 +178,7 @@ func TestWriteCommandUnfinishedExit13(t *testing.T) {
 // 尚无状态目录（从未安装过）的机器：未实现的写命令保持 1.25 的行为，且不会为了「假装检查」创建目录。
 func TestWriteCommandStubDoesNotCreateStateDir(t *testing.T) {
 	h := newHarness(t, asRoot())
-	if code := h.run("install", "server", "--non-interactive"); code != 1 {
+	if code := h.run("update", "server", "--non-interactive"); code != 1 {
 		t.Fatalf("退出码 %d", code)
 	}
 	if _, err := os.Stat(toolsRoot(h)); !os.IsNotExist(err) {

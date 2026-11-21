@@ -76,7 +76,8 @@ func copyRepo(t *testing.T) string {
 	if err := copyFile(filepath.Join(root, "docs", "api", "openapi.yaml"), filepath.Join(dst, "docs", "api", "openapi.yaml")); err != nil {
 		t.Fatal(err)
 	}
-	for _, d := range []string{"cmd", "internal", "migrations", "pkg", "scripts"} {
+	// tests/toolsworld（Story 1.33）是 internal/tools 的 installer/cli 测试共用的测试世界；副本里的 golangci-lint 需要它才能类型检查这些 _test.go。只复制这一个测试包，门禁规则不变。
+	for _, d := range []string{"cmd", "internal", "migrations", "pkg", "scripts", "tests/toolsworld"} {
 		err := filepath.WalkDir(filepath.Join(root, d), func(p string, e fs.DirEntry, err error) error {
 			if err != nil || e.IsDir() {
 				return err

@@ -58,6 +58,10 @@ var managedPrefixes = []string{
 	"/etc/lingedge", "/var/lib/lingedge", "/var/lib/lingedge-node", NodeUpgradeDir, "/var/log/lingedge", NodeLogDir,
 }
 
+// IsManagedPath 报告 p 是否落在 Undoer 允许触及的 Tools 管理目录内（/etc/lingedge、/var/lib/lingedge…；Tools 状态目录除外）。
+// installer 在预判目录撤销时用它：被创建的「祖先」若在受管目录之外（如缺失的 /var/log），回滚时保留它而不是请求一个必然被拒绝的撤销。
+func IsManagedPath(p string) bool { return managedPath(p) == nil }
+
 func under(p, prefix string) bool { return p == prefix || strings.HasPrefix(p, prefix+"/") }
 
 func managedPath(p string) error {

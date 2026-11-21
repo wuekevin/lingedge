@@ -95,16 +95,11 @@ func jsonAfterParseFailure(cmd *cobra.Command, args []string) bool {
 // 或 Cobra 自己的未知命令/参数错误），而不是命令执行期的结构化错误。
 func isParseStageError(err error) bool {
 	var ce *Error
-	var me *manifest.Error
-	var de *downloader.Error
-	var rse *resolver.Error
-	switch {
-	case errors.As(err, &ce):
+	if errors.As(err, &ce) {
 		return ce.Code == "usage.invalid_flag"
-	case errors.As(err, &me), errors.As(err, &de), errors.As(err, &rse), errors.Is(err, context.Canceled), RegistryError(err) != nil, ServiceError(err) != nil:
-		return false
 	}
-	return true
+	_, structured := classify(err)
+	return !structured
 }
 
 // Execute 运行 lingedge 并返回进程退出码。stdout/stderr 的分工见 tools-design §5：
@@ -131,9 +126,6 @@ func (r *Run) finish(cmd *cobra.Command, err error) int {
 	defer r.log.close()
 	exit := ExitOK
 	var ce *Error
-	var me *manifest.Error
-	var de *downloader.Error
-	var rse *resolver.Error
 	if err == nil && r.ctx.Err() != nil && r.result == nil && !r.helpDone {
 		err = context.Canceled
 	}
@@ -142,33 +134,9 @@ func (r *Run) finish(cmd *cobra.Command, err error) int {
 		r.jsonPre = jsonAfterParseFailure(cmd, rewriteHelpTopic(r.args))
 	}
 	if err != nil {
-		switch {
-		case errors.As(err, &ce):
-			exit = ce.Exit
-		case errors.As(err, &me):
-			// 发行信任域①的验证失败（验签/sequence/吊销/过期/轮换/包内签名）：退出码 5 的真实生产者。
-			ce = VerifyError(me)
-			exit = ce.Exit
-		case errors.As(err, &de):
-			// 下载器（Story 1.28）：传输策略/大小/外层 SHA256/解压校验/离线 bundle 失败，映射见 DownloadError。
-			ce = DownloadError(de)
-			exit = ce.Exit
-		case errors.As(err, &rse):
-			// 依赖/版本/资源/端口求解（Story 1.30）：无解/资源/系统 → 3，端口 → 4，未发布 7，内置 8，吊销 5，需确认 9，映射见 ResolveError。
-			ce = ResolveError(rse)
-			exit = ce.Exit
-		case RegistryError(err) != nil:
-			// 任务锁 / journal / state.json（Story 1.29）：被占用 → 6，存在未完成事务 → 13，状态不可读/损坏等，映射见 RegistryError。
-			ce = RegistryError(err)
-			exit = ce.Exit
-		case ServiceError(err) != nil:
-			// systemd 单元 / 运行用户 / 目录权限 / systemctl（Story 1.32）：systemd 缺失/版本不足/需要 root/冲突 → 3，外部命令失败 → 1，映射见 ServiceError。
-			ce = ServiceError(err)
-			exit = ce.Exit
-		case errors.Is(err, context.Canceled):
-			ce = newErr(ExitSigint, "interrupt.sigint", "已被用户中断（SIGINT）", "再次运行以继续；若有未完成事务，先运行 lingedge recover")
-			exit = ExitSigint
-		default:
+		if c, ok := classify(err); ok {
+			ce, exit = c, c.Exit
+		} else {
 			// 不是命令自己返回的结构化错误：来自 Cobra 的解析阶段（未知命令/标志/参数个数）→ 用法错误。
 			ce = usageErr("usage.invalid", cobraMessage(err), "运行 lingedge --help 或 lingedge <命令> --help 查看用法")
 			exit = ExitUsage
@@ -215,6 +183,45 @@ func (r *Run) finish(cmd *cobra.Command, err error) int {
 		}
 	}
 	return int(exit)
+}
+
+// classify 把命令返回的错误映射为 CLI 结构化错误（退出码 + 稳定错误码）；不认识的（Cobra 解析阶段的错误）返回 false。
+func classify(err error) (*Error, bool) {
+	var ce *Error
+	var me *manifest.Error
+	var de *downloader.Error
+	var rse *resolver.Error
+	switch {
+	case errors.As(err, &ce):
+		return ce, true
+	case InstallError(err) != nil:
+		// 安装编排（Story 1.33）：回滚结果（10/12/130）、需确认（9）、规格缺失、升级须走 update 等；StepFailed 沿 Cause 映射并补上步骤与系统状态。
+		return InstallError(err), true
+	case errors.As(err, &me):
+		// 发行信任域①的验证失败（验签/sequence/吊销/过期/轮换/包内签名）：退出码 5 的真实生产者。
+		return VerifyError(me), true
+	case errors.As(err, &de):
+		// 下载器（Story 1.28）：传输策略/大小/外层 SHA256/解压校验/离线 bundle 失败，映射见 DownloadError。
+		return DownloadError(de), true
+	case errors.As(err, &rse):
+		// 依赖/版本/资源/端口求解（Story 1.30）：无解/资源/系统 → 3，端口 → 4，未发布 7，内置 8，吊销 5，需确认 9，映射见 ResolveError。
+		return ResolveError(rse), true
+	case RegistryError(err) != nil:
+		// 任务锁 / journal / state.json（Story 1.29）：被占用 → 6，存在未完成事务 → 13，状态不可读/损坏等，映射见 RegistryError。
+		return RegistryError(err), true
+	case ServiceError(err) != nil:
+		// systemd 单元 / 运行用户 / 目录权限 / systemctl（Story 1.32）：systemd 缺失/版本不足/需要 root/冲突 → 3，外部命令失败 → 1，映射见 ServiceError。
+		return ServiceError(err), true
+	case errors.Is(err, context.Canceled):
+		return newErr(ExitSigint, "interrupt.sigint", "已被用户中断（SIGINT）", "再次运行以继续；若有未完成事务，先运行 lingedge recover"), true
+	}
+	return nil, false
+}
+
+// isStructured 报告错误是否有结构化映射（命令的 Run 返回它时原样透传给 finish，而不是包成 general.unexpected）。
+func isStructured(err error) bool {
+	_, ok := classify(err)
+	return ok
 }
 
 func levelFor(c ExitCode) string {

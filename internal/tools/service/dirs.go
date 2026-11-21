@@ -221,3 +221,76 @@ func DirUndo(results []DirResult) []registry.UndoAction {
 	}
 	return out
 }
+
+// DirPlan 是一个目录规格的只读规划结果（不创建、不修改任何东西）。
+type DirPlan struct {
+	Path string
+	// Exists：目标目录已存在（Create 为空）。
+	Exists bool
+	// Mismatch：既有目录与规格不符之处（权限宽于规格、属主不符）；Ensure 会把它作为 *MismatchError 报告，Repair 才会修正。
+	Mismatch []string
+	// Create：Ensure 将会创建的目录（缺失的祖先自上而下，最后是目标自身）。
+	Create []string
+}
+
+// Plan 只读地预演 Ensure：返回每个规格将创建哪些目录、既有目录有哪些不符。installer 用它在「先写 undo 再动手」之前判定 Created、
+// 并在预检阶段把不符作为需要确认的冲突报告（不静默放行宽于规格的权限）。同一批 specs 里前面创建的目录视为后面规格的既有祖先，与 Ensure 的顺序语义一致。
+func (e *Ensurer) Plan(specs []DirSpec) ([]DirPlan, error) {
+	willExist := map[string]bool{}
+	probe := *e
+	probe.Repair = false
+	var out []DirPlan
+	for _, sp := range specs {
+		if err := security.ValidateUnitPath(sp.Path); err != nil {
+			return out, newErr(KindInvalidParam, "目录路径不合法：%v", err)
+		}
+		real := hostPath(e.Root, sp.Path)
+		dp := DirPlan{Path: sp.Path}
+		st, err := os.Lstat(real)
+		switch {
+		case err == nil:
+			dp.Exists = true
+			_, items, ierr := probe.inspectExisting(sp, real, st)
+			if ierr != nil {
+				return out, ierr
+			}
+			dp.Mismatch = items
+		case os.IsNotExist(err):
+			if willExist[sp.Path] {
+				dp.Exists = true
+				break
+			}
+			var missing []string
+			for p := filepath.Dir(sp.Path); p != filepath.Dir(p); p = filepath.Dir(p) {
+				if willExist[p] {
+					break
+				}
+				if _, serr := os.Lstat(hostPath(e.Root, p)); serr == nil {
+					break
+				}
+				missing = append([]string{p}, missing...)
+			}
+			dp.Create = append(missing, sp.Path)
+			for _, c := range dp.Create {
+				willExist[c] = true
+			}
+		default:
+			return out, wrapErr(KindIO, err, "无法检查 %s", sp.Path)
+		}
+		out = append(out, dp)
+	}
+	return out, nil
+}
+
+// PlanUndo 把 Plan 的结果转成撤销信息（与 DirUndo 同形：只有将被创建的目录 Created=true，由深到浅）。
+func PlanUndo(plans []DirPlan) []registry.UndoAction {
+	var all []string
+	for _, p := range plans {
+		all = append(all, p.Create...)
+	}
+	out := make([]registry.UndoAction, 0, len(all))
+	for i := len(all) - 1; i >= 0; i-- {
+		out = append(out, registry.UndoAction{Action: ActRemoveDirIfEmpty, Path: all[i], Created: true})
+	}
+	return out
+}

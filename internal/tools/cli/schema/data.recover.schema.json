@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "recover 的 data（tools-design §12.3；Story 1.33，追加式）",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["mode", "unfinished", "transactions", "stale_temps_removed"],
+  "properties": {
+    "mode": {"enum": ["", "resume", "rollback"]},
+    "unfinished": {"type": "integer", "minimum": 0},
+    "stale_temps_removed": {"type": "integer", "minimum": 0},
+    "transactions": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["tx", "components", "action"],
+      "properties": {"tx": {"type": "string"}, "command": {"type": "string"}, "components": {"type": "array", "items": {"type": "string"}},
+        "action": {"enum": ["rolled_back", "resumed", "finalized", "discarded_empty"]}, "steps_undone": {"type": "integer"}, "message": {"type": "string"}}}},
+    "result": {"type": "object", "additionalProperties": false, "required": ["outcome", "components", "access"],
+      "properties": {"outcome": {"type": "string"}, "components": {"type": "array"}, "access": {"type": "array"}}},
+    "pending": {"type": "array", "items": {"type": "object"}}
+  }
+}

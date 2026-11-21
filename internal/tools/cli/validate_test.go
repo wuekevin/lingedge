@@ -51,10 +51,8 @@ func TestUsageErrors(t *testing.T) {
 			t.Errorf("%v 退出码 %d，期望 2\n%s", args, code, h.stderr)
 		}
 	}
-	// 合法组合不被误伤（走到「尚未实现」= 1，而不是 2）。
+	// 合法组合不被误伤（走到「尚未实现」= 1，而不是 2）。Story 1.33 起 install 已实现：其合法组合通过校验后进入清单验证，本构建未内置发行公钥 → 5（见下）。
 	for _, args := range [][]string{
-		{"install", "server", "--channel", "beta", "--version", "1.2.3-rc.1+b5", "--set", "listen=127.0.0.1:8080", "--setup-listen", ":8080"},
-		{"install", "website", "--mode", "ssr"},
 		{"update", "node", "--no-backup", "--yes"},
 		{"update", "node", "--apply-staged"},
 		{"logs", "node", "--since", "10m", "-n", "5"},
@@ -64,6 +62,20 @@ func TestUsageErrors(t *testing.T) {
 		h := newHarness(t, asRoot())
 		if code := h.run(append(args, "--non-interactive", "--yes")...); code != 1 {
 			t.Errorf("%v 应通过校验落到未实现(1)，得 %d\n%s", args, code, h.stderr)
+		}
+	}
+}
+
+// install 的合法标志组合不被用法校验误伤：通过校验后进入清单验证，本构建未内置发行公钥 → 退出码 5（而不是 2）。
+func TestInstallValidCombosPassValidation(t *testing.T) {
+	for _, args := range [][]string{
+		{"install", "server", "--channel", "beta", "--version", "1.2.3-rc.1+b5", "--set", "env=staging", "--setup-listen", ":8080"},
+		{"install", "website", "--mode", "ssr"},
+		{"install", "node", "--set", "port.node.tcp.9100=19100@127.0.0.1"},
+	} {
+		h := newHarness(t, asRoot())
+		if code := h.run(append(args, "--non-interactive", "--yes")...); code != 5 {
+			t.Errorf("%v 应通过校验进入清单验证（5），得 %d\n%s", args, code, h.stderr)
 		}
 	}
 }
@@ -108,9 +120,14 @@ func TestShellMetacharactersAreLiteral(t *testing.T) {
 		if err := validateAgainst(t, "envelope.schema.json", env); err != nil {
 			t.Errorf("%q: %v", v, err)
 		}
-		// 作为 --set 的值（合法键）：被接受为字面值，走到「尚未实现」，值原样进入日志而不被执行。
-		if code := h.run("install", "server", "--set", "k="+v, "--json", "--log-file", logf); code != 1 {
-			t.Errorf("--set 值 %q 退出码 %d，期望 1", v, code)
+		// 作为 --set 的值（合法键）：被接受为字面值（含控制字符的值被 ParseSet 拒绝 → 2），走到清单验证（本构建无内置公钥 → 5），
+		// 值只当作数据，绝不被执行（哨兵文件断言见下）。
+		want := 5
+		if strings.ContainsAny(v, "\n\r") {
+			want = 2
+		}
+		if code := h.run("install", "server", "--set", "k="+v, "--json", "--log-file", logf); code != want {
+			t.Errorf("--set 值 %q 退出码 %d，期望 %d", v, code, want)
 		}
 		// 作为 --version：不是 semver → 2。
 		if code := h.run("install", "server", "--version", v, "--json", "--log-file", logf); code != 2 {

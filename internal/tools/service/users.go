@@ -78,6 +78,21 @@ func (p *Provisioner) groupExists(ctx context.Context, name string) (bool, error
 	return false, wrapErr(KindExec, err, "查询组 %s 失败", name)
 }
 
+// Exists 报告运行用户是否已存在（只读查询：id -u）。installer 在「先写 undo 再动手」时用它预先判定本事务是否会创建该用户
+// （EnsureUser 的查询与创建是一次调用，来不及在创建前把 Created 写进 journal）。
+func (p *Provisioner) Exists(ctx context.Context, name string) (bool, error) {
+	if !isRunUser(name) {
+		return false, &Error{Kind: KindInvalidParam, Field: "user", Msg: "不是 LingEdge 运行用户"}
+	}
+	if _, err := p.lookupUID(ctx, name); err != nil {
+		if errors.Is(err, errNoSuchUser) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
 // EnsureUser 保证运行用户 name 存在：已存在则不动（Created=false）；不存在才 `useradd --system --no-create-home --shell /usr/sbin/nologin`。
 // 同名组已存在时用 -g 复用，否则 --user-group 一并创建。name 必须是 RunUsers 之一。
 // 既有用户 UID 为 0 视为冲突（绝不让服务以 root 的别名运行）；UID 在普通用户范围（>= 1000）只警告：它可能是人在用的账号。

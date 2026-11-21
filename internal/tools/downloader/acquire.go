@@ -62,6 +62,33 @@ type Params struct {
 	// 或一步到位用 Acquired.Finish(install)。默认 false：行为与 1.28 相同（链成功即提交）。
 	// 代价（已知、有意）：提交之前 sequence 没有推进，同一份清单可被再次 Acquire；这正是「安装失败可重试/可回滚」所需要的。
 	DeferCommit bool
+
+	// OnStage 在 Acquire 的每个阶段**开始之前**调用（§12.1 的步骤 10–13 对应的四个阶段，见 Stage）。
+	// 它是 installer 把「先写 undo 再动手」落到下载链上的挂钩：返回非 nil 即中止 Acquire（与其他失败一样清理 staging/<tx>，信任库不变）。
+	// nil = 不观察。回调不得修改 Params 指向的任何对象。
+	OnStage func(Stage) error
+}
+
+// Stage 是 Acquire 的阶段（与 tools-design §12.1 的步骤 10–13 一一对应）。
+type Stage string
+
+// Stage 取值。
+const (
+	// StageManifest（步骤 10）：取得签名清单；此阶段开始前 staging/<tx> 尚未创建。
+	StageManifest Stage = "manifest"
+	// StageVerify（步骤 11）：验证清单签名/schema/sequence/有效期/吊销（不推进 sequence，提交由 Commit 完成）。
+	StageVerify Stage = "verify"
+	// StagePackage（步骤 12）：取得包并核对长度与外层 SHA256。
+	StagePackage Stage = "package"
+	// StageCheck（步骤 13）：包内 META 验签、逐文件 SHA256 校验与安全解压、META 与清单一致。
+	StageCheck Stage = "check"
+)
+
+func (p Params) stage(s Stage) error {
+	if p.OnStage == nil {
+		return nil
+	}
+	return p.OnStage(s)
 }
 
 // Acquired 是成功的结果。
@@ -147,6 +174,9 @@ func Acquire(ctx context.Context, p Params) (_ *Acquired, err error) {
 	if err := p.check(); err != nil {
 		return nil, err
 	}
+	if err := p.stage(StageManifest); err != nil {
+		return nil, err
+	}
 	src, err := p.openSource()
 	if err != nil {
 		return nil, err
@@ -180,6 +210,9 @@ func Acquire(ctx context.Context, p Params) (_ *Acquired, err error) {
 	// 步骤 1–4
 	mf, sig, err := src.manifest(ctx)
 	if err != nil {
+		return nil, err
+	}
+	if err := p.stage(StageVerify); err != nil {
 		return nil, err
 	}
 	res, err := p.Verifier.Verify(mf, sig, manifest.VerifyOptions{Channel: p.Channel, Offline: src.offline(), AllowExpired: p.AllowExpired})
@@ -233,6 +266,9 @@ func Acquire(ctx context.Context, p Params) (_ *Acquired, err error) {
 
 	// 步骤 5：取得包，长度与外层 SHA256 必须等于清单。
 	pkgFile := filepath.Join(txDir, name)
+	if err := p.stage(StagePackage); err != nil {
+		return nil, err
+	}
 	if err := src.fetch(ctx, art, name, pkgFile); err != nil {
 		return nil, err
 	}
@@ -240,6 +276,9 @@ func Acquire(ctx context.Context, p Params) (_ *Acquired, err error) {
 		return nil, err
 	}
 
+	if err := p.stage(StageCheck); err != nil {
+		return nil, err
+	}
 	// 步骤 6：解压前读取 META/SHA256SUMS(.sig)（META 必须先于 payload），验签，再解压并逐文件校验。
 	f, err := os.Open(pkgFile)
 	if err != nil {

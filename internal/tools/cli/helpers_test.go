@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -44,12 +45,18 @@ func newHarness(t *testing.T, opts ...hopt) *harness {
 	h := &harness{t: t, stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{}, dir: dir}
 	t0 := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
 	calls := 0
+	var clockMu sync.Mutex // 进度消费者 goroutine（Story 1.33）与命令主流程会并发读时钟
 	h.env = Env{
 		Stdin: strings.NewReader(""), Stdout: h.stdout, Stderr: h.stderr,
-		Getenv:         func(string) string { return "" },
-		Geteuid:        func() int { return 1000 },
-		Hostname:       func() (string, error) { return "edge-host-1", nil },
-		Now:            func() time.Time { calls++; return t0.Add(time.Duration(calls-1) * 25 * time.Millisecond) },
+		Getenv:   func(string) string { return "" },
+		Geteuid:  func() int { return 1000 },
+		Hostname: func() (string, error) { return "edge-host-1", nil },
+		Now: func() time.Time {
+			clockMu.Lock()
+			defer clockMu.Unlock()
+			calls++
+			return t0.Add(time.Duration(calls-1) * 25 * time.Millisecond)
+		},
 		NewRunID:       func(time.Time) string { return testRunID },
 		StatePath:      filepath.Join(dir, "tools", "state.json"),
 		DefaultLogFile: "", // 缺省不写日志；需要日志的用例显式传 --log-file

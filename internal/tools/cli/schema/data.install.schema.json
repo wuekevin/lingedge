@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "install 的 data（tools-design §6；Story 1.33，追加式）：--dry-run 与真实安装同一形状，dry-run 的 outcome 为 planned",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["component", "dry_run", "outcome", "plan", "preflight", "step_map", "conflicts", "components", "access", "listeners_known"],
+  "properties": {
+    "component": {"type": "string"},
+    "dry_run": {"type": "boolean"},
+    "outcome": {"enum": ["planned", "installed", "already_installed"]},
+    "tx": {"type": "string"},
+    "credential_mode": {"type": "string"},
+    "listeners_known": {"type": "boolean"},
+    "plan": {
+      "type": "object",
+      "required": ["components", "order", "steps", "ports", "units", "files", "warnings", "blockers", "resources"],
+      "properties": {
+        "components": {"type": "array", "items": {"type": "object", "required": ["name", "action", "version", "wanted"],
+          "properties": {"name": {"type": "string"}, "action": {"enum": ["install", "upgrade", "keep"]}, "version": {"type": "string"}, "wanted": {"type": "boolean"}}}},
+        "order": {"type": "array", "items": {"type": "string"}},
+        "steps": {"type": "array", "items": {"type": "object", "required": ["seq", "component", "kind", "summary"]}},
+        "ports": {"type": "array", "items": {"type": "object", "required": ["component", "proto", "port", "bind"]}},
+        "units": {"type": "array", "items": {"type": "object", "required": ["component", "name", "kind", "path"]}},
+        "files": {"type": "array", "items": {"type": "object", "required": ["component", "path", "kind", "mode", "owner", "policy"]}},
+        "warnings": {"type": "array", "items": {"type": "object", "required": ["code", "message"]}},
+        "blockers": {"type": "array", "items": {"type": "object", "required": ["kind", "code", "message"]}},
+        "resources": {"type": "object", "required": ["memory_needed_mb", "memory_available_mb", "disks"]}
+      }
+    },
+    "preflight": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["n", "name", "status"],
+      "properties": {"n": {"type": "integer", "minimum": 1, "maximum": 9}, "name": {"type": "string"}, "status": {"enum": ["ok", "warn", "fail"]}, "message": {"type": "string"}}}},
+    "step_map": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["seq", "component", "kind", "steps"],
+      "properties": {"seq": {"type": "integer"}, "component": {"type": "string"}, "kind": {"type": "string"}, "steps": {"type": "array", "items": {"type": "integer", "minimum": 1, "maximum": 22}}}}},
+    "conflicts": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["kind", "message"],
+      "properties": {"kind": {"enum": ["file", "unit", "dir", "port_unverified"]}, "component": {"type": "string"}, "path": {"type": "string"}, "message": {"type": "string"}, "hint": {"type": "string"}}}},
+    "components": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["name", "version", "state", "release_dir"],
+      "properties": {"name": {"type": "string"}, "version": {"type": "string"}, "state": {"type": "string"}, "release_dir": {"type": "string"}}}},
+    "access": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["component", "kind", "label", "value"],
+      "properties": {"component": {"type": "string"}, "kind": {"enum": ["setup_url", "setup_token", "master_key_fingerprint", "note"]}, "label": {"type": "string"}, "value": {"type": "string"}, "secret": {"type": "boolean"}}}}
+  }
+}

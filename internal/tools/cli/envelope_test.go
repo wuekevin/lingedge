@@ -32,7 +32,8 @@ func TestJSONSnapshotsAndSchemas(t *testing.T) {
 		{"err-root", []string{"install", "server", "--json"}, nil, 3, ""},
 		{"err-builtin", []string{"install", "scheduler", "--json"}, nil, 8, ""},
 		{"err-confirm", []string{"uninstall", "server", "--json"}, []hopt{asRoot()}, 9, ""},
-		{"err-not-implemented", []string{"install", "server", "--json", "--dry-run"}, []hopt{asRoot()}, 1, ""},
+		{"err-not-implemented", []string{"update", "server", "--json", "--dry-run"}, []hopt{asRoot()}, 1, ""},
+		{"err-install-no-keys", []string{"install", "server", "--json", "--dry-run"}, []hopt{asRoot()}, 5, ""}, // 本构建未内置发行公钥：安装/预检失败关闭
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

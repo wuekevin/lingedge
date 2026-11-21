@@ -121,7 +121,7 @@ lingedge install <component> [flags]  # component: server|admin-web|console|webs
     --channel stable|beta             #   默认 stable
     --offline <bundle.tar>            #   从离线可信发行包安装（同样验签，§9.4）
     --allow-expired-manifest          #   仅与 --offline 联用：放行已过 valid_until 的清单（气隙环境；告警；sequence/签名/吊销仍生效，§9.2）
-    --set key=value (可重复)          #   组件初始配置项（经 schema 校验，非任意文本注入）
+    --set key=value (可重复)          #   组件初始配置项（经 schema 校验，非任意文本注入）；换端口：--set port.<组件>.<tcp|udp>.<原端口>=<新端口>[@<绑定地址>]（§12.4）
     --mode static|ssr                 #   仅 website（变体）
     --skip-start                      #   仅物化，不启动（调试）
     --setup-listen <addr>             #   仅 server：向导监听地址，默认 127.0.0.1:8080（§13）
@@ -153,7 +153,7 @@ lingedge backup restore <file> [--component …] [--replace]
 lingedge rollback <component> [--to <version>] [--from-backup <file>]
 lingedge uninstall <component> [--purge --confirm-name <hostname>]
 
-lingedge recover [--resume|--rollback]   # 处理被中断的事务（§12.3）
+lingedge recover [--resume|--rollback]   # 处理被中断的事务（§12.3）；非交互且未给标志 → 退出码 9
 ```
 
 要点：
@@ -699,6 +699,34 @@ stateDiagram-v2
 - 「存在未完成事务」的判定：journal 未 `commit/abort` **且没有存活的持有者**。持有者是否存活由 journal 文件自身的 `flock` 判定（活着的事务持有它到 `commit/abort/Close`，被杀的由内核释放），而不是 pid；因此「另一个组件上正在进行的合法事务」不会被误判成 13。空文件（创建后、写入 `open` 前被杀）与中间损坏的文件同样算未完成，由 `recover` 处理（空事务可 `DiscardEmpty`）。
 - 归档：`commit/abort` 后可 `Archive`（rename 到 `journal/archive/`，不覆盖同名归档）；中间被杀则 `ArchiveFinished` 补做。
 
+### 12.4 实现（Story 1.33：`internal/tools/installer`）
+
+**依赖与分层**：`cli → installer → {registry, downloader+manifest, resolver, probe, service, security}`；`installer` 不 import 任何 Server 包。组件特有知识经 `ComponentSpec` 注入（`Executables`/`ValidateSettings`/`InitConfig`/`Start`/`Health`，见 `installer/component.go`）；**生产构建的 `installer.ProductionSpecs()` 为空**（具体组件由 1.35 server、1.40 静态前端、Epic 3 node 等 Story 登记），未登记的组件 `install` 以 `install.component_spec_missing`（退出码 1）明确失败，**不存在占位实现**。假组件只在 `_test.go` 与 `tests/toolsworld`（G-11）；`tests/security/toolsbinary` 对编译出的 `lingedge` 做 `go tool nm` 与字符串扫描，证明二进制不含它们（带负向样本）。
+
+**一次安装的流程**（`Installer.Install`）：
+1. `cli` 的写命令入口 `registry.Begin`（组件锁 + journal 扫描，6/13）；`--dry-run` 不取锁、不开 journal。
+2. **预检 1–9（`Plan`，只读）**：`probe.Collect` → `resolver.System`；读取并验证清单（在线 `<release.base_url>/<channel>/manifest.json(.sig)`，或 `--offline` bundle；只 `Verify` 不提交）→ `resolver.Resolve`。阻断按 `Kind/Code` 归到 1–9 步（os/arch → 1/2，资源 → 3，端口 → 4，外部依赖 → 7，依赖/成环/升级路径/用法 → 8，未发布/内置/吊销/版本 → 9）；只有「被动升级需确认」的阻断时，确认（交互 y / `--yes`）后以 `AcceptPassiveUpgrade` 重新求解。随后：组件规格齐备、systemd 版本（决定 LoadCredential 或降级，ADR-027）、渲染全部将创建的文件（单元、server 内建三件套、规格的 `InitConfig`）并与磁盘比对 → **冲突**（既有内容不同的配置/单元/站点、既有目录权限宽于规格或属主不符、`ListenersKnown=false`）。冲突在交互时询问，非交互无 `--yes` → 9（端口无法验证 → 4）；确认后既有内容原样保留、新内容写 `.new`。**安装流程不执行已装组件的升级**（含被动升级）：计划含 `upgrade` 即 `precondition.upgrade_required`（3），指向 `lingedge update`（1.43：备份、迁移决策、健康回滚）。
+3. `task.Extend`（依赖闭包追加组件锁，非阻塞，被占用 → 6）→ `OpenTx`。journal 里补记 1–9（无副作用，undo 为空；第 1 步的 undo 携带请求 JSON，供 `recover --resume`）。
+4. **取包 10–13**：对计划里每个组件 `downloader.Acquire`（`DeferCommit`，`TxID = <tx>-<组件>`，`Params.Executable` 来自规格，`OnStage` 把四个阶段映射成 journal 的 10–13 步；多个组件时步骤号只前进不后退，其 staging 由这些步骤的 undo 覆盖）。取包后核对包的 SHA256 与预检所选一致，不一致（清单在两者之间变了）以 `manifest.KindPackage`（5）中止。
+5. **物化 14–18、激活 19–20** 包在 `Acquired.Finish` 里（嵌套）：全部成功后才提交 sequence/`key_rotation`，失败则 Discard，信任库不变。14：校验过的复制（逐文件重算 SHA256，对照已验签的 `SHA256SUMS`）→ `releases/<v>.partial` → rename → `current` 链接（目标 release 已存在且不一致 → 不覆盖，3）；15：`service.Provisioner`；16：`service.Ensurer`；17：单元（不覆盖，`.new`）→ `daemon-reload` → `enable`；18：配置（`O_EXCL`、先 chown 后写、从不覆盖；server：`server.yaml`、`master.key`（32B CSPRNG，格式见 docs/operations/secrets.md §2，已存在沿用）、`setup-token.hash`）；19：`ComponentSpec.Start`；20：`ComponentSpec.Health` 在 `install.health_timeout`（缺省 60s，[ASSUMPTION]，见 §21）内按 `install.health_interval` 重试。
+6. **提交 21–22**：21 在**一次**原子写里落盘 `state.json`（组件记录 + `host.baota`，即 `RecordHostBaota` 的语义）——这是提交点；22 输出访问信息（server：向导地址、**只显示一次**的 setup token、主密钥短指纹与「与数据库备份分开保管」提示，F-7；`--setup-listen` 非回环时告警）。最后 `Commit` + `Archive`，清理 staging。提交点之后的任何 journal 故障（21 done、22、commit）**不回滚**已提交的安装：journal 保持未完成，`recover --resume` 只补写收尾记录。
+
+**先写 undo 再动手**：每步的 `Created` 在动手前由只读检查决定（`Provisioner.Exists`、`Ensurer.Plan`、`Lstat`、`IsEnabled/IsActive`），`journal.Begin`（fsync）之后才执行副作用；预判与实际不符（用户在期间被创建/删除）时重写 undo（在途步骤可重新 begin）。一步内的 undo 动作**按记录顺序**执行，由记录者排成「先依赖者」顺序（先 disable 再删单元、先删 release 再删空目录、后装的组件先撤）。installer 自己的撤销动作（`remove_staging`/`remove_release`/`unlink_current`/`remove_opt_dir`/`state_forget`）与 service 的动作由同一个 `Undoer` 执行，且不盲信 journal：路径形状白名单、只处理 `Created=true`、类型检查、幂等（目标已不存在即完成）。受管目录之外被创建的祖先（真实系统上 `/etc`、`/var/lib`、`/var/log` 总已存在）回滚时保留。
+
+**失败与退出码**：任一步失败 → 逆序撤销（每撤销一步记 `undone`，撤销本身幂等，被中断后可续做）→ `abort` 并归档。预检失败 3/4/7/8（无任何副作用，不开 journal）；取包/校验失败 5（回滚后原错误码，传输失败 1）；物化失败为原错误码（回滚后）；**激活后（19–21）失败 10**（状态已恢复）；`--no-rollback` 的健康失败 11（保留现场，状态记 `failed`）；**撤销失败或 journal 无法收尾 12**（journal 保留，`recover --rollback` 重试）；SIGINT：物化步骤（14–18）与提交点（21）是原子的——收到信号后**完成当前步骤**，在步骤之间回滚，退出码 130（回滚本身用 `context.WithoutCancel`，不被打断）。10 与 12 互斥。
+
+**`recover`**（`Installer.Recover`）：对每个已死亡且未结束的事务——空 journal 直接丢弃；中间行损坏 → 保留并要求人工；`--rollback`（默认建议）按 `UndoPlan` 逆序撤销、`abort`、归档；`--resume`：最大已开始步骤 ≤ 18 → 先撤销在途步骤（重做时 `Created` 重新判定），用 journal 里的请求（含已求解的 `Pinned`；安装时已确认的冲突记为 `Accepted`，续跑不再询问）重新预检，重新取包并**完整重验**（不信任遗留的 staging 包），从在途步骤续跑；已进入激活阶段（19–20）或提交点未完成 → 拒绝（`recover.not_possible`，3），只能回滚；已进入提交阶段且 `state.json` 已记录本事务 → 只补写收尾记录。无标志：交互时询问（回滚为推荐），非交互 → 9。
+
+**事件**：`installer.Event`（`phase/step_start/step_done/step_skipped/step_failed/warning/rollback_step/info`）经 `Deps.Events` 非阻塞投递（满/关闭/panic 都被吞掉并计数），UI 无法影响安装结果；`cli` 把它渲染成 stderr 的文本行或 NDJSON（`--json`，`--progress=none` 关闭）。事件与日志从不含 setup token、master.key 内容或口令（测试以明文扫描断言）。
+
+**tools.yaml**（`--config`，缺省 `/etc/lingedge/tools/tools.yaml`；`installer.LoadToolsConfig`）：`release.base_url`（发行源，UD-3 无缺省；清单在 `<base_url>/<channel>/manifest.json`，包 URL 来自清单）、`release.ca_file`、`release.proxy`（缺省遵循 `HTTPS_PROXY`）、`release.resume_dir`（缺省 `<状态目录>/downloads`，0700；`--dry-run` 不启用）、`install.health_timeout`/`install.health_interval`。只严格校验这两节（未知键/类型错误/非 https/相对路径一律拒绝），其他顶层节属 1.42 的 schema，此处忽略。
+
+**`--set`**（`installer.ParseSet`，有 fuzz）：`port.<组件>.<tcp|udp>.<原端口>=<新端口>[@<绑定地址>]` → `resolver.PortOverride`；其余键为组件初始配置项（`ComponentSpec.ValidateSettings`；server 内建 `env`、`trusted-proxies`）。键 `^[a-z][a-z0-9_.-]{0,127}$`，重复键、控制字符、超长值、≤64 项；错误只回显键，不回显取值。
+
+**数据输出**：`install` 的 `data`（`cli/schema/data.install.schema.json`，追加式，dry-run 与真实安装同形）= `{component, dry_run, outcome(planned|installed|already_installed), tx?, plan（resolver.Plan 原样）, preflight[1–9 结论], step_map（resolver 步骤 → 22 步）, conflicts[], components[], access[], credential_mode?, listeners_known}`；`recover` 的 `data` 见 `data.recover.schema.json`。退出码表、envelope schema **未改**，新增的错误码（`install.*`、`recover.not_possible`、`port.unverified`、`usage.invalid_config`）均映射到既有退出码（见 `cli/installerr.go` 头注释）。
+
+**对前序包的追加式改动**：`downloader.Params.OnStage`（四阶段回调，nil = 无）；`registry.Task.Extend`（依赖闭包追加组件锁）；`service.Provisioner.Exists`、`service.Ensurer.Plan/PlanUndo`（只读预演）、`service.IsManagedPath`。
+
 ## 13. Server 安装向导（FR-11、F-8）
 
 Tools 负责**物化与准备**，Web 向导负责**业务初始化**，边界如下：
@@ -979,7 +1007,7 @@ LockPersonality=yes
 - **目录与文件**：`ServerDirs`/`NodeDirs`/`UpgradeResultDir` 是 §8 与 ADR-020 §2 的数据化表示；`Ensurer` 先 0700 创建、显式 chmod、再 chown（经 `security.MkdirAllPerm`），既有目录不改动、不符作为 `MismatchError`（`Repair` 才修正）、符号链接/文件目标拒绝；`FileWriter.Create` 用 `security.CreateFile`（`O_EXCL`）、**先 chown 后写内容**、从不覆盖（`master.key` 走它）。`Ownership` 接口让非 root 测试记录 chown 调用，真实 chown 在 ENV-LNX 验证。`/run/lingedge-node`、`current`、`state.json`、`certs/<uid>/`、`generations/g<N>/` 由 systemd/Agent 创建，Tools 不创建。
 - **systemctl**：`Systemctl` 的每个方法构造固定形状的参数数组，单元名只认 `AllUnits`；`Enable`/`Start` 先查询并返回 `UndoAction`（只有「此前未启用/未运行」才 `Created`）。
 - **单元安装（FR-6）**：`Installer.Install`：不存在 → `registry.EnsureFile` 创建（root:root 0644）；内容一致 → 幂等完成；内容不同或目标是符号链接 → 不覆盖，写 `<unit>.new` 并返回警告；`PendingNewUnits` 供 doctor。
-- **撤销**：`Undoer.Apply` 执行 `userdel`/`remove_dir_if_empty`/`remove_path`/`unlink_unit`/`systemctl_disable`/`systemctl_stop`，只撤销 `Created=true`，路径须在 Tools 管理的目录内（`/var/lib/lingedge/tools` 除外）、单元与用户名须在已知集合、删文件前复核 SHA256。编排与 recover 本体属 1.33。
+- **撤销**：`Undoer.Apply` 执行 `userdel`/`remove_dir_if_empty`/`remove_path`/`unlink_unit`/`systemctl_disable`/`systemctl_stop`，只撤销 `Created=true`，路径须在 Tools 管理的目录内（`/var/lib/lingedge/tools` 除外）、单元与用户名须在已知集合、删文件前复核 SHA256。编排与 recover 本体已由 Story 1.33 交付（§12.4）。
 - **版本与降级**：`ParseVersion`、`MinSystemd=235`、`CredentialMinSystemd=247`、`SelectCredentialMode`、`CheckSystemdVersion`/`CheckCredentialConsistency`（doctor，1.42）；见 ADR-027。
 - **平台**：`platform_linux.go`（`sd_booted` 判定）/`platform_other.go`（恒 false，`Systemctl` 明确返回 `not_systemd`）；`platform_unix.go`（属主读取）。`linux/amd64`、`linux/arm64` 交叉编译通过。
 - **CLI**：`cli.ServiceError` 把 `service` 的失败映射为 3（systemd 缺失/版本不足/需要 root/冲突/IO/目录不符）或 1（命令失败/撤销被拒/参数缺陷）；不接线未实现的命令。
@@ -1193,3 +1221,9 @@ LockPersonality=yes
 - **§15**：`lingedge-openresty.service` 的 `StartLimitIntervalSec=0` 由 `[Service]` 更正到 `[Unit]`（原位置会被 systemd 忽略）；§15.1 增主密钥交付的两个变体；新增 §15.5（实现记录）。
 - **§21**：`LoadCredential` 最低版本与降级已核对并落 ADR-027（≥247；单元整体 ≥235；降级 = `root:<运行组> 0440` 密钥文件）。
 - **新增 ADR-027**。真实 systemd 行为、各发行版版本输出与指令引入版本的复验登记为 ENV-LNX（1.45）。
+
+## 修订记录 2026-11-21（Story 1.33：installer 编排）
+
+- **新增 §12.4**：22 步状态机、journal 先于副作用、冲突不覆盖、dry-run 零副作用、`recover`（resume/rollback）、事件、tools.yaml 的 `release.*`/`install.*`、`--set` 语法的实现口径。`§12.1` 的 22 步表、`§4` 退出码表、`§6` envelope **未改**；`install`/`recover` 的 `data` 为追加的 schema。
+- **取舍（须披露）**：① 清单在预检阶段先取得并验证（求解需要它），第 10–13 步随后重新取得并完整重验，取包后比对包的 SHA256 与预检所选一致；② 信任状态（sequence/`key_rotation`）在第 14–20 步全部成功后才提交（`DeferCommit` + `Finish`），而非第 11 步验签后立即写——换来「安装失败可用同一份清单重试、不推进 sequence」；③ 预检 1–9 在 journal 之外只读求值，通过后补记；④ 安装不执行已装组件的升级（含被动升级），指向 `update`（1.43）；⑤ `ListenersKnown=false` 视为需要确认的冲突（非交互无 `--yes` → 4）；⑥ `current` 链接在第 14 步创建（resolver 的 `activate` 在 install 时并入 14）。
+- 追加：`downloader.Params.OnStage`、`registry.Task.Extend`、`service.Provisioner.Exists`/`Ensurer.Plan`/`IsManagedPath`。**无迁移/OpenAPI/proto/CF-6/contract-v1 变更。**
