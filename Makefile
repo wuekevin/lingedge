@@ -42,18 +42,19 @@ endef
 .PHONY: help build verify-build test race lint fmt vet check-scaffold clean \
         gen-lint arch-check golangci shell-check repo-check gate-selftest vuln verify-gates \
         release-keys-check contract-bin contract-selftest openapi-breaking migrations-check migrations-seal freeze-check perms-check tenantscope-check audit-check contract-check \
-        print-ldflags migrate migrate-test proto proto-check openapi-check frontend e2e edge-test security release
+        print-ldflags migrate migrate-test proto proto-check openapi-check frontend e2e edge-test security release release-finalize release-verify release-sign release-sign-test release-test secrets-check
 
 help:
 	@echo "目标: build verify-build test race lint migrate migrate-test proto proto-check openapi-check frontend e2e edge-test security release"
 	@echo "辅助: fmt vet check-scaffold clean gen-lint arch-check golangci shell-check gate-selftest vuln verify-gates"
 	@echo "契约(Story 1.3): contract-check（= contract-selftest openapi-check proto-check migrations-check freeze-check perms-check[Story 1.18] tenantscope-check[Story 1.20] audit-check[Story 1.21]）migrations-seal"
 	@echo "迁移(Story 1.6): migrate（MIGRATE_ARGS=plan|up|down|status|recover|lint ...）migrate-test"
+	@echo "发行(Story 1.34): release → release-finalize → release-verify（两轮离线签名，见 docs/operations/release.md）release-sign（构建离线签名工具）release-sign-test release-test secrets-check"
 	@echo "未实现的目标会输出 NOT_IMPLEMENTED(story X.Y) 并以非零退出。"
 
 # 内置发行公钥守卫（Story 1.27 AC5、NFR-1）：internal/tools/manifest/builtin/keys.json 由发行流水线在构建前注入（不入库）。
 # 含测试公钥/测试 key_id/私钥字段/杂散文件 → 任何构建失败；缺失 → 开发构建放行（lingedge 运行期对任何清单失败关闭），
-# 发行构建（make build RELEASE=1；make release 本体属 Story 1.34，须经它）失败。门禁自测见 scripts/gates/releasekeys_test.go、tests/gates、tests/security/releasekeys。
+# 发行构建（make build RELEASE=1；make release 经同一守卫，Story 1.34）失败。门禁自测见 scripts/gates/releasekeys_test.go、tests/gates、tests/security/releasekeys。
 release-keys-check:
 	$(GATES) release-keys $(if $(RELEASE),-require,)
 
@@ -124,6 +125,7 @@ repo-check:
 gate-selftest:
 	$(GO) test -count=1 ./scripts/gates/...
 	GOLANGCI_LINT='$(GOLANGCI_LINT)' $(GO) test -count=1 -v ./tests/gates/...
+	$(MAKE) --no-print-directory release-sign-test
 
 # 依赖漏洞扫描（G-7 的 Go 部分；需访问 vuln.go.dev，不在 make security 内，完整供应链门禁属 Story 1.34）。
 vuln:
@@ -238,7 +240,7 @@ edge-test:
 # 本目标当前只覆盖 Story 1.2 的静态门禁：G-6 固定口令、G-11 测试替身隔离、G-12 命令注入（Story 1.14 追加任务类型白名单 tasktype）、NFR-29 品牌。
 # Story 1.11 追加 G-5（日志脱敏扫描：向真实 logx 注入私钥/Token/主密钥/明文，断言输出无泄露，含负向自测）。
 # 威胁模型 §9 的其余门禁（G-1、G-3、G-7…G-10、G-13；Story 1.26 起 G-4 已接入：gates extract + tests/security 路径穿越向量集）尚未接入，由对应 Story 逐项追加到本目标；
-# Story 1.27 追加 release-keys（内置发行公钥守卫，含 -require 的发行模式）。
+# Story 1.27 追加 release-keys（内置发行公钥守卫，含 -require 的发行模式）。Story 1.34 追加 secrets（仓库密钥扫描）。
 # Story 1.23 追加三个信任域门禁（gates trustdomain：Server 代码路径不得存在加载发行清单私钥的逻辑；tests/security/trustdomain 对真实二进制符号表做同样检查，含负向样本）与 G-5 签名密钥材料日志脱敏用例。
 # Story 1.20 追加 G-2（多租户隔离矩阵 tests/security/tenant_isolation：真实临时 MySQL/Redis 上的真实进程内装配；缺 MySQL/Redis 时测试以「等待环境验证」跳过——
 # 跳过不代表通过，LINGEDGE_REQUIRE_MYSQL=1 / LINGEDGE_REQUIRE_REDIS=1 可把缺失视为失败）。
@@ -253,12 +255,66 @@ security:
 	$(GATES) flags
 	$(GATES) extract
 	$(GATES) release-keys
+	$(GATES) secrets
 	$(GO) test -count=1 ./tests/security/...
-	@echo "make security: 已覆盖 G-2（租户隔离矩阵）/G-4（Tools 解压：extract 门禁 + tests/security 路径穿越向量集）/G-5/G-6/G-11/G-12（含任务类型白名单 tasktype、Tools 白名单执行入口 safeexec 的元字符注入向量）/三个信任域（trustdomain）/发行公钥构建守卫（release-keys，Story 1.27 AC5；发行构建 RELEASE=1 缺失即失败）/CLI 旧标志名（flags，MIN-04）/品牌；未接入（随对应 Story 追加）: G-1 G-3 G-7 G-8 G-9 G-10 G-13" >&2
+	@echo "make security: 已覆盖 G-2（租户隔离矩阵）/G-4（Tools 解压：extract 门禁 + tests/security 路径穿越向量集）/G-5/G-6/G-11/G-12（含任务类型白名单 tasktype、Tools 白名单执行入口 safeexec 的元字符注入向量）/三个信任域（trustdomain）/发行公钥构建守卫（release-keys，Story 1.27 AC5；发行构建 RELEASE=1 缺失即失败）/仓库密钥扫描（secrets，G-7 的密钥扫描部分：仓库与 CI 中不存在发行私钥，Story 1.34 AC2）/CLI 旧标志名（flags，MIN-04）/品牌；G-7 其余部分：依赖漏洞见 make vuln，SBOM 随 make release 产出，许可证扫描尚未接入；G-8 篡改测试由 tests/release 覆盖（make test）；未接入（随对应 Story 追加）: G-1 G-3 G-9 G-10 G-13" >&2
 
-# 发行流水线本体随 Story 1.34 交付；1.34 须让本目标先走 `make build RELEASE=1`（内置发行公钥守卫，缺失/含测试公钥即失败）。
+# --- 发行流水线与离线签名流程（Story 1.34、ADR-012 §1.5/§1.10、tools-design §9、docs/operations/release.md）----------------------
+# 在线流水线（scripts/release）只产出待签物与组装，没有任何签名代码、不接触私钥；签名只在离线机用 scripts/release-sign（独立 module）完成。
+# 两轮签名（包内 SHA256SUMS.sig 在 .tar.gz 里面，包的外层 sha256 写进清单，清单再被签名）：
+#   make release            构建（RELEASE=1 守卫 + 可复现性双构建）+ stage + 第 1 轮待签清单 to-sign-1.json   [在线]
+#   release-sign sign ...   离线机签第 1 轮                                                                   [离线]
+#   make release-finalize   验第 1 轮签名 → 最终 .tar.gz → 待签 manifest.json + to-sign-2.json              [在线]
+#   release-sign sign ...   离线机签第 2 轮（清单）                                                          [离线]
+#   make release-verify     用 Tools 同一条校验链验证 → publish/ 发行目录                                    [在线]
+# 变量：RELEASE_VERSION（必填，semver）RELEASE_KEYS（真实发行公钥集 keys.json，UD-3；注入内置目录后经 RELEASE=1 守卫）
+#       RELEASE_CHANNEL（stable|beta）RELEASE_SEQUENCE（必填，单调递增）RELEASE_BASE_URL（必填，发行源 https 地址，T-3）
+#       RELEASE_SIGS（第 1 轮 .sig 目录，缺省 <out>/signatures）RELEASE_FLAGS（透传，如 -platforms/-allow-dirty/-openresty-tree）RELEASE_FINALIZE_FLAGS（透传，如 -key-rotation/-revoke）
+# 发行构建总经 `release-keys-check RELEASE=1`（与 make build RELEASE=1 同一守卫：缺失/含测试公钥即失败）；流水线 build 内部再检一次并扫描产物。
+RELEASE_VERSION  ?=
+RELEASE_CHANNEL  ?= stable
+RELEASE_SEQUENCE ?=
+RELEASE_BASE_URL ?=
+RELEASE_KEYS     ?=
+RELEASE_SIGS     ?=
+RELEASE_FLAGS    ?=
+RELEASE_FINALIZE_FLAGS ?=
+RELEASE_OUT      ?= bin/release/$(RELEASE_VERSION)
+RELEASE_PUBKEYS  ?= internal/tools/manifest/builtin/keys.json
+RELEASE_REQUIRE_RUBY ?= 1
+
 release:
-	$(call not_implemented,1.34)
+	@test -n "$(RELEASE_VERSION)" || { echo "release: 需要 RELEASE_VERSION=<semver>" >&2; exit 2; }
+	@if [ -n "$(RELEASE_KEYS)" ]; then install -m 0644 "$(RELEASE_KEYS)" $(RELEASE_PUBKEYS); fi
+	@$(MAKE) --no-print-directory release-keys-check RELEASE=1
+	$(GO) run ./scripts/release build -src . -out $(RELEASE_OUT) -version $(RELEASE_VERSION) $(RELEASE_FLAGS)
+
+release-finalize:
+	@test -n "$(RELEASE_VERSION)" && test -n "$(RELEASE_SEQUENCE)" && test -n "$(RELEASE_BASE_URL)" || { echo "release-finalize: 需要 RELEASE_VERSION RELEASE_SEQUENCE RELEASE_BASE_URL" >&2; exit 2; }
+	$(GO) run ./scripts/release finalize -out $(RELEASE_OUT) -keys $(RELEASE_PUBKEYS) -channel $(RELEASE_CHANNEL) -sequence $(RELEASE_SEQUENCE) -base-url $(RELEASE_BASE_URL) $(if $(RELEASE_SIGS),-sigs $(RELEASE_SIGS),) $(RELEASE_FINALIZE_FLAGS)
+
+release-verify:
+	@test -n "$(RELEASE_VERSION)" || { echo "release-verify: 需要 RELEASE_VERSION" >&2; exit 2; }
+	$(GO) run ./scripts/release verify -out $(RELEASE_OUT) -keys $(RELEASE_PUBKEYS)
+
+# 构建离线签名工具（在离线机上执行；只需 Go toolchain，无第三方依赖）。
+release-sign:
+	@mkdir -p bin
+	$(GO) build -C scripts/release-sign -o ../../bin/release-sign .
+	@echo "已构建 bin/release-sign：拷到离线机运行，私钥只存在于离线介质"
+
+# 离线签名工具自测（独立 module）：单元 + §9.6 向量复算 + Ruby OpenSSL 与 Go ed25519 双实现交叉验证。
+# 缺少支持 Ed25519 的 Ruby 时缺省视为失败（RELEASE_REQUIRE_RUBY=0 可降级为「跳过并标等待环境验证」，跳过不代表通过）。
+release-sign-test:
+	cd scripts/release-sign && $(GO) vet ./... && LINGEDGE_REQUIRE_RUBY=$(RELEASE_REQUIRE_RUBY) $(GO) test -count=1 ./...
+
+# 发行流水线测试：scripts/release 单测（符号链接消除、SBOM、迁移预告解析、确定性打包、无签名代码）+ tests/release 端到端
+# （真实构建 → 离线签名（运行时随机密钥）→ Tools 验签通过/篡改拒绝、可复现性、公钥轮换、OpenResty 链接消除、Ruby 交叉验证）。
+release-test: release-sign-test
+	$(GO) test -count=1 ./scripts/release/... ./tests/release/...
+
+secrets-check:
+	$(GATES) secrets
 
 clean:
 	rm -rf $(DIST) bin

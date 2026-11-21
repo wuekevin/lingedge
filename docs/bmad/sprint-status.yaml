@@ -73,7 +73,7 @@ development_status:
   1-31b-遗留项清理: review   # 1.31 遗留清理（本机可做项全部完成并测试）：baota.Includer 受控 include 跟随（白名单根/相对 nginx 前缀/glob 上限/include 链防环/符号链接逐级不越界/readGuard 两处/文件·字节·深度·节点上限）；MySQL/Redis unix socket 端点（probe.Endpoint 追加 type/socket、Lstat 检查、免凭据握手、mysql --protocol=socket 认证、默认候选+/proc/net/unix 发现、凭据仅发往属主受信的 socket；真实临时 mysqld/redis-server 的 socket 测通）；nvm/fnm/volta/n/asdf/宝塔 Node 项目管理器只读识别（不执行）；无迁移/契约/CF-6/schema 变更；变异验证与 fuzz 见 docs/bmad/stories/1-31b-遗留项清理.md；等待环境验证：ENV-BT/ENV-LNX（真实宝塔 vhost include 样式与 socket 属主账号、/proc/net/unix、Node 目录）；后续：1.33、1.42、Server 向导
   1-32-service-包-systemd-unit-渲染-运行用户-目录-systemctl-封装: review   # 开发完成、本机门禁见 docs/bmad/stories/1-32-*.md：internal/tools/service（go:embed 模板 lingedge-server/node/openresty/.path/upgrade.path·.service + Server 降级变体；golden 人工对照 §15/ADR-024 逐字节比对 + 独立 INI 属性测试逐条断言加固项；所有变量经 ValidateUnitValue/ValidateUnitPath，注入向量表与 2 个 fuzz；OpenResty ExecStartPre/ExecStart 同一子模板同一对 -p/-c；运行用户 id/getent/useradd 经 safeexec 仅不存在才创建并记 Created；目录按 §8/ADR-020 §2 总表，创建即最终权限（umask 无关）、先 chown 后写内容、master.key O_EXCL 不覆盖；systemctl 参数数组+单元白名单；单元已存在不覆盖写 .new 内容一致幂等；LoadCredential ≥247/单元 ≥235 版本解析+降级变体(root:组 0440 密钥文件)+doctor 检查函数，ADR-027；Undoer 执行本包 undo；cli.ServiceError）；变异验证 72/72 检出；等待环境验证：ENV-LNX（真实 systemctl/systemd-analyze verify/LoadCredential/useradd/chown、Agent 内 openresty -t 一致性）；后续：1.33 编排、1.42 doctor
   1-33-installer-编排-22-步安装状态机-journal-回滚-dry-run-recover: review   # 开发完成、本机门禁见 docs/bmad/stories/1-33-*.md：internal/tools/installer（22 步状态机：预检 1–9 只读求值→取包 10–13 经 downloader.Acquire(DeferCommit+Finish，OnStage 映射 journal 步)→物化 14–18→激活 19–20→提交 21–22；每步先写 undo（Created 动手前只读判定）再执行；逆序撤销幂等可续做，退出码 3/4/7/8·5·10·12·130；--dry-run 对整棵根目录零变化；冲突（配置/单元/目录权限/ListenersKnown=false）停下确认、既有内容绝不覆盖写 .new；提交点 state.json 原子写（含 host.baota），提交点之后 journal 故障不回滚；recover --resume/--rollback；installer.Event 非阻塞通道，UI 不影响业务；tools.yaml release.*/install.*；--set 解析（fuzz）；server.yaml 经真实 config.Parse 校验、master.key/setup-token）+ cli install/recover 真实命令（classify 汇总全部错误映射）；ComponentSpec 仅接口、生产 ProductionSpecs 为空、假组件只在 tests/toolsworld（二进制符号扫描证明）；真实子进程 22 步×4 点 kill -9 后 resume/rollback 两条路与真实 SIGINT=130；变异验证 29 条全部检出；fuzz 4 个；等待环境验证：真实 Linux/systemd 安装、真实组件、ss//proc、宝塔（ENV-LNX/ENV-BT，1.45）；后续：1.35 server 规格、1.40、1.42、1.43 升级执行、1.44 多选界面
-  1-34-发行流水线与离线签名流程-待签清单-包-sbom: backlog
+  1-34-发行流水线与离线签名流程-待签清单-包-sbom: review   # 开发完成、本机门禁见 docs/bmad/stories/1-34-*.md：scripts/release-sign（独立 module、仅标准库、离线机：keygen/sign/verify/endorse，人工确认+逐项核对+0600 私钥）+ scripts/release（在线流水线、无签名代码：build[可复现性双构建/迁移预告/stage/SBOM/第 1 轮待签]→finalize[验第 1 轮签名/最终确定性 .tar.gz/待签 manifest.json]→verify[Tools 同一条校验链验证→publish/]）+ make release/release-finalize/release-verify/release-sign + gates secrets（G-7 密钥扫描，无豁免）；两轮离线签名（包内签名在包里面）；构建期消除符号链接（SafeExtract 不放宽）；Ruby OpenSSL×Go ed25519 在本机真实交叉验证 §9.6；变异验证 16/16 检出；等待环境验证：UD-3（真实发行密钥/签名人/公开发行源）、UD-4/Story 3.22（真实 OpenResty 目录树）；后续：1.35（cmd/lingedge 接线后内置公钥守卫覆盖真实产物、install server）、1.43、1.36、Epic 3、6.19（许可证扫描/演练）
   1-35-lingedge-install-server-tools-侧-server-安装-第一批终点: backlog
   1-36-前端-workspace-基座-shared-tokens-三态-i18n-类型生成-门禁: backlog
   1-37-安装向导-spa-go-embed: backlog
@@ -787,9 +787,11 @@ environment_verification:   # 『等待环境验证』登记（验证人/日期�
     verified_by: ""
     verified_on: ""
   1-34-发行流水线与离线签名流程-待签清单-包-sbom:
-    status: not_started
+    status: partial
     required_env: "本机；真实离线签名需 UD-3（签名人/硬件密钥）"
     condition: "流水线与测试签名闭环本机完成；真实发行密钥签名与公开发行源待 UD-3。"
+    done_locally: "make lint security gate-selftest vuln contract-check build verify-build migrate-test race 全绿：见 docs/bmad/stories/1-34-*.md。本机真实：go build 多平台 + 可复现性（另一目录+干净 GOCACHE，4 个二进制哈希一致）、离线签名工具（运行时随机密钥）两轮签名、Tools 同一条校验链验签通过/篡改全部拒绝、公钥轮换端到端、OpenResty 风格目录树的符号链接消除、Ruby OpenSSL（Homebrew Ruby 4.0 + OpenSSL 3.6）与 Go ed25519 对 §9.6 向量及流水线真实签名的双向交叉验证。"
+    pending: "UD-3：真实发行密钥签名/签名人/保管/公开发行源；UD-4+Story 3.22：真实 OpenResty 目录树；远端 CI（Ruby 需支持 Ed25519）；Story 1.35 接线后内置公钥守卫对真实 lingedge 产物生效。"
     verified_by: ""
     verified_on: ""
   1-35-lingedge-install-server-tools-侧-server-安装-第一批终点:

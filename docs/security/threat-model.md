@@ -385,7 +385,7 @@ flowchart LR
 | G-4 路径穿越向量 | `../`、绝对路径、符号链接、硬链接、`%2e%2e`、超大条目数；Tools 与 Agent 解包器、日志下载、媒体上传 | 安全测试、CLI 安装与升级测试 | M1 |
 | G-5 日志脱敏扫描 | 在集成测试输出与日志样本中扫描 Token/密码/私钥/`Authorization` 模式 | 安全测试 | M1 |
 | G-6 固定密码扫描 | 代码、配置模板、迁移与文档中检索默认口令模式（NFR-6） | 安全测试 | M1 |
-| G-7 依赖与供应链扫描 | Go 与 npm 依赖漏洞扫描、许可证扫描、SBOM 生成；**工具实现时选型** | 安全测试 | M1 |
+| G-7 依赖与供应链扫描 | Go 与 npm 依赖漏洞扫描、许可证扫描、SBOM 生成；**工具实现时选型**。Story 1.34 落地：**仓库密钥扫描**（`gates secrets`，`make security`；仓库与 CI 中不存在发行私钥，无豁免）、**SBOM**（`make release` 用 `go version -m`/pnpm lockfile 生成 CycloneDX，随包发布）、漏洞扫描 `make vuln`；**许可证扫描尚未接入** | 安全测试 | M1 |
 | G-8 签名/篡改测试 | 篡改清单/包体/配置修订/重放旧 seq 均被拒 | CLI 安装与升级测试、Node 配置下发测试 | M1 |
 | G-9 伪造 Header 测试 | 访客伪造三类 IP Header、非可信代理伪造 XFF（AC-E-4、E-6） | Node 配置下发测试、规则引擎测试 | M1 |
 | G-10 缓存泄漏测试 | **V-1（Go 单元，本机可跑）**：KCR 矩阵——条件字段/插值变量（cookie/UA/header/query/client_ip/method）× 缓存策略键维度（含内联 `cache_key` 覆盖、`any/not` 嵌套、`cache_interaction=bypass` 放行）；**V-2（OpenResty 集成）**：`origin_rule when cookie beta=1` + `cookie_policy=ignore` → 发布被拒 `rule.cache_key_dimension_conflict`；改 `include_named:[beta]` → 通过且有/无 beta 请求命中不同缓存对象、互不串；`cache_interaction=bypass` → beta=1 请求 `BYPASS` 且不产生缓存对象；`UA contains Mobile → rewrite`、回源头 `X-Client: ${client_ip}` 同理；**V-3（泄漏测试 AC-C-7a/b/c）**：两用户不同会话 Cookie 请求同一动态 URL 不得互串，条件化回源规则场景同样不得串 | 缓存失效测试、规则引擎测试 | M1 |

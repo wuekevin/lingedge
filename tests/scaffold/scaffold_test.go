@@ -291,14 +291,15 @@ func TestMakefileTargets(t *testing.T) {
 	root := repoRoot(t)
 	notImplemented := map[string]string{
 		"frontend": "1.36", "e2e": "1.37", "edge-test": "3.22",
-		"release": "1.34",
 	}
 	// security 自 Story 1.2 起为真实目标（运行静态门禁，不再是占位）；其余新增门禁目标同理。
 	implemented := []string{"build", "verify-build", "test", "race", "lint", "security", "gen-lint", "arch-check", "golangci", "shell-check", "gate-selftest", "vuln", "verify-gates",
 		// Story 1.3 起为真实目标（契约工具链）。
 		"proto", "proto-check", "openapi-check", "openapi-breaking", "migrations-check", "migrations-seal", "freeze-check", "contract-selftest", "contract-check", "contract-bin",
 		// Story 1.6 起为真实目标（迁移框架与迁移测试台）。
-		"migrate", "migrate-test"}
+		"migrate", "migrate-test",
+		// Story 1.34 起为真实目标（发行流水线与离线签名流程；make release 不再是 NOT_IMPLEMENTED）。
+		"release", "release-finalize", "release-verify", "release-sign", "release-sign-test", "release-test", "secrets-check"}
 
 	for _, tgt := range implemented {
 		cmd := exec.Command("make", "-n", "--no-print-directory", tgt)
@@ -338,9 +339,11 @@ func TestMakefileWiresGates(t *testing.T) {
 		"arch-check":    {"scripts/gates arch"},
 		"golangci":      {"golangci-lint", "@v2.15.0", "run ./..."},
 		"shell-check":   {"scripts/gates shell"},
-		"security":      {"scripts/gates testdouble", "scripts/gates passwords", "scripts/gates brand", "scripts/gates shell"},
-		"gate-selftest": {"./scripts/gates/...", "GOLANGCI_LINT=", "./tests/gates/..."},
-		"verify-gates":  {"golangci-lint", "scripts/gates testdouble", "./tests/gates/..."},
+		"security":      {"scripts/gates testdouble", "scripts/gates passwords", "scripts/gates brand", "scripts/gates shell", "scripts/gates secrets"},
+		"gate-selftest": {"./scripts/gates/...", "GOLANGCI_LINT=", "./tests/gates/...", "release-sign-test"},
+		// Story 1.34：make release 必须先过内置发行公钥守卫（RELEASE=1 → release-keys -require），再进入流水线；不得绕过。
+		"release":      {"release-keys-check", "RELEASE=1", "scripts/release build", "-version"},
+		"verify-gates": {"golangci-lint", "scripts/gates testdouble", "./tests/gates/..."},
 		// Story 1.3：契约工具链必须真实接入（任一子命令从配方消失即失败）。
 		"openapi-check":     {"bin/contract openapi-check", "bin/contract openapi-breaking", "-base-ref 'contract-v1'", "oasdiff@v1.38.0"},
 		"proto-check":       {"buf@v1.75.0", " lint", " breaking proto --against '.git#ref=contract-v1,subdir=proto'", "scripts/proto-check-gen.sh"},

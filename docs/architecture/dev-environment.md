@@ -134,7 +134,7 @@ inputs:
 | `make e2e` | Playwright E2E（需运行环境，见 §6） |
 | `make edge-test` | 渲染器 golden、注入向量、`nginx -t`（若有 OpenResty）、Lua 引擎测试 |
 | `make security` | 注入/SSRF/路径穿越向量集、日志脱敏扫描、固定密码扫描、依赖扫描 |
-| `make release` | 产出签名清单与发行包（签名私钥离线，不在 CI 机上；仅"待签名"产物，ADR-012） |
+| `make release` | **Story 1.34 起为真实目标**：先过内置发行公钥守卫（`RELEASE=1`），再构建（固定 toolchain、`-trimpath`、`-buildvcs=false`）、同源再构建比对哈希（可复现性）、产出各组件包的 stage 树、SBOM 与第 1 轮待签清单；签名私钥离线（`scripts/release-sign`，只在离线机运行），后续 `make release-finalize`（组装最终包与待签清单）、`make release-verify`（用 Tools 同一条校验链验证并产出 `publish/`）。流程、保管与轮换见 `docs/operations/release.md` |
 
 - **配置**：开发用配置位于 `configs/`（**不含任何默认密码**，NFR-6）；本地凭据经环境变量或未入库的 `*.local.yaml`。
 

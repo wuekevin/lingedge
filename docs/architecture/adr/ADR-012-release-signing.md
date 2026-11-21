@@ -69,3 +69,11 @@
 
 - **§2 落地为可执行门禁**：「发行签名私钥离线、Server 不持有」不再只是文字约束——`make security` 的 `gates trustdomain` 扫描 Server 代码路径（`internal/`（不含 `internal/tools`）、`cmd/lingedge-server`、`pkg/`）与 Server 示例配置，出现「加载发行清单私钥」的标识符/字符串字面量（含发行清单签名域前缀 `LINGEDGE-MANIFEST-V1`，它只属于 Tools 验签与离线签名流水线）即失败；`tests/security/trustdomain` 对真实编译的 `lingedge-server` 做 `go tool nm` 符号扫描；两处都带负向样本（加入 `loadReleasePrivateKey` 必被抓到）。`signing_keys.purpose` 的 CHECK 只含 `config_signing|mtls_ca|grpc_server`，schema 上也没有发行清单用途。
 - 信任域②③在 Server 的实现见 `internal/platform/signingkeys` 与 `pkg/signing`（节点侧复用的验证库，只依赖标准库）。
+
+## 修订记录 2026-11-21（Story 1.34）
+
+- **§1.5/§1.10 落地为可执行流程**：`make release`/`release-finalize`/`release-verify`（在线，无签名代码、不接触私钥）+ `scripts/release-sign`（离线，独立 module、仅标准库）；两轮离线签名（先包内 `SHA256SUMS`，再清单——因为包内签名在包里面、包的外层 sha256 在清单里）。流程、保管、轮换/吊销/泄露处置见 `docs/operations/release.md`（签名人/保管介质/应急渠道仍待 UD-3 确认）。
+- **「CI 中不存在发行私钥」成为门禁**：`gates secrets`（`make security`，G-7 的密钥扫描部分）扫描全仓库与 CI 配置的私钥形态（PEM 私钥块且正文为真实密钥结构、离线签名工具私钥文件、PKCS#8 Ed25519、private_key 类键的种子长度高熵值、私钥类文件名、CI 引用发行私钥），**不设豁免**；测试密钥一律运行时生成。
+- **SBOM**（§1.10 [ASSUMPTION] 已核对）：不引入外部工具，流水线用 `go version -m`（Go）与 `pnpm-lock.yaml`（npm）生成 CycloneDX 1.5，随包（受签名保护）与汇总副本发布；构建可复现性以「同源在另一目录 + 干净 GOCACHE 再构建并逐文件比对 SHA-256」验证（`repro.json`）。
+- **交叉验证**：§9.6 向量由 Ruby OpenSSL 与 Go `crypto/ed25519` 两实现在本机真实复验通过（见 tools-design §9.6）。
+

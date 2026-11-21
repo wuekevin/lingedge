@@ -458,7 +458,7 @@ offline-bundle/
 | 包签名输入 | `"LINGEDGE-PKG-V1\nnode\n0.1.0\nlinux-amd64\n"` ‖ `SHA256SUMS` 字节 |
 | `META/SHA256SUMS.sig` 的 `sig`（base64） | `YLlLdkS0mzZ4zZYLbph1d34DZ/CjhSEr1CSslVVc5PRjIwHBaJHJwYfsORDZq+X2EKkGCIHGquM08a9sn/VqAA==` |
 
-Story 1.27 已按本节落盘 `internal/tools/manifest/testdata/vectors.json`（key_id 取 `golden-test-1`），并由 `golden_test.go` 经生产验签路径与 Go 复算双重断言（逐字节翻转清单/签名/SHA256SUMS 均失败）；本机的 Ruby 2.6/LibreSSL 不支持 Ed25519，Ruby 侧的验签结论沿用上表（1.34 流水线交叉验证）。
+Story 1.27 已按本节落盘 `internal/tools/manifest/testdata/vectors.json`（key_id 取 `golden-test-1`），并由 `golden_test.go` 经生产验签路径与 Go 复算双重断言（逐字节翻转清单/签名/SHA256SUMS 均失败）；本机系统 Ruby 2.6/LibreSSL 不支持 Ed25519；Story 1.34 已用支持 Ed25519 的 Ruby（Homebrew Ruby 4.0 + OpenSSL 3.6）在本机**真实**复验：Ruby OpenSSL 与 Go `crypto/ed25519` 对上表清单/包签名均验签通过、篡改一位均失败、两者对同一种子的确定性签名逐字节相同，且离线签名工具 `scripts/release-sign` 的独立实现复算出与上表完全相同的签名（`scripts/release-sign/crosscheck_test.go`）。
 
 测试断言：验签通过；任一输入字节翻转 → 失败；`key_id` 不在公钥集或在 `revoked_key_ids` → 失败；`sequence` 小于本地已见值 → 退出码 5。该种子私钥**只允许出现在测试代码与本文**，生产构建扫描不得出现该种子/公钥（G-6/ADR-023 的固定数据检查）。
 
@@ -1227,3 +1227,10 @@ LockPersonality=yes
 - **新增 §12.4**：22 步状态机、journal 先于副作用、冲突不覆盖、dry-run 零副作用、`recover`（resume/rollback）、事件、tools.yaml 的 `release.*`/`install.*`、`--set` 语法的实现口径。`§12.1` 的 22 步表、`§4` 退出码表、`§6` envelope **未改**；`install`/`recover` 的 `data` 为追加的 schema。
 - **取舍（须披露）**：① 清单在预检阶段先取得并验证（求解需要它），第 10–13 步随后重新取得并完整重验，取包后比对包的 SHA256 与预检所选一致；② 信任状态（sequence/`key_rotation`）在第 14–20 步全部成功后才提交（`DeferCommit` + `Finish`），而非第 11 步验签后立即写——换来「安装失败可用同一份清单重试、不推进 sequence」；③ 预检 1–9 在 journal 之外只读求值，通过后补记；④ 安装不执行已装组件的升级（含被动升级），指向 `update`（1.43）；⑤ `ListenersKnown=false` 视为需要确认的冲突（非交互无 `--yes` → 4）；⑥ `current` 链接在第 14 步创建（resolver 的 `activate` 在 install 时并入 14）。
 - 追加：`downloader.Params.OnStage`、`registry.Task.Extend`、`service.Provisioner.Exists`/`Ensurer.Plan`/`IsManagedPath`。**无迁移/OpenAPI/proto/CF-6/contract-v1 变更。**
+
+## 修订记录 2026-11-21（Story 1.34：发行流水线与离线签名）
+
+- **§9 实现口径**（不改 CF-6 的 schema 与签名域前缀、不改 §9.1–§9.6 的格式）：发行流水线 `scripts/release`（在线，无任何签名代码）与离线签名工具 `scripts/release-sign`（独立 module，仅标准库）按 §9.2/§9.3 产出清单与包；**两轮签名**——包内 `META/SHA256SUMS.sig` 位于 `.tar.gz` 内部、包的外层 sha256 写进清单、清单再被签名，因此先签各包的 `SHA256SUMS`（第 1 轮），组装最终包与 `manifest.json` 后再签清单（第 2 轮）。包为确定性 `.tar.gz`（固定时间戳/uid/gid、gzip 头清零、META 在前、payload 按路径排序、无符号链接——OpenResty 等目录树里的链接在构建期被消除，SafeExtract 不放宽）。每个包内附 `payload/share/lingedge-sbom.cdx.json`（CycloneDX 1.5，受包内签名与清单外层 sha256 保护）。
+- **§9.2 迁移预告**取自 `lingedge-server migrate plan --offline`（plan 默认即 JSON；`--json` 标志未被该子命令接受，故未使用）：`schema_from=0000`、`schema_to=<最新序号 4 位>`、`classes`=出现过的分类、`irreversible_count`、`backup_required`（[ASSUMPTION] 含 reversible/irreversible 迁移即 true）。
+- **公钥轮换**：`release-sign endorse` 产出 `key_rotation` 段（背书签名输入即 §9.1 的 `LINGEDGE-KEYROT-V1`），`release finalize -key-rotation` 写入清单；端到端（背书 → Tools 验证并落盘 keys.d → 新 key 签名的清单通过；未知背书者 → rotation_invalid）已由 `tests/release` 覆盖。
+- 流程、保管、吊销与泄露处置见 `docs/operations/release.md`。**无迁移/OpenAPI/proto/CF-6/contract-v1 变更。**
