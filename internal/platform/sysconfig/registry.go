@@ -129,6 +129,10 @@ type Def struct {
 	Sensitive bool
 	// Patchable：能否经通用 PATCH /admin/settings 修改。false 的键只能经专用端点（run_mode：需再认证；ssrf：需再认证）或不可改（能力状态）。
 	Patchable bool
+	// ReauthRequired：安全敏感键（Story 1.22b）——经通用 PATCH 写入（含「恢复默认」）须会话在 auth.reauth_window_s 内再认证；由设置服务在写事务之前强制，
+	// 复用 Story 1.17 的 httpx.ReauthChecker。不改 OpenAPI 的 x-reauth 清单（该集合由 CI 固定，patchSettings 本身仍只需 setting:write）：
+	// 同一个 operation 里「改品牌」与「关掉强制 TOTP」强度不同，分级只能在服务内按键判定。Bearer API Token 没有会话，永远不能满足，因此令牌不能写这些键。
+	ReauthRequired bool
 	// Dedicated 说明不可 PATCH 时应使用的端点（写进 400 的 reason）。
 	Dedicated string
 	// Doc 是一行说明。
@@ -140,6 +144,24 @@ var (
 	// Brand 默认值 [ASSUMPTION]：产品名称取自项目名；主色为工程假设，可在品牌设置中覆盖。
 	defaultLocales = []string{"zh-CN", "en"}
 )
+
+// reauthRequiredKeys 是安全敏感键清单（Story 1.22b）：写入它们可以降低系统安全强度或改变信任边界，需要近期再认证——
+//   - 登录节流窗口/阈值、强制管理员 TOTP：调松 = 放宽口令爆破与二步认证要求；
+//   - 会话滑动/绝对过期、再认证窗口、近期 MFA 窗口：调长 = 被盗会话/再认证有效更久；
+//   - API Token 默认有效期/上限：调长 = 泄露的令牌存活更久；
+//   - 邮件（SMTP 主机/端口/用户名/口令/发件人）：改写邮件中继即可截获重置口令邮件；
+//   - 审计/登录日志保留期：调短 = 缩短取证窗口；
+//   - 开放自助注册：扩大攻击面。
+//
+// 不在清单内的键（品牌、入口 URL、语言）只需 setting:write。运行模式与 SSRF 白名单本来就只能经带 x-reauth 的专用端点修改。
+var reauthRequiredKeys = map[string]bool{
+	KeyThrottleWindow: true, KeyThrottleAccountMax: true, KeyThrottleIPMax: true, KeyTOTPRequiredAdmin: true,
+	KeySessionIdleTTL: true, KeySessionAbsoluteTTL: true, KeyReauthWindow: true, KeyMFAWindow: true,
+	KeyAPITokenDefaultTTL: true, KeyAPITokenMaxTTL: true,
+	KeyMailHost: true, KeyMailPort: true, KeyMailUsername: true, KeyMailCredential: true, KeyMailFrom: true,
+	KeyRetentionAuditDays: true, KeyRetentionLoginDays: true,
+	KeyRegistrationOpen: true,
+}
 
 func secs(d time.Duration) int64 { return int64(d / time.Second) }
 
@@ -197,6 +219,9 @@ func buildDefs() []Def {
 
 		{Key: KeySSRFAllowCIDRs, Group: GroupSecurity, Type: TCIDREntries, Default: []any{}, MaxItems: 256,
 			Dedicated: "PUT /admin/settings/ssrf-allowlist", Doc: "平台 SSRF 白名单（回源例外网段）；只能经专用端点修改（需再认证，ADR-004 §6）"},
+	}
+	for i := range d {
+		d[i].ReauthRequired = reauthRequiredKeys[d[i].Key]
 	}
 	for _, c := range AdvancedCapabilities {
 		d = append(d, Def{Key: capabilityKey(c), Group: GroupGeneral, Type: TEnum, Default: StatusUnverified, Enum: []string{StatusUnverified},

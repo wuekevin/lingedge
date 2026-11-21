@@ -155,12 +155,13 @@ func (r *Router) Register(meta RouteMeta, h gin.HandlerFunc) (err error) {
 		return fmt.Errorf("httpx: %s %s 已被 %s 注册", meta.Method, meta.Path, prev)
 	}
 
+	denied, _ := r.hooks.Auditor.(DeniedRecorder) // 可选：已认证主体的授权类拒绝留痕（Story 1.22b）
 	chain := []gin.HandlerFunc{
 		setMetaMiddleware(meta),
 		authnMiddleware(r.hooks.Authenticator, meta),
-		featureMiddleware(r.hooks.Features, meta), // 认证后、授权前（ADR-018 §11）：未启用的功能不泄漏授权细节
-		authzMiddleware(r.hooks.Authorizer, meta),
-		scopeMiddleware(r.hooks.Scope, meta),
+		featureMiddleware(r.hooks.Features, meta, denied), // 认证后、授权前（ADR-018 §11）：未启用的功能不泄漏授权细节
+		authzMiddleware(r.hooks.Authorizer, meta, denied),
+		scopeMiddleware(r.hooks.Scope, meta, denied),
 		auditMiddleware(r.hooks.Auditor, meta),
 	}
 	if meta.Idempotent {

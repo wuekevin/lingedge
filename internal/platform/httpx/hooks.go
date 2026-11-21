@@ -53,6 +53,30 @@ type Auditor interface {
 	Begin(r *http.Request, meta RouteMeta) (end func(AuditOutcome), err error)
 }
 
+// Denial 描述一次「已认证主体被拒绝」：Stage 是被拒绝的环节（feature / authorize / scope），Code 是响应的错误码
+// （仅 auth.forbidden、auth.reauth_required、feature.disabled 会被登记）。
+type Denial struct {
+	Stage string
+	Code  apierr.Code
+}
+
+// 被拒绝环节取值。
+const (
+	DenialStageFeature   = "feature"
+	DenialStageAuthorize = "authorize"
+	DenialStageScope     = "scope"
+)
+
+// DeniedRecorder 是 Auditor 可选实现的扩展（Story 1.22b）：已认证主体被授权类拒绝（403 auth.forbidden / auth.reauth_required / feature.disabled）时，
+// 路由器在渲染 403 响应之后调用它，由实现决定是否留痕。约束：
+//   - 只对**已认证主体**调用（认证失败的 401 不会走到这里：未认证请求不产生审计行，避免匿名者刷表）；
+//   - 实现必须自带防刷（同一 (主体, operation, 窗口) 去重与主体级上限）并吞掉自身的一切错误——写入失败绝不能改变已确定的响应
+//     （与写操作审计的 fail-closed 相反：被拒绝的请求没有业务变更，没有「业务已提交、审计没写」的不一致可言）；
+//   - 路由器会兜住实现的 panic。
+type DeniedRecorder interface {
+	RecordDenied(r *http.Request, meta RouteMeta, d Denial)
+}
+
 // FeatureGate 是功能开关钩子（Story 1.22、FR-24、ADR-018 §11）：报告某个功能（RouteMeta.Feature，如 commercial）在当前运行模式下是否启用。
 // 对声明了 Feature 的路由，feature 中间件在**认证之后、授权之前**调用它：未启用 → 403 feature.disabled；返回 error → 500（fail-closed，
 // 不会因为读不到运行模式而放行商业路由）。未声明 Feature 的路由不调用它。

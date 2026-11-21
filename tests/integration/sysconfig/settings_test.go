@@ -14,6 +14,7 @@ import (
 func TestSettingsPatchAndRead(t *testing.T) {
 	w := apistack.New(t)
 	adm := admin(w)
+	adm.Reauth() // 安全敏感设置键的写入需近期再认证（Story 1.22b）
 
 	r := adm.Do("GET", "/admin/settings", nil)
 	w.Contract("getSettings", "GET", "/admin/settings", r)
@@ -116,6 +117,7 @@ func TestSettingsPatchAndRead(t *testing.T) {
 func TestSensitiveSettingEncryptedAtRestAndRedacted(t *testing.T) {
 	w := apistack.New(t)
 	adm := admin(w)
+	adm.Reauth() // 安全敏感设置键的写入需近期再认证（Story 1.22b）
 	secret := apistack.RandPassword(t)
 	w.Secret(secret)
 

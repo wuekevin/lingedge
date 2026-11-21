@@ -236,7 +236,7 @@ func authnMiddleware(h Authenticator, meta RouteMeta) gin.HandlerFunc {
 
 // featureMiddleware 执行功能开关（Story 1.22）：声明了 Feature 的路由，功能未启用 → 403 feature.disabled；开关读取失败 → 500（fail-closed）。
 // 它在认证之后：未认证的请求仍得到 401（不向匿名者暴露哪些功能被关闭），已认证主体（含 API Token）在授权之前就被拒绝。
-func featureMiddleware(g FeatureGate, meta RouteMeta) gin.HandlerFunc {
+func featureMiddleware(g FeatureGate, meta RouteMeta, dr DeniedRecorder) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if meta.Feature == "" {
 			c.Next()
@@ -248,14 +248,16 @@ func featureMiddleware(g FeatureGate, meta RouteMeta) gin.HandlerFunc {
 			return
 		}
 		if !ok {
-			Fail(c, apierr.New(apierr.FeatureDisabled, "feature is not enabled"))
+			err := apierr.New(apierr.FeatureDisabled, "feature is not enabled")
+			Fail(c, err)
+			noteDenied(c, dr, meta, DenialStageFeature, err)
 			return
 		}
 		c.Next()
 	}
 }
 
-func authzMiddleware(h Authorizer, meta RouteMeta) gin.HandlerFunc {
+func authzMiddleware(h Authorizer, meta RouteMeta, dr DeniedRecorder) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if meta.Auth == AuthPublic {
 			c.Next()
@@ -270,6 +272,7 @@ func authzMiddleware(h Authorizer, meta RouteMeta) gin.HandlerFunc {
 		c.Request = c.Request.WithContext(withAccessCarrier(c.Request.Context(), carrier))
 		if err := h.Authorize(c.Request, meta, p); err != nil {
 			Fail(c, err)
+			noteDenied(c, dr, meta, DenialStageAuthorize, err)
 			return
 		}
 		if carrier.set { // 授权决策交给后续钩子（Scope 钩子，见 access.go）
@@ -279,7 +282,7 @@ func authzMiddleware(h Authorizer, meta RouteMeta) gin.HandlerFunc {
 	}
 }
 
-func scopeMiddleware(h ScopeResolver, meta RouteMeta) gin.HandlerFunc {
+func scopeMiddleware(h ScopeResolver, meta RouteMeta, dr DeniedRecorder) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if meta.Auth == AuthPublic {
 			c.Next()
@@ -297,7 +300,9 @@ func scopeMiddleware(h ScopeResolver, meta RouteMeta) gin.HandlerFunc {
 			err = apierr.New(apierr.AuthForbidden, "forbidden")
 		}
 		if err != nil {
-			Fail(c, MapScopeError(err))
+			err = MapScopeError(err)
+			Fail(c, err)
+			noteDenied(c, dr, meta, DenialStageScope, err)
 			return
 		}
 		ctx := tenantscope.NewContext(c.Request.Context(), s)
@@ -307,6 +312,23 @@ func scopeMiddleware(h ScopeResolver, meta RouteMeta) gin.HandlerFunc {
 		c.Request = c.Request.WithContext(ctx)
 		c.Next()
 	}
+}
+
+// noteDenied 在已认证主体被授权类拒绝（403 auth.forbidden / auth.reauth_required / feature.disabled）后通知可选的 DeniedRecorder（Story 1.22b）。
+// 404（不泄漏存在性）、400、401、429、5xx 一律不登记；没有主体（链被错误组装）不登记；实现的 panic 被兜住，绝不影响已确定的响应。
+func noteDenied(c *gin.Context, dr DeniedRecorder, meta RouteMeta, stage string, err error) {
+	if dr == nil || err == nil {
+		return
+	}
+	ae, ok := apierr.As(err)
+	if !ok || (ae.Code != apierr.AuthForbidden && ae.Code != apierr.AuthReauthRequired && ae.Code != apierr.FeatureDisabled) {
+		return
+	}
+	if p, ok := PrincipalFrom(c.Request.Context()); !ok || p == nil {
+		return
+	}
+	defer func() { _ = recover() }() // 防刷审计是尽力而为：自身故障不得影响响应
+	dr.RecordDenied(c.Request, meta, Denial{Stage: stage, Code: ae.Code})
 }
 
 const replayedKey = "lingedge.idempotent_replay"

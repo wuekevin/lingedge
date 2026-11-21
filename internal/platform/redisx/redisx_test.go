@@ -107,7 +107,7 @@ func TestKeyNegatives(t *testing.T) {
 
 func TestChannelPurposes(t *testing.T) {
 	k := ks(t)
-	for _, p := range []Purpose{PurposeCertRevoke, PurposePermVersion, PurposeTaskWakeup} {
+	for _, p := range []Purpose{PurposeCertRevoke, PurposePermVersion, PurposeTaskWakeup, PurposeSettingChange} {
 		ch, err := k.Channel("node", p)
 		if err != nil || ch.String() != "le:prod:node:"+string(p)+":all" {
 			t.Errorf("%s: %q %v", p, ch, err)

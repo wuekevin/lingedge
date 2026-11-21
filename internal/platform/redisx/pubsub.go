@@ -20,6 +20,9 @@ const (
 	PurposeCertRevoke  Purpose = "cert_revoke"  // 节点证书吊销广播（ADR-003 §6，兜底：短 TTL 轮询 MySQL）
 	PurposePermVersion Purpose = "perm_version" // 权限版本失效（兜底：缓存短 TTL）
 	PurposeTaskWakeup  Purpose = "task_wakeup"  // 任务唤醒（兜底：Worker 轮询，ADR-019）
+	// PurposeSettingChange 系统设置变更的缓存失效广播（Story 1.22b；属 ADR-025 §1「失效广播/缓存清除的 Pub/Sub」）。
+	// 兜底：设置快照 TTL（默认 5 秒）+ 订阅轮询对账（启动、周期、Redis 恢复时丢弃快照）。消息体不含任何设置值，只是「已变更」。
+	PurposeSettingChange Purpose = "setting_change"
 )
 
 // 订阅/频道错误。
@@ -37,7 +40,7 @@ func (ch Channel) String() string { return ch.s }
 // Channel 构造频道；id 缺省为 "all"。
 func (ks Keyspace) Channel(module string, p Purpose, id ...string) (Channel, error) {
 	switch p {
-	case PurposeCertRevoke, PurposePermVersion, PurposeTaskWakeup:
+	case PurposeCertRevoke, PurposePermVersion, PurposeTaskWakeup, PurposeSettingChange:
 	default:
 		return Channel{}, fmt.Errorf("%w: %q", ErrBadPurpose, p)
 	}

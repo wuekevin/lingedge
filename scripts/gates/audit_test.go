@@ -94,6 +94,23 @@ func TestAuditGateRejectsViolations(t *testing.T) {
 		{"Record 引用了未声明的常量", func(a *auditInput) {
 			a.Sources["internal/x/y.go"] = "package x\n\nfunc f() {\n\tw.Record(ctx, audit.ActionNope, audit.Event{ResourceType: \"x\"})\n}\n"
 		}, "audit-record-unknown", "ActionNope"},
+		// 被拒绝类审计（Story 1.22b）。
+		{"被拒绝类动作混进某 operation 的 Catalog", func(a *auditInput) {
+			a.Catalog = strings.Replace(a.Catalog, `{"cancelTask", []Action{ActionTaskCancel}},`, `{"cancelTask", []Action{ActionTaskCancel, ActionAccessDenied}},`, 1)
+		}, "audit-denied-catalog", "ActionAccessDenied"},
+		{"业务代码经 Record 写被拒绝类动作", func(a *auditInput) {
+			a.Sources["internal/x/y.go"] = "package x\n\nfunc f() {\n\ts.audit.Record(ctx, audit.ActionAccessDenied, audit.Event{ResourceType: \"operation\"})\n}\n"
+		}, "audit-denied-misuse", "ActionAccessDenied"},
+		{"登记了被拒绝类动作却没有写入实现（denied.go 缺 RecordDenied）", func(a *auditInput) {
+			a.Denied = strings.ReplaceAll(a.Denied, "RecordDenied", "Removed")
+		}, "audit-denied-unrecorded", "RecordDenied"},
+		{"被拒绝类动作没有 ResultDenied", func(a *auditInput) { a.Denied = strings.ReplaceAll(a.Denied, "ResultDenied", "ResultX") }, "audit-denied-unrecorded", "ResultDenied"},
+		{"被拒绝类动作常量未被 denied.go 引用", func(a *auditInput) {
+			a.Denied = strings.ReplaceAll(a.Denied, "ActionAccessDenied", "ActionSomethingElse")
+		}, "audit-denied-unrecorded", "ActionAccessDenied"},
+		{"DeniedActions 引用了未声明的常量", func(a *auditInput) {
+			a.Catalog = strings.Replace(a.Catalog, "var DeniedActions = []Action{ActionAccessDenied}", "var DeniedActions = []Action{ActionAccessDenied, ActionGhost}", 1)
+		}, "audit-const-orphan", "ActionGhost"},
 		{"无法解析的 Go 文件", func(a *auditInput) { a.Sources["internal/x/bad.go"] = "package x\n\nfunc (\n" }, "audit-record-unparseable", "无法解析"},
 		{"openapi 解析为空不得放行", func(a *auditInput) { a.OpenAPI = "openapi: 3.1.0\n" }, "audit-openapi", "解析"},
 	}

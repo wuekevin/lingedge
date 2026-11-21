@@ -27,6 +27,7 @@ func keysOf(m map[string]any) string {
 func TestPublicSiteInfoAndVersion(t *testing.T) {
 	w := apistack.New(t)
 	adm := admin(w)
+	adm.Reauth() // 安全敏感设置键的写入需近期再认证（Story 1.22b）
 	in := w.SeedInternals()
 	// 种入「不得出现在公开响应里」的真实敏感/内部值：SMTP 口令（加密落库）、内部主机/IP、管理员邮箱。
 	secret := apistack.RandPassword(t)

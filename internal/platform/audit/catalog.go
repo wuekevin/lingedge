@@ -45,8 +45,21 @@ const (
 	ActionRunModeUpdate       Action = "system.run_mode.update"
 )
 
+// 被拒绝类动作（Story 1.22b）：已认证主体被授权类拒绝（403 auth.forbidden / auth.reauth_required / feature.disabled）。它们**不属于任何 operation 的
+// Catalog 登记**（不是业务变更、不在业务事务内写入），只由审计钩子的 DeniedRecorder（denied.go）写入，result=denied；
+// 门禁 `gates audit` 对它们有独立规则（audit-denied-*）：必须登记在 DeniedActions、不得出现在 Catalog、不得被业务代码经 Record 写入、denied.go 必须真有写入实现。
+const (
+	ActionAccessDenied Action = "access.denied"
+)
+
+// DeniedActions 是被拒绝类动作清单（唯一来源，见上）。
+var DeniedActions = []Action{ActionAccessDenied}
+
 // 资源类型（audit_logs.resource_type）。
 const (
+	// ResourceOperation 是被拒绝类审计的对象：被拒绝访问的 operation（resource_uid = operationId）。
+	ResourceOperation = "operation"
+
 	ResourceSession  = "session"
 	ResourceUser     = "user"
 	ResourceRole     = "role"

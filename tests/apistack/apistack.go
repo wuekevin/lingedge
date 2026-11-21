@@ -115,6 +115,9 @@ type Options struct {
 	SysCacheTTL time.Duration
 	// SysPublicRateLimit 是公开接口每 IP 每分钟上限（<=0 取默认 120）；测试调小以观察 429。
 	SysPublicRateLimit int
+	// DeniedWindow / DeniedActorCap 调整被拒绝类审计（access.denied）的去重窗口与主体级上限（<=0 取默认）。
+	DeniedWindow   time.Duration
+	DeniedActorCap int
 }
 
 // New 创建被测系统（独立临时 MySQL 库 + 独立临时 Redis + 全部迁移）。
@@ -155,7 +158,8 @@ func New(t *testing.T, opts ...Options) *World {
 	// 与生产进程同一个装配根（cmd/lingedge-server/assembly）：钩子与路由都由它构造，测试只调小缓存 TTL/限流、追加探针审计动作（Story 1.22b）。
 	cfg := config.Defaults()
 	cfg.Auth.Argon2 = testArgon
-	asm := assembly.New(assembly.Options{ExtraAuditOps: o.ExtraAuditOps, SysCacheTTL: o.SysCacheTTL, SysPublicRateLimit: o.SysPublicRateLimit})
+	asm := assembly.New(assembly.Options{ExtraAuditOps: o.ExtraAuditOps, SysCacheTTL: o.SysCacheTTL, SysPublicRateLimit: o.SysPublicRateLimit,
+		DeniedWindow: o.DeniedWindow, DeniedActorCap: o.DeniedActorCap})
 	deps := server.Deps{Tasks: store, DB: w.App, Redis: w.RC, Clock: clock.System(), IDs: gen, Logger: lg, Config: &cfg, Secrets: newBox(t),
 		Migrations: httpx.MigrationProbeFromApp(w.App, set)}
 	hooks, err := asm.BuildHooks(deps)
@@ -232,6 +236,9 @@ func (w *World) MaintPool() *db.MaintPool {
 	w.T.Cleanup(func() { _ = p.Close() })
 	return p
 }
+
+// NewBox 返回一个真实的 secretbox.Box（临时目录 0400 主密钥，运行期随机生成）：供测试自建额外的模块实例（模拟多实例）。
+func NewBox(t testing.TB) *secretbox.Box { return newBox(t) }
 
 // newBox 在临时目录写 0400 主密钥文件（运行期随机生成），返回真实 FileKeyProvider 支撑的 Box（与生产同一实现）。
 func newBox(t testing.TB) *secretbox.Box {

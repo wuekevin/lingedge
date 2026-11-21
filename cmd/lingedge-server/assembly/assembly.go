@@ -28,6 +28,9 @@ type Options struct {
 	// SysCacheTTL / SysPublicRateLimit 调整系统设置快照缓存 TTL 与公开接口限流（<=0 取默认；测试调小以观察过期与 429）。
 	SysCacheTTL        time.Duration
 	SysPublicRateLimit int
+	// DeniedWindow / DeniedActorCap 调整被拒绝类审计的去重窗口与主体级上限（<=0 取默认；测试缩短窗口以观察「窗口过后再记」）。
+	DeniedWindow   time.Duration
+	DeniedActorCap int
 }
 
 // Assembly 持有一次进程装配中被多处共享的模块实例（认证模块同时提供认证钩子与 /auth/* 路由，二者必须是同一个实例）。
@@ -71,7 +74,7 @@ func (a *Assembly) BuildHooks(d server.Deps) (httpx.Hooks, error) {
 	if d.DB == nil || d.Redis == nil || d.Config == nil || d.Secrets == nil {
 		return httpx.Hooks{}, errors.New("装配认证模块需要 MySQL 池、Redis、配置与信封加密（主密钥）")
 	}
-	aw, err := audit.New(audit.Options{Pool: d.DB, IDs: d.IDs, Clock: d.Clock, Log: d.Logger, ExtraOps: a.opts.ExtraAuditOps})
+	aw, err := audit.New(audit.Options{Pool: d.DB, IDs: d.IDs, Clock: d.Clock, Log: d.Logger, ExtraOps: a.opts.ExtraAuditOps, Redis: d.Redis, DeniedWindow: a.opts.DeniedWindow, DeniedActorCap: a.opts.DeniedActorCap})
 	if err != nil {
 		return httpx.Hooks{}, err
 	}
@@ -88,6 +91,8 @@ func (a *Assembly) BuildHooks(d server.Deps) (httpx.Hooks, error) {
 		return httpx.Hooks{}, err
 	}
 	a.Auth = m
+	// 安全敏感设置键（登录节流/强制 TOTP/会话与 MFA 窗口/令牌有效期/邮件/保留期等）的写入要求近期再认证：设置模块用认证模块的 ReauthChecker（Story 1.22b）。
+	sys.SetReauthChecker(m.ReauthChecker())
 	tm, err := tenant.New(context.Background(), tenant.Options{Pool: d.DB, Clock: d.Clock, Log: d.Logger, Audit: aw})
 	if err != nil {
 		return httpx.Hooks{}, err

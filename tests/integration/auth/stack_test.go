@@ -95,6 +95,8 @@ type stackOpts struct {
 	permPoll time.Duration
 	// trustedProxies 是路由器的可信反代（空 = 默认只信任本机 127.0.0.1/::1）；来源 IP 白名单测试用它验证「伪造 X-Forwarded-For 不能绕过」。
 	trustedProxies []string
+	// deniedWindow 是被拒绝类审计（access.denied）的去重窗口（0 = 默认 60 秒）。
+	deniedWindow time.Duration
 }
 
 func newStack(t *testing.T, o ...stackOpts) *stack {
@@ -186,7 +188,7 @@ func newStack(t *testing.T, o ...stackOpts) *stack {
 
 func (s *stack) newModule(lg *zap.Logger, clk clock.Clock) auth.Module {
 	s.t.Helper()
-	aw, err := audit.New(audit.Options{Pool: s.e.app, IDs: uid.NewGenerator(clock.System()), Clock: clk, Log: lg})
+	aw, err := audit.New(audit.Options{Pool: s.e.app, IDs: uid.NewGenerator(clock.System()), Clock: clk, Log: lg, Redis: s.rc, DeniedWindow: s.opt.deniedWindow})
 	if err != nil {
 		s.t.Fatal(err)
 	}

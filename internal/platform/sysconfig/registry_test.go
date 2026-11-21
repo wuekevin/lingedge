@@ -174,3 +174,30 @@ func TestCheckModulesNegativeSamples(t *testing.T) {
 }
 
 func nopLog() *zap.Logger { return zap.NewNop() }
+
+// Story 1.22b：安全敏感键清单里的每个键都必须是已注册、可经通用 PATCH 修改的键（防拼写错误让分级静默失效）；
+// 品牌/入口 URL/语言不在清单内；运行模式与 SSRF 白名单不经 PATCH（它们的专用端点本来就有 x-reauth）。
+func TestReauthRequiredKeysAreRegisteredAndPatchable(t *testing.T) {
+	for k := range reauthRequiredKeys {
+		d, ok := Lookup(k)
+		if !ok || !d.Patchable || !d.ReauthRequired {
+			t.Errorf("安全敏感键 %q 必须已注册、Patchable 且 ReauthRequired 被置位: %+v ok=%v", k, d, ok)
+		}
+	}
+	for _, d := range Defs() {
+		if d.ReauthRequired && !reauthRequiredKeys[d.Key] {
+			t.Errorf("%s 的 ReauthRequired 不在清单内", d.Key)
+		}
+	}
+	for _, k := range []string{KeyBrandName, KeyBrandNameEN, KeyBrandLogoUID, KeyBrandFaviconUID, KeyBrandPrimaryColor, KeyBrandSupportEmail, KeyAdminURL, KeyConsoleURL, KeyDocsURL, KeyStatusURL, KeyLocales} {
+		if reauthRequiredKeys[k] {
+			t.Errorf("%s 不应要求再认证", k)
+		}
+	}
+	// 与认证模块读取的会话/节流/MFA/令牌键对齐：这些键全部是安全敏感键。
+	for _, k := range []string{KeyThrottleWindow, KeyThrottleAccountMax, KeyThrottleIPMax, KeyTOTPRequiredAdmin, KeySessionIdleTTL, KeySessionAbsoluteTTL, KeyReauthWindow, KeyMFAWindow, KeyAPITokenDefaultTTL, KeyAPITokenMaxTTL} {
+		if !reauthRequiredKeys[k] {
+			t.Errorf("%s 应是安全敏感键", k)
+		}
+	}
+}

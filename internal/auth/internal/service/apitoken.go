@@ -26,6 +26,7 @@ import (
 	"github.com/wuekevin/lingedge/internal/platform/db"
 	"github.com/wuekevin/lingedge/internal/platform/rbac"
 	"github.com/wuekevin/lingedge/internal/platform/redisx"
+	"github.com/wuekevin/lingedge/internal/platform/tenantscope"
 )
 
 // API Token（Story 1.19、ADR-018 §7、FR-25、NFR-14）。
@@ -323,6 +324,41 @@ func (s *Service) insertToken(ctx context.Context, t domain.NewAPIToken) (token,
 	return "", "", fmt.Errorf("auth: 生成唯一令牌前缀失败: %w", err)
 }
 
+// checkAPITokenQuota 在创建令牌的事务内核对租户配额键 api_tokens（Story 1.22b；只做令牌创建这一个硬上限）：
+//   - 平台令牌（tenantID == nil）不属于任何租户，不受租户配额约束；
+//   - 租户没有 api_tokens 配额行或 limit_value 为 NULL = 不限（默认租户无限制，docs/database/tenant-site.md；系统没有另设「默认上限」——那是产品决定，未被规定）；
+//   - 有限额时：本租户当前有效令牌（未吊销且未过期，含所有成员创建的）数 >= 限额 → 403 tenant.quota_exceeded（限额 0 = 不允许创建）。
+//     配额行被 FOR UPDATE 锁住，同一租户的并发创建串行化，上限是硬上限；
+//   - 轮换不经此检查（新增一枚、同时吊销旧的一枚，有效数不变）。
+//
+// 与 Story 6.9 的关系：6.9 负责配额的通用强制与用量统计（sites/members/… 以及响应里的 used）；这里只接线令牌创建，不引入通用框架，
+// 6.9 落地时可把 LockAPITokenQuota/CountActiveTenantAPITokens 收编进统一的配额检查，行为（NULL=不限、>=限额拒绝）保持一致。
+// 租户取自请求 Scope（自助 operation 的 Scope 由主体自身推导），不取自任何请求参数；缺少 Scope 一律 fail-closed。
+func (s *Service) checkAPITokenQuota(ctx context.Context, tenantID *uint64, now time.Time) error {
+	if tenantID == nil {
+		return nil
+	}
+	sc, ok := tenantscope.FromContext(ctx)
+	if !ok || sc.IsPlatform() || sc.TenantID() != *tenantID {
+		return apierr.Internal(errors.New("auth: 创建令牌缺少与创建者租户一致的 Scope"))
+	}
+	limit, err := s.repo.LockAPITokenQuota(ctx, sc)
+	if err != nil {
+		return err
+	}
+	if limit == nil {
+		return nil
+	}
+	n, err := s.repo.CountActiveTenantAPITokens(ctx, sc, now)
+	if err != nil {
+		return err
+	}
+	if n >= *limit {
+		return apierr.New(apierr.TenantQuotaExceeded, "api token quota exceeded", apierr.Detail{Field: "quota_key", Reason: "api_tokens"})
+	}
+	return nil
+}
+
 // CreateAPIToken 创建令牌（Cookie 会话；近期 MFA 由认证钩子先行检查）。返回元数据与**仅此一次**的明文。
 func (s *Service) CreateAPIToken(ctx context.Context, p *domain.Principal, in CreateTokenInput, ri RequestInfo) (TokenView, string, error) {
 	userID, tenantID, err := tokenOwner(p)
@@ -358,6 +394,9 @@ func (s *Service) CreateAPIToken(ctx context.Context, p *domain.Principal, in Cr
 	var token, newUID string
 	// 令牌写入与审计同一事务（失败即整体回滚：不会留下「没有审计的令牌」）。变更摘要只含前缀/名称/作用域，绝不含令牌明文或哈希。
 	err = s.withTx(ctx, func(ctx context.Context) error {
+		if qerr := s.checkAPITokenQuota(ctx, tenantID, now); qerr != nil {
+			return qerr
+		}
 		var ierr error
 		if token, newUID, ierr = s.insertToken(ctx, nt); ierr != nil {
 			return ierr

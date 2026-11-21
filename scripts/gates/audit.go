@@ -21,7 +21,11 @@ import (
 //	audit-const-orphan      audit.Action 常量没有登记到任何 operation，或 Catalog 引用了未声明的常量；
 //	audit-declared-unrecorded  Catalog 登记的动作在业务代码里没有任何 `.Record(ctx, audit.ActionX, …)` 调用——声明了审计却没有记录者；
 //	audit-record-unverifiable  `.Record(ctx, <非 audit.Action* 常量>, audit.Event{…})`：动作不是登记常量，门禁无法核对；
-//	audit-record-unknown    Record 调用引用了 Catalog 里没有登记的动作常量。
+//	audit-record-unknown    Record 调用引用了 Catalog 里没有登记的动作常量；
+//	audit-denied-catalog    被拒绝类动作（DeniedActions，Story 1.22b：已认证主体的授权类拒绝，result=denied）出现在某个 operation 的 Catalog 登记里——
+//	                        它们不属于任何业务 operation，不得与写操作审计混用；
+//	audit-denied-misuse     业务代码经 `.Record(ctx, audit.ActionX, …)` 写被拒绝类动作——它们只能由审计钩子的 DeniedRecorder 写入（带防刷与 best-effort 语义）；
+//	audit-denied-unrecorded DeniedActions 登记了动作，但 internal/platform/audit/denied.go 里没有对应的写入实现（缺 RecordDenied / ResultDenied / 动作常量引用）。
 //
 // 运行时侧的对应检查：httpx 审计钩子（audit.Writer.Auditor）对「声明了 x-audit 的成功请求却没有审计行」报警计数；
 // contracttest.CheckAuditCoverage 对真实路由集合做同样的元数据检查（cmd/lingedge-server 的 TestAuditCoverage）。
@@ -31,6 +35,7 @@ const (
 	auditCatalogRel = "internal/platform/audit/catalog.go"
 	auditPkgDir     = "internal/platform/audit"
 	auditExemptRel  = "scripts/gates/data/audit-exempt.txt"
+	auditDeniedRel  = "internal/platform/audit/denied.go"
 )
 
 type openAPIOp struct {
@@ -85,6 +90,7 @@ func parseAuditExempt(txt string) map[string]string {
 type auditCatalog struct {
 	Consts map[string]string
 	Ops    map[string][]string
+	Denied []string // DeniedActions 登记的动作常量名（被拒绝类审计，Story 1.22b）
 }
 
 func parseAuditCatalog(src string) (auditCatalog, error) {
@@ -112,6 +118,15 @@ func parseAuditCatalog(src string) (auditCatalog, error) {
 					if bl, ok := vs.Values[i].(*ast.BasicLit); ok && bl.Kind == token.STRING {
 						v, _ := strconv.Unquote(bl.Value)
 						c.Consts[n.Name] = v
+					}
+				}
+			}
+			if gd.Tok == token.VAR && len(vs.Names) == 1 && vs.Names[0].Name == "DeniedActions" && len(vs.Values) == 1 {
+				if cl, ok := vs.Values[0].(*ast.CompositeLit); ok {
+					for _, e := range cl.Elts {
+						if ident, ok := e.(*ast.Ident); ok {
+							c.Denied = append(c.Denied, ident.Name)
+						}
 					}
 				}
 			}
@@ -199,6 +214,7 @@ type auditInput struct {
 	OpenAPI string
 	Exempt  string
 	Catalog string
+	Denied  string            // internal/platform/audit/denied.go（被拒绝类审计的写入实现）
 	Sources map[string]string // 相对路径 → 内容（非测试 Go 源码，已排除审计包自身）
 }
 
@@ -270,6 +286,34 @@ func checkAudit(in auditInput) []Finding {
 			}
 		}
 	}
+	// 被拒绝类动作（Story 1.22b）：登记在 DeniedActions、不得出现在 Catalog、有真实写入实现。
+	denied := map[string]bool{}
+	for _, a := range cat.Denied {
+		denied[a] = true
+		used[a] = true
+		if _, ok := cat.Consts[a]; !ok {
+			add(auditCatalogRel, 0, "audit-const-orphan", "DeniedActions 引用了未声明的动作常量 %s", a)
+		}
+	}
+	for id, acts := range cat.Ops {
+		for _, a := range acts {
+			if denied[a] {
+				add(auditCatalogRel, 0, "audit-denied-catalog", "被拒绝类动作 audit.%s 不得登记到 operation %s 的 Catalog（它只由审计钩子的 DeniedRecorder 写入，不属于任何业务 operation）", a, id)
+			}
+		}
+	}
+	if len(cat.Denied) > 0 {
+		for _, need := range []string{"RecordDenied", "ResultDenied"} {
+			if !strings.Contains(in.Denied, need) {
+				add(auditDeniedRel, 0, "audit-denied-unrecorded", "DeniedActions 已登记被拒绝类动作，但 %s 里没有 %s——声明了被拒绝类审计却没有写入实现", auditDeniedRel, need)
+			}
+		}
+		for _, a := range cat.Denied {
+			if !strings.Contains(in.Denied, a) {
+				add(auditDeniedRel, 0, "audit-denied-unrecorded", "被拒绝类动作 audit.%s 在 %s 里没有被写入（缺少对该常量的引用）", a, auditDeniedRel)
+			}
+		}
+	}
 	seenVal := map[string]string{}
 	for name, val := range cat.Consts {
 		if !used[name] {
@@ -300,6 +344,8 @@ func checkAudit(in auditInput) []Finding {
 				add(c.File, c.Line, "audit-record-unverifiable", "Record 的动作必须是 audit.Action* 常量（门禁据此核对「声明了审计就有记录者」）")
 			case func() bool { _, ok := cat.Consts[c.Action]; return !ok }():
 				add(c.File, c.Line, "audit-record-unknown", "Record 引用了未声明的动作常量 audit.%s", c.Action)
+			case denied[c.Action]:
+				add(c.File, c.Line, "audit-denied-misuse", "被拒绝类动作 audit.%s 不得经 Record 写入：它只能由审计钩子的 DeniedRecorder 写入（防刷、best-effort，不属于业务事务）", c.Action)
 			default:
 				if !used[c.Action] {
 					add(c.File, c.Line, "audit-record-unknown", "动作 audit.%s 没有登记到 audit.Catalog 的任何 operation", c.Action)
@@ -349,6 +395,9 @@ func loadAuditInput(root string) (auditInput, error) {
 		return in, err
 	}
 	if in.Catalog, err = read(auditCatalogRel); err != nil {
+		return in, err
+	}
+	if in.Denied, err = read(auditDeniedRel); err != nil {
 		return in, err
 	}
 	in.Sources = map[string]string{}

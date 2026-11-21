@@ -63,7 +63,7 @@ func TestTrustedProxiesFromConfigDeterminesSourceIP(t *testing.T) {
 			t.Cleanup(func() {
 				cancel()
 				select {
-				case <-done:
+				case <-done: //nolint:errcheck // 通道接收；停机错误已由主流程断言
 				case <-time.After(30 * time.Second):
 				}
 			})

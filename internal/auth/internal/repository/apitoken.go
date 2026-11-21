@@ -2,14 +2,19 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/wuekevin/lingedge/internal/auth/internal/domain"
 	"github.com/wuekevin/lingedge/internal/platform/db"
+	"github.com/wuekevin/lingedge/internal/platform/scope"
 )
 
 // API Token 的数据访问（Story 1.19）。api_tokens 在认证钩子（Scope 产生之前）按 token_hash/id 访问，在管理 API 里以创建者自己的 user_id 为边界，
 // 故登记为认证/身份表（scripts/gates/data/identity-tables.txt）；所有 SQL 为编译期常量 + 占位符；写操作由 Service 用 WithTx 划定事务边界。
+
+// ErrNoTenantScope 表示需要租户范围 Scope 的配额查询收到了平台范围或零值 Scope（调用方应 fail-closed）。
+var ErrNoTenantScope = errors.New("auth/repository: 需要租户范围的 Scope")
 
 const tokenCols = `t.id, t.uid, t.created_at, t.tenant_id, tn.uid AS tenant_uid, t.user_id, t.name, t.token_prefix, t.token_hash, t.scopes_json,
 	t.allowed_cidrs_json, t.expires_at, t.last_used_at, t.last_used_ip, t.revoked_at, t.rotated_from_id, rf.uid AS rotated_from_uid`
@@ -131,3 +136,34 @@ func (r *Repo) ListOwnedAPITokens(ctx context.Context, userID uint64, tenantID *
 
 const listTokensSQL = `SELECT ` + tokenCols + ` FROM api_tokens t LEFT JOIN tenants tn ON tn.id = t.tenant_id
 	LEFT JOIN api_tokens rf ON rf.id = t.rotated_from_id WHERE t.user_id = ? AND (t.tenant_id <=> ?)`
+
+// QuotaKeyAPITokens 是 tenant_quotas 里令牌数量上限的配额键（docs/database/tenant-site.md §tenant_quotas）。
+const QuotaKeyAPITokens = "api_tokens"
+
+// LockAPITokenQuota 读取并**锁定**本租户 `api_tokens` 配额行（SELECT … FOR UPDATE），返回限额：行不存在或 limit_value 为 NULL = 不限（nil）。
+// 租户取自 Scope（只允许租户范围 Scope；平台范围/零值返回 ErrNoTenantScope）。锁让同一租户并发创建令牌被串行化，保证上限是硬上限而不是「大致」；
+// 没有配额行（默认租户不限）时不加锁也无需加锁——没有上限可以被并发突破。必须在事务内调用。
+func (r *Repo) LockAPITokenQuota(ctx context.Context, sc scope.Scope) (*int64, error) {
+	if sc.IsZero() || sc.IsPlatform() || sc.TenantID() == 0 {
+		return nil, ErrNoTenantScope
+	}
+	var limit *int64
+	err := r.ex(ctx).Get(ctx, &limit, db.Q(`SELECT limit_value FROM tenant_quotas WHERE tenant_id = ? AND quota_key = ? FOR UPDATE`), sc.TenantID(), QuotaKeyAPITokens)
+	if err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return limit, nil
+}
+
+// CountActiveTenantAPITokens 统计本租户当前有效的令牌数（未吊销且未过期；含租户内所有成员创建的令牌）。租户取自 Scope。
+func (r *Repo) CountActiveTenantAPITokens(ctx context.Context, sc scope.Scope, now time.Time) (int64, error) {
+	if sc.IsZero() || sc.IsPlatform() || sc.TenantID() == 0 {
+		return 0, ErrNoTenantScope
+	}
+	var n int64
+	err := r.ex(ctx).Get(ctx, &n, db.Q(`SELECT COUNT(*) FROM api_tokens WHERE tenant_id = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?)`), sc.TenantID(), now)
+	return n, err
+}

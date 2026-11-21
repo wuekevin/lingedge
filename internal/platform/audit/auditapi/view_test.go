@@ -30,7 +30,11 @@ func TestToViewActorLabels(t *testing.T) {
 		{"平台用户（actor_tenant_id=0）→ platform", with(func(r *repository.LogRow) { r.ActorTenantID = u64(0) }), true, "platform", "user", true},
 		{"acting-as → platform", with(func(r *repository.LogRow) { r.ActingAs = true; r.ActorTenantID = u64(7) }), true, "platform", "user", true},
 		{"平台令牌 → platform", with(func(r *repository.LogRow) { r.ActorType = "api_token"; r.ActorLabel = "le_abcdefgh" }), true, "platform", "user", true},
-		{"租户令牌保留前缀", with(func(r *repository.LogRow) { r.ActorType = "api_token"; r.ActorLabel = "le_abcdefgh"; r.ActorTenantID = u64(7) }), true, "le_abcdefgh", "api_token", false},
+		{"租户令牌保留前缀", with(func(r *repository.LogRow) {
+			r.ActorType = "api_token"
+			r.ActorLabel = "le_abcdefgh"
+			r.ActorTenantID = u64(7)
+		}), true, "le_abcdefgh", "api_token", false},
 		{"节点 → system", with(func(r *repository.LogRow) { r.ActorType = "node"; r.ActorLabel = "edge-hk-01" }), true, "system", "system", false},
 		{"系统组件保留", with(func(r *repository.LogRow) { r.ActorType = "system"; r.ActorLabel = "scheduler" }), true, "scheduler", "system", false},
 		{"平台视角保留快照", with(func(r *repository.LogRow) { r.ActorTenantID = u64(7); r.ActorDisplayName = str("张三") }), false, email, "user", false},

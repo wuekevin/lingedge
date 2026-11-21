@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"sync/atomic"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/wuekevin/lingedge/internal/platform/clock"
 	"github.com/wuekevin/lingedge/internal/platform/db"
 	"github.com/wuekevin/lingedge/internal/platform/httpx"
+	"github.com/wuekevin/lingedge/internal/platform/redisx"
 	"github.com/wuekevin/lingedge/internal/platform/requestid"
 	"github.com/wuekevin/lingedge/internal/platform/tenantscope"
 	"github.com/wuekevin/lingedge/internal/platform/uid"
@@ -109,6 +111,11 @@ type Options struct {
 	Log   *zap.Logger
 	// ExtraOps 是 Catalog 之外额外登记的 operation（仅测试/探针路由使用；生产装配不传）。
 	ExtraOps []Op
+	// Redis 用于被拒绝类审计的防刷去重（denied.go）；nil = 关闭被拒绝类审计（不是「不去重地写」）。
+	Redis *redisx.Client
+	// DeniedWindow / DeniedActorCap 是被拒绝类审计的去重窗口与主体级上限（<=0 取 DefaultDeniedWindow / DefaultDeniedActorCap）。
+	DeniedWindow   time.Duration
+	DeniedActorCap int
 	// OnMissing 在「声明了审计的成功请求却没有审计行」时被调用（测试与告警接线用）；可为 nil。
 	OnMissing func(operationID string)
 }
@@ -123,6 +130,11 @@ type Writer struct {
 	onMissing func(string)
 	extra     []Op
 	missing   atomic.Int64
+
+	denied           *deniedState
+	deniedWritten    atomic.Int64
+	deniedSuppressed atomic.Int64
+	deniedFailed     atomic.Int64
 }
 
 var _ Recorder = (*Writer)(nil)
@@ -142,7 +154,8 @@ func New(o Options) (*Writer, error) {
 	if o.Log == nil {
 		o.Log = zap.NewNop()
 	}
-	return &Writer{pool: o.Pool, repo: repo, ids: o.IDs, clk: o.Clock, log: o.Log.Named("audit"), onMissing: o.OnMissing, extra: o.ExtraOps}, nil
+	return &Writer{pool: o.Pool, repo: repo, ids: o.IDs, clk: o.Clock, log: o.Log.Named("audit"), onMissing: o.OnMissing, extra: o.ExtraOps,
+		denied: newDeniedState(o.Redis, o.DeniedWindow, o.DeniedActorCap)}, nil
 }
 
 // Repo 返回审计 Repository（读取 API 使用）。

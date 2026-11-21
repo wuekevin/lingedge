@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -66,6 +67,11 @@ type Service struct {
 	limit  *redisx.Limiter
 	ks     redisx.Keyspace
 	pubMax int
+	// rc/changeCh：设置变更广播（Story 1.22b）。nil = 无 Redis，仅靠快照 TTL 感知。
+	rc       *redisx.Client
+	changeCh redisx.Channel
+
+	reauth atomic.Pointer[reauthHolder] // 再认证检查组件（SetReauthChecker 装配后设置；未设置时安全敏感键一律拒绝）
 
 	mu      sync.Mutex
 	snap    snapshot
@@ -106,8 +112,43 @@ func newService(o Options) (*Service, error) {
 	s.repo, s.pool, s.ids, s.box, s.audit = repo, o.Pool, o.IDs, o.Box, o.Audit
 	if o.Redis != nil {
 		s.limit, s.ks = redisx.NewLimiter(o.Redis, nil), o.Redis.Keyspace()
+		if err := s.startChangeBroadcast(o.Redis); err != nil {
+			return nil, err
+		}
 	}
 	return s, nil
+}
+
+// changePollInterval 是设置变更订阅的轮询对账周期：到期时丢弃快照（下次读取重新加载）。它是广播丢失时的兜底之一（另一个是快照 TTL）。
+const changePollInterval = 30 * time.Second
+
+// startChangeBroadcast 订阅设置变更广播（Story 1.22b、ADR-025 §1 失效广播）：别的实例写入设置后，本实例立即丢弃快照，运行模式等的跨实例感知从
+// 「最长一个 CacheTTL（5 秒）」缩短到广播延迟（毫秒级）。Pub/Sub 有损：Redis 不可用/广播丢失时由快照 TTL 与订阅的轮询对账兜底（Redis 恢复时 Poll 立即对账），
+// 最坏仍是一个 CacheTTL。订阅随 redisx.Client 关闭而结束。不影响数据面零 Redis 依赖（只在 Server 进程内，数据面二进制不得依赖 Redis，ADR-025 §3）。
+func (s *Service) startChangeBroadcast(c *redisx.Client) error {
+	ch, err := c.Keyspace().Channel("sysconfig", redisx.PurposeSettingChange)
+	if err != nil {
+		return err
+	}
+	s.rc, s.changeCh = c, ch
+	_, err = c.Subscribe(context.Background(), ch, redisx.SubscribeOptions{
+		Handler:      func(context.Context, string) { s.invalidate() },
+		Poll:         func(context.Context) error { s.invalidate(); return nil },
+		PollInterval: changePollInterval,
+	})
+	return err
+}
+
+// broadcastChange 在设置变更提交之后通知其他实例丢弃快照（有损、尽力而为：失败只记日志，不回滚、不影响响应）。
+func (s *Service) broadcastChange(ctx context.Context) {
+	if s.rc == nil {
+		return
+	}
+	pctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+	defer cancel()
+	if err := s.rc.Publish(pctx, s.changeCh, "changed"); err != nil {
+		s.log.Debug("设置变更广播未发出（其他实例将在快照 TTL 内感知）", zap.Error(err))
+	}
 }
 
 // ---- 读取（缓存快照）----
@@ -325,7 +366,7 @@ func (s *Service) Patch(ctx context.Context, values map[string]json.RawMessage) 
 	if len(details) > 0 {
 		return nil, apierr.Validation(details...)
 	}
-	if err := s.applyCrossField(ctx, changes); err != nil {
+	if err := s.requireReauthFor(ctx, changes); err != nil {
 		return nil, err
 	}
 	if err := s.apply(ctx, func(ctx context.Context, ev audit.Event) error {
@@ -354,16 +395,38 @@ func (s *Service) prepare(d Def, raw json.RawMessage) (change, *ValidationError)
 	return ch, nil
 }
 
-// applyCrossField 校验跨键约束（以「库里现值 + 本次变更」为准）：滑动过期 ≤ 绝对过期；API Token 默认有效期 ≤ 上限。
-func (s *Service) applyCrossField(ctx context.Context, changes []change) error {
-	rows, err := s.repo.ListSettings(ctx)
-	if err != nil {
-		return apierr.Internal(err)
+// crossKeys 是参与跨键约束的全部键（升序加锁，顺序固定以避免死锁）。
+var crossKeys = []string{KeyAPITokenDefaultTTL, KeyAPITokenMaxTTL, KeySessionAbsoluteTTL, KeySessionIdleTTL}
+
+// checkCrossKeys 在**写事务内**校验跨键约束：滑动过期 ≤ 绝对过期；API Token 默认有效期 ≤ 上限。
+// 只要本次变更触及任一相关键，就先按固定顺序对全部相关键行加锁（SELECT … FOR UPDATE，当前读，读到的是最新已提交值），再以「锁内现值 + 本次变更」
+// 校验——并发 PATCH 因此被串行化：后到者在锁上等待，拿到锁后看到先到者已提交的值，不可能两个各自合法的变更合起来违反约束（Story 1.22b，1.22 遗留）。
+// 行不存在（取默认值）时 InnoDB 在该键位置加间隙锁，并发首次插入的死锁/重复键由 tx 的重试兜住，重试时重新校验。
+// 不触及相关键的变更（品牌、运行模式等）不加这些锁，不增加争用。
+func (s *Service) checkCrossKeys(ctx context.Context, changes []change) error {
+	touched := func(k string) bool {
+		for _, c := range changes {
+			if c.def.Key == k {
+				return true
+			}
+		}
+		return false
+	}
+	hit := false
+	for _, k := range crossKeys {
+		hit = hit || touched(k)
+	}
+	if !hit {
+		return nil
 	}
 	sn := snapshot{vals: map[string]json.RawMessage{}}
-	for _, r := range rows {
-		if r.ValueJSON != nil {
-			sn.vals[r.Key] = json.RawMessage(*r.ValueJSON)
+	for _, k := range crossKeys { // crossKeys 已是升序
+		cur, exists, err := s.repo.GetSettingForUpdate(ctx, k)
+		if err != nil {
+			return fmt.Errorf("锁定设置 %s: %w", k, err)
+		}
+		if exists && cur.ValueJSON != nil {
+			sn.vals[k] = json.RawMessage(*cur.ValueJSON)
 		}
 	}
 	for _, c := range changes {
@@ -375,14 +438,6 @@ func (s *Service) applyCrossField(ctx context.Context, changes []change) error {
 	}
 	num := func(k string) int64 { n, _ := sn.value(s.log, k).(json.Number); i, _ := n.Int64(); return i }
 	var details []apierr.Detail
-	touched := func(k string) bool {
-		for _, c := range changes {
-			if c.def.Key == k {
-				return true
-			}
-		}
-		return false
-	}
 	if (touched(KeySessionIdleTTL) || touched(KeySessionAbsoluteTTL)) && num(KeySessionIdleTTL) > num(KeySessionAbsoluteTTL) {
 		details = append(details, apierr.Detail{Field: "values." + KeySessionIdleTTL, Reason: "must not exceed " + KeySessionAbsoluteTTL})
 	}
@@ -428,6 +483,9 @@ func (s *Service) apply(ctx context.Context, record recordFn, resType, resUID st
 		}
 	}
 	err := s.tx(ctx, func(ctx context.Context) error {
+		if err := s.checkCrossKeys(ctx, changes); err != nil {
+			return err
+		}
 		summary := map[string]any{}
 		for _, c := range changes {
 			ch, err := s.applyOne(ctx, c, actor)
@@ -450,6 +508,7 @@ func (s *Service) apply(ctx context.Context, record recordFn, resType, resUID st
 		return apierr.Internal(err)
 	}
 	s.invalidate()
+	s.broadcastChange(ctx)
 	return nil
 }
 
