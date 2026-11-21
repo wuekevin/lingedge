@@ -56,6 +56,10 @@ const (
 	KeyRetentionLoginDays = "retention.login_logs_days"
 
 	KeySSRFAllowCIDRs = "ssrf.allow_cidrs"
+
+	// KeyGRPCSANExtra 是 Server gRPC 叶证书的额外 SAN（主机名或 IP 字面量列表，ADR-003 §3）：初始化（Story 1.23）与后续轮换（Story 3.10）签发叶证书时
+	// 与 server_url 的主机一起写入 SAN。只影响「之后签发」的证书，不会改动已签发的证书。
+	KeyGRPCSANExtra = "grpc.tls.san_extra"
 )
 
 // 分组（openapi getSettings 的 group 枚举）。
@@ -107,6 +111,8 @@ const (
 	TEnum        ValueType = "enum"
 	TStringList  ValueType = "string_list"
 	TCIDREntries ValueType = "cidr_entries"
+	// THostList 是主机名/IP 字面量列表（可为空）；主机名按 RFC 1123（允许 *. 通配前缀），IP 经规范化。
+	THostList ValueType = "host_list"
 )
 
 // Def 是一个设置键的定义。
@@ -161,6 +167,7 @@ var reauthRequiredKeys = map[string]bool{
 	KeyMailHost: true, KeyMailPort: true, KeyMailUsername: true, KeyMailCredential: true, KeyMailFrom: true,
 	KeyRetentionAuditDays: true, KeyRetentionLoginDays: true,
 	KeyRegistrationOpen: true,
+	KeyGRPCSANExtra:     true, // 改变节点 mTLS 信任的 Server 叶证书身份范围
 }
 
 func secs(d time.Duration) int64 { return int64(d / time.Second) }
@@ -217,6 +224,8 @@ func buildDefs() []Def {
 		{Key: KeyRetentionAuditDays, Group: GroupRetention, Type: TInt, Default: int64(DefaultAuditRetentionDays), Min: 30, Max: 3650, Patchable: true, Doc: "审计日志保留天数（仅存储；清理由 Story 3.48 执行）"},
 		{Key: KeyRetentionLoginDays, Group: GroupRetention, Type: TInt, Default: int64(DefaultLoginRetentionDays), Min: 30, Max: 3650, Patchable: true, Doc: "登录日志保留天数（仅存储；清理由 Story 3.48 执行）"},
 
+		{Key: KeyGRPCSANExtra, Group: GroupSecurity, Type: THostList, Default: []any{}, MaxItems: 32, Patchable: true,
+			Doc: "Server gRPC 叶证书的额外 SAN（主机名或 IP；与 server_url 主机一起写入，只影响之后签发的证书，Story 1.23/3.10）"},
 		{Key: KeySSRFAllowCIDRs, Group: GroupSecurity, Type: TCIDREntries, Default: []any{}, MaxItems: 256,
 			Dedicated: "PUT /admin/settings/ssrf-allowlist", Doc: "平台 SSRF 白名单（回源例外网段）；只能经专用端点修改（需再认证，ADR-004 §6）"},
 	}
@@ -351,6 +360,32 @@ func (d Def) Normalize(raw json.RawMessage) (json.RawMessage, *ValidationError) 
 			list = append(list, entry{CIDR: p.String(), Note: note})
 		}
 		out = list
+	case THostList:
+		arr, ok := v.([]any)
+		if !ok {
+			return nil, bad(d.Key, "must be an array of host names or IP addresses")
+		}
+		if len(arr) > d.MaxItems {
+			return nil, bad(d.Key, "must have at most %d items", d.MaxItems)
+		}
+		list := make([]string, 0, len(arr))
+		seen := map[string]bool{}
+		for _, e := range arr {
+			s, ok := e.(string)
+			if !ok {
+				return nil, bad(d.Key, "must be an array of host names or IP addresses")
+			}
+			h, ok := NormalizeHost(s)
+			if !ok {
+				return nil, bad(d.Key, "%q is not a valid host name or IP address", trunc(s))
+			}
+			if seen[h] {
+				return nil, bad(d.Key, "duplicate item %q", trunc(h))
+			}
+			seen[h] = true
+			list = append(list, h)
+		}
+		out = list
 	case TStringList:
 		arr, ok := v.([]any)
 		if !ok {
@@ -387,6 +422,36 @@ func (d Def) Normalize(raw json.RawMessage) (json.RawMessage, *ValidationError) 
 		return nil, bad(d.Key, "cannot be encoded")
 	}
 	return b, nil
+}
+
+var hostLabelRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+
+// NormalizeHost 校验并规范化 SAN 条目：IP 字面量（无 zone，未指定地址除外）→ 规范文本；主机名（RFC 1123，至少一个点之外也允许单标签，
+// 允许最左 "*." 通配）→ 小写。其他（含空白、端口、路径、下划线、空串）一律拒绝。
+func NormalizeHost(s string) (string, bool) {
+	if s == "" || len(s) > 253 {
+		return "", false
+	}
+	if a, err := netip.ParseAddr(s); err == nil {
+		if a.Zone() != "" || a.IsUnspecified() {
+			return "", false
+		}
+		return a.Unmap().String(), true
+	}
+	h := strings.ToLower(strings.TrimSuffix(s, "."))
+	h = strings.TrimPrefix(h, "*.")
+	if h == "" || strings.Contains(s, "*") && !strings.HasPrefix(s, "*.") {
+		return "", false
+	}
+	for _, l := range strings.Split(h, ".") {
+		if !hostLabelRe.MatchString(l) {
+			return "", false
+		}
+	}
+	if strings.HasPrefix(s, "*.") {
+		return "*." + h, true
+	}
+	return h, true
 }
 
 func trunc(s string) string {

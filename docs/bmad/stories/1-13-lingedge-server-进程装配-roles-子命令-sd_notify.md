@@ -120,4 +120,4 @@ DoD（基线 §25）：除下述「等待环境验证」外满足；前端功能
 
 **等待环境验证**：① 真实 systemd `Type=notify` 全流程（unit 的 `Type=notify`/`NotifyAccess`、`TimeoutStartSec` 内收到 READY=1、`systemctl stop` 触发 SIGTERM 的优雅停机与 `TimeoutStopSec`）——本机 macOS 无 systemd，仅以自建 unixgram socket 验证协议；② Linux 抽象 socket（`@` 前缀）的端到端收发（本机跳过，仅验证前缀翻译）；③ MySQL 8.0.16（最低版本）与 Linux 验收机上重跑 `tests/integration/server` 与 `tests/migrations`（本机仅 8.0.46）；④ 经 systemd `LoadCredential` 的 `$CREDENTIALS_DIRECTORY/master.key` 启动路径（沿用 1.11 的等待项）；⑤ 备份恢复整流程中 Tools 调用 `lineage bump`（1.41/1.43）的联调。
 
-**遗留/后续**：1.14/1.15 登记幂等键保留期等内部周期作业并接入 worker/scheduler 骨架；3.13 实现 grpc 角色的真实监听；1.16–1.21 逐个替换 `assembleHooks()` 的默认拒绝钩子；1.24 注册 `setup` 子命令；1.23 写入 `deploy.lineage=1`（本 Story 的 bump 依赖其存在）；如出现长连接路由需补 `RegisterOnShutdown`。
+**遗留/后续**：1.14/1.15 登记幂等键保留期等内部周期作业并接入 worker/scheduler 骨架；3.13 实现 grpc 角色的真实监听；1.16–1.21 逐个替换 `assembleHooks()` 的默认拒绝钩子；1.24 注册 `setup` 子命令；1.23 写入 `deploy.lineage=1`（本 Story 的 bump 依赖其存在；**Story 1.23 已交付**，联调测试 `tests/integration/signingkeys` 的 `TestLineageBumpAfterInit`：初始化前 show/bump 拒绝，初始化后可读到 1、可 bump 且单调）；如出现长连接路由需补 `RegisterOnShutdown`。

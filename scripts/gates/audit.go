@@ -91,6 +91,7 @@ type auditCatalog struct {
 	Consts map[string]string
 	Ops    map[string][]string
 	Denied []string // DeniedActions 登记的动作常量名（被拒绝类审计，Story 1.22b）
+	System []string // SystemActions 登记的动作常量名（系统发起的动作，Story 1.23）
 }
 
 func parseAuditCatalog(src string) (auditCatalog, error) {
@@ -126,6 +127,15 @@ func parseAuditCatalog(src string) (auditCatalog, error) {
 					for _, e := range cl.Elts {
 						if ident, ok := e.(*ast.Ident); ok {
 							c.Denied = append(c.Denied, ident.Name)
+						}
+					}
+				}
+			}
+			if gd.Tok == token.VAR && len(vs.Names) == 1 && vs.Names[0].Name == "SystemActions" && len(vs.Values) == 1 {
+				if cl, ok := vs.Values[0].(*ast.CompositeLit); ok {
+					for _, e := range cl.Elts {
+						if ident, ok := e.(*ast.Ident); ok {
+							c.System = append(c.System, ident.Name)
 						}
 					}
 				}
@@ -314,6 +324,22 @@ func checkAudit(in auditInput) []Finding {
 			}
 		}
 	}
+	// 系统发起的动作（Story 1.23）：登记在 SystemActions、不得出现在 Catalog（它们没有对应的 x-audit operation）、必须有记录者（见下方 ③）。
+	system := map[string]bool{}
+	for _, a := range cat.System {
+		system[a] = true
+		used[a] = true
+		if _, ok := cat.Consts[a]; !ok {
+			add(auditCatalogRel, 0, "audit-const-orphan", "SystemActions 引用了未声明的动作常量 %s", a)
+		}
+	}
+	for id, acts := range cat.Ops {
+		for _, a := range acts {
+			if system[a] {
+				add(auditCatalogRel, 0, "audit-system-catalog", "系统发起的动作 audit.%s 不得登记到 operation %s 的 Catalog（它不由任何 REST operation 触发，不对应 x-audit）", a, id)
+			}
+		}
+	}
 	seenVal := map[string]string{}
 	for name, val := range cat.Consts {
 		if !used[name] {
@@ -352,6 +378,11 @@ func checkAudit(in auditInput) []Finding {
 				}
 				recorded[c.Action] = true
 			}
+		}
+	}
+	for _, a := range cat.System {
+		if _, ok := cat.Consts[a]; ok && !recorded[a] {
+			add(auditCatalogRel, 0, "audit-system-unrecorded", "SystemActions 登记了动作 audit.%s，但业务代码里没有任何 .Record(ctx, audit.%s, …) 调用——声明了审计却没有记录", a, a)
 		}
 	}
 	for id, acts := range cat.Ops {

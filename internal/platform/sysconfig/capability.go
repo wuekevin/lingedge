@@ -36,7 +36,7 @@ var DeliveredModules = []ModuleInfo{
 	{Name: "tenants", Paths: []string{"/tenants"}},                                                 // 1.20
 	{Name: "tasks", Paths: []string{"/tasks"}},                                                     // 1.14
 	{Name: "audit", Paths: []string{"/audit-logs", "/admin/login-logs"}},                           // 1.21
-	{Name: "system", Paths: []string{"/admin/settings", "/admin/system/run-mode", "/admin/system/version", "/admin/installations", "/public/site-info", "/public/version"}}, // 1.22
+	{Name: "system", Paths: []string{"/admin/settings", "/admin/system/run-mode", "/admin/system/version", "/admin/installations", "/public/site-info", "/public/version", "/admin/system/signing-keys"}}, // 1.22；/admin/system/signing-keys 为 1.23（签名密钥元数据，归属系统模块）
 }
 
 // ModulesDelivered 返回已交付模块键（排序）。

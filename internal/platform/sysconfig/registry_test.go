@@ -201,3 +201,34 @@ func TestReauthRequiredKeysAreRegisteredAndPatchable(t *testing.T) {
 		}
 	}
 }
+
+// grpc.tls.san_extra（Story 1.23）：主机名/IP 列表，可为空；规范化、去重、拒绝非法。
+func TestGRPCSANExtraNormalize(t *testing.T) {
+	for _, c := range []struct{ in, want string }{
+		{`[]`, `[]`},
+		{`["Edge.Example.TEST","10.0.0.5","::1","*.node.example.test"]`, `["edge.example.test","10.0.0.5","::1","*.node.example.test"]`},
+		{`["::ffff:10.0.0.5"]`, `["10.0.0.5"]`},
+	} {
+		if got, err := norm(t, KeyGRPCSANExtra, c.in); err != nil || got != c.want {
+			t.Errorf("%s -> %s %v, want %s", c.in, got, err, c.want)
+		}
+	}
+	for _, in := range []string{`"a.example.test"`, `[1]`, `[""]`, `["a b.test"]`, `["a.test:9443"]`, `["https://a.test"]`, `["a_b.test"]`, `["0.0.0.0"]`, `["fe80::1%eth0"]`,
+		`["a.test","A.test"]`, `["x*.test"]`, `["-a.test"]`, `["a..test"]`} {
+		if _, err := norm(t, KeyGRPCSANExtra, in); err == nil {
+			t.Errorf("%s 应被拒绝", in)
+		}
+	}
+	big := make([]string, 33)
+	for i := range big {
+		big[i] = "h" + string(rune('a'+i%26)) + string(rune('a'+i/26)) + ".test"
+	}
+	b, _ := json.Marshal(big)
+	if _, err := norm(t, KeyGRPCSANExtra, string(b)); err == nil {
+		t.Error("超过 32 项应被拒绝")
+	}
+	d, _ := Lookup(KeyGRPCSANExtra)
+	if !d.Patchable || !d.ReauthRequired {
+		t.Errorf("san_extra 应可 PATCH 且需再认证: %+v", d)
+	}
+}

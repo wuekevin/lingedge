@@ -173,6 +173,9 @@ sequenceDiagram
 - **三个独立信任域**（ADR-012）：发行清单签名 / 配置修订签名 / 节点 mTLS CA。本协议只涉及后两者；**发行签名公钥不经此协议下发**（内置于 Tools）。
 - **初始信任**：`EnrollResponse.signing_keyset`（`previous_version=0`，无 `signature`），通过 enroll 阶段的 TLS+CA 钉扎建立信任起点。
 - **轮换**：新 `SigningKeyset`（`version = N+1`）由 `version=N` 中仍为 `ACTIVE/RETIRING` 的 key 签名（`signed_by_key_id`、`signature`，输入 `"LINGEDGE-KEYSET-V1\n"+canonical_json(version,keys,issued_at,previous_version)`）。节点验证链后替换本地 keyset。
+- **canonical_json 的字段编码**（CC-10 澄清，实现：`pkg/signing`，Server/Agent/Tools 共用）：对象键按字典序、无空白、UTF-8、不转义 HTML、整数不带小数点；顶层键 `issued_at`（UTC RFC 3339，纳秒部分去掉尾随 0，如 `2026-11-21T08:00:00Z`）、`keys`、`previous_version`、`version`；`keys[]` 每项键 `algorithm`（`ed25519`）、`key_id`（`^[A-Za-z0-9_-]{1,32}$`）、`not_before`（同 `issued_at` 格式，未给出为 `null`）、`public_key`（32 字节原始公钥的标准 base64，带填充）、`status`（proto 枚举名 `ACTIVE|RETIRING|REVOKED`）；数组按 `key_id` 升序排列（签发方保证，验证方按收到的顺序重算）。**不含** `signed_by_key_id` 与 `signature`。
+- **链验证规则**（`pkg/signing.VerifyKeysetLink/VerifyChain`）：新版本必须严格 `= 旧版本+1` 且 `previous_version = 旧版本`（小于等于已信任版本 = 回滚，拒绝；跳版本 = 断链，拒绝）；`signed_by_key_id` 必须是**上一版**中 `ACTIVE/RETIRING` 的 key（`REVOKED`/未知拒绝）；签名对 `"LINGEDGE-KEYSET-V1\n"` ‖ canonical body 成立（任何内容被改 = 失败）；上一版中保留下来的 key 其算法与公钥不得改变，`REVOKED` 不得恢复；每一版至少有一把 `ACTIVE` key；任一级失败则整条链作废，调用方不得部分采用。信任起点（`previous_version=0`、无签名）经 enroll 的 TLS+CA 钉扎获得（`pkg/signing.VerifyRoot` 只做结构校验）。
+- **指纹口径**：配置签名公钥 = SHA-256(原始 32 字节公钥) 小写十六进制；证书（CA、Server 叶证书）= SHA-256(证书 DER) 小写十六进制（CA 的即 enroll Token 的 `ca_fp`）。
 - **重叠期**：新 key 先以 `ACTIVE` 加入、旧 key 降为 `RETIRING`（仍可验证）；确认全部节点已升级到新 keyset 后，旧 key 才置 `REVOKED`。重叠期内新旧签发的修订均可被节点验证（FR-26）。
 - **紧急吊销**：key 泄露时发布新 keyset 将其置 `REVOKED`；节点拒绝其签发的任何**未应用**修订；已应用的修订不受影响（运维应立即发布新修订）。
 - 节点通过 `HeartbeatResponse.latest_keyset_version` 或 `DIRECTIVE_REFETCH_KEYSET` 触发 `GetSigningKeyset(known_version)`；响应为 `known_version` 之后的完整链，节点**逐级验证**。

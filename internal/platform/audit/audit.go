@@ -172,7 +172,8 @@ func (w *Writer) Record(ctx context.Context, action Action, ev Event) error {
 	if !knownAction(action) && !w.extraAction(action) {
 		return fmt.Errorf("%w: %q", ErrUnknownAction, action)
 	}
-	if meta, ok := httpx.MetaFrom(ctx); ok && meta.Audit && !hasAction(w.actionsFor(meta.OperationID), action) {
+	// 系统发起的动作（SystemActions）可在任意 operation 的请求内被记录（例如安装向导的请求调用密钥初始化，Story 1.24），不要求登记在该 operation 下。
+	if meta, ok := httpx.MetaFrom(ctx); ok && meta.Audit && !isSystemAction(action) && !hasAction(w.actionsFor(meta.OperationID), action) {
 		return fmt.Errorf("%w: operation %s 未登记动作 %q", ErrUnknownAction, meta.OperationID, action)
 	}
 	if ev.ResourceType == "" || len(ev.ResourceType) > 48 || len(ev.ResourceUID) > 64 {

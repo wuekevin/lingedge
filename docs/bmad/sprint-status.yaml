@@ -59,7 +59,7 @@ development_status:
   1-21-审计模块与审计-登录日志-api: review   # 开发完成、本机门禁全绿（真实 MySQL/Redis 临时实例 + 真实 Worker，无 Mock：审计模块 internal/platform/audit——Service 在业务事务内经 audit.Recorder 写 audit_logs，审计写入失败=业务整体回滚（fail-closed，真实 MySQL 触发器注入 9 个写 operation：500、数据不残留、重试成功恰好一条审计）；真实审计钩子替换 adminAuditor/DenyAuditor 默认并对运行期「声明了审计却无记录」报警；27 个 x-audit operation 逐个驱动各恰好一条审计行（操作者/租户/acting_as/对象/动作/结果/脱敏摘要/request_id/来源 IP），Admin 代租户双记；audit_logs 只 INSERT（真实 app 账号 UPDATE/DELETE/TRUNCATE/DROP/ALTER 被拒，API 无写路径）；GET /audit-logs（游标分页、9 个过滤、租户仅见自己租户且字段裁剪、平台跨租户/代租户）、GET /audit-logs/{id}、GET /admin/login-logs，kin-openapi 契约；partition.maintain 对真实审计写入的 audit_logs 联调（真实 lingedge_maint，pmax 保留、行搬迁不丢）；Request ID 追踪审计+Task+Worker 日志；make audit-check（gates audit + 真实路由集合检查，含负向样本，并入 contract-check）；隔离矩阵 cancelTask FailClosed→Driven 并新增 audit-logs 驱动；无迁移变更、无契约变更；保留期 DROP PARTITION 属 3.48 未实现、失败/拒绝类审计未写）；等待环境验证见下方 1-21 块
   1-22-系统设置-运行模式开关与能力注册表: review   # 开发完成、本机门禁全绿（真实 MySQL/Redis 临时实例的真实进程内装配，无 Mock：internal/platform/sysconfig——键注册表（27 个业务键 + 4 个只读能力状态键，类型/范围/枚举/格式校验、默认值、分组、敏感、可否经通用 PATCH）、类型化设置服务（整批校验、变更与审计同一事务、死锁/重复键整体重试；注入审计失败的 4 个写 operation 均 500 + 不残留 + 重试恰好一条审计）、敏感键 mail.smtp_password 经 secretbox 信封加密落 value_enc（AAD=表|列|uid，库扫描无明文，读取脱敏，密文挪行解密失败）；/admin/settings*（含 brand、ssrf-allowlist）、/admin/system/run-mode（x-reauth，行锁串行化并发切换：16 并发全部成功且审计 from/to 成链，无需迁移，立即生效）、/admin/system/version（真实 pkg/version + 迁移探针）、/admin/installations、/public/site-info、/public/version（匿名、字段白名单、leakguard/运行期秘密扫描、Cache-Control、按 IP 限流 429）共 12 个 operation（无 501 占位，响应经 kin-openapi 校验）；feature.disabled：httpx RouteMeta.Feature(x-feature) + FeatureGate + 中间件（认证后、授权前；开关读取失败 500、未装配默认拒绝），商业类 operation（billing 标签 43 个 + register/listPublicPlans/createTenant）契约加 x-feature: commercial（CC-9，仅加法），CI 新增 checkFeatureTags（带负向样本）与清单 feature 一致性，M1 用测试专用合成路由端到端验证（自用 403、商业放行、切换即时）；能力注册表：DeliveredModules + CheckModules 对真实路由集合核对（不虚报/不漏登/不半交付），高级能力 http3|l2_cache|dnssec|edge_compute 恒 unverified、置为 available 被拒（PATCH/服务层，带外写入不生效）；/auth/me 返回 features{run_mode,modules_delivered,capability_status} 并改走 permission_version 缓存（关闭 1.18 遗留）；认证模块键/默认值/范围别名到注册表（单一来源，三项一致性测试）；无迁移变更）；等待环境验证见下方 1-22 块
   1-22b-遗留项清理: review   # 开发完成（本机门禁见 docs/bmad/stories/1-22b-遗留项清理.md）：metrics.listen 仅回环（config 层拒绝）、server.trusted_proxies 配置化、装配根收敛为 cmd/lingedge-server/assembly、租户视角审计操作者展示名、令牌创建配额硬上限、被拒绝类审计（access.denied，防刷、best-effort）、设置跨键并发锁、setting_change 广播、安全敏感设置键分级再认证；无新迁移/无契约变更
-  1-23-签名与-ca-密钥初始化-信任域②③: backlog
+  1-23-签名与-ca-密钥初始化-信任域②③: review   # 开发完成、本机门禁见 docs/bmad/stories/1-23-签名与-ca-密钥初始化-信任域②③.md：internal/platform/signingkeys（Initialize 幂等/并发安全/缺主密钥拒绝/与审计及 deploy.lineage 同事务，Ed25519 配置签名密钥 + ECDSA P-256 私有 CA 默认 10 年可配 5–10 年 + Server gRPC 叶证书 serverAuth/SAN/90 天，私钥信封加密 AAD=表|列|uid 用后清零）、pkg/signing（节点侧复用：修订签名 LINGEDGE-REVISION-V1 无过期、链式 keyset 防回滚/断链/篡改、指纹、CA 剩余有效期检查供 doctor）、GET /admin/system/signing-keys（仅公钥与指纹）、gates trustdomain + 二进制符号扫描（Server 无发行私钥加载逻辑）；无新迁移（lingedge_app 权限已足够，AA-7 无依赖）、CC-10 仅加法；setup 子命令未注册（1.24）
   1-24-server-setup-mode-与-web-安装向导后端-含-setup-token: backlog
   1-25-tools-骨架-命令树-退出码-json-envelope-非交互约定: backlog
   1-26-security-叶子包-安全解压-安全执行-脱敏-权限: backlog
@@ -462,8 +462,8 @@ sprint_plan:
       - key: "1-23-签名与-ca-密钥初始化-信任域②③"
         id: "1.23"
         depends_on: ["1.7", "1.11"]
-        env: "本机 MySQL"
-        waiting_env_verification: false
+        env: "本机 MySQL；MySQL 8.0.16 与 Linux 验收机、多进程并发初始化需 ENV-LNX"
+        waiting_env_verification: true
       - key: "1-24-server-setup-mode-与-web-安装向导后端-含-setup-token"
         id: "1.24"
         depends_on: ["1.13", "1.20", "1.22", "1.23"]
@@ -669,6 +669,14 @@ environment_verification:   # 『等待环境验证』登记（验证人/日期�
     condition: "本机通过仅代表 macOS + 8.0.46 临时 mysqld + Redis 临时实例、单进程（含用两个独立 sysconfig 实例模拟多实例）单库下的行为：MySQL 8.0.16 上配额行/跨键行的 SELECT … FOR UPDATE（含间隙锁与死锁重试）、测试里 BEFORE INSERT 触发器故障注入；多 Server 实例下设置变更广播的跨实例延迟与被拒绝类审计的全局去重；真实 Nginx 反代下 server.trusted_proxies 的来源 IP 取值；真实 Redis 部署形态下 setting_change 与去重键的 Pub/Sub 有损/TTL 行为，均不得由本机通过代替。"
     done_locally: "make lint security gate-selftest race vuln contract-check build verify-build migrate-test 全绿：见 docs/bmad/stories/1-22b-遗留项清理.md（metrics 回环拒绝含真实二进制、trusted_proxies 配置与来源 IP 同源、受限创建者令牌 401 逐字节一致、共享装配根、租户视角展示名与隔离矩阵、令牌配额含并发、被拒绝类审计防刷与写入失败不影响响应与未认证不记、跨键并发锁含变异验证、setting_change 广播与 TTL 兜底、安全敏感键再认证、secrets.rewrap 待接线守卫）。"
     pending: "① MySQL 8.0.16 与 Linux 验收机重跑 tests/integration/{audit,auth,sysconfig,server,tenant}、tests/security/tenant_isolation、make migrate-test；② 多 Server 实例：设置变更广播与被拒绝类审计去重；③ 真实 Nginx 反代下 server.trusted_proxies；④ 真实 Redis 部署形态；⑤ 产品/安全确认：展示名作为租户视角操作者标签、被拒绝类审计窗口 60 秒/每主体 20 条默认值、mail.*/retention.*/registration_open 纳入再认证清单；⑥ 认证模块自己的 15 秒设置快照未纳入广播（见 1-22b 文档「仍保留」）。"
+    verified_by: ""
+    verified_on: ""
+  1-23-签名与-ca-密钥初始化-信任域②③:
+    status: partial
+    required_env: "ENV-LNX（Linux 验收机，多进程）；MySQL 8.0.16"
+    condition: "本机通过仅代表 macOS + 8.0.46 临时 mysqld + Redis 临时实例、单进程（用同一进程内 12 个独立 Service 实例模拟并发）下的行为：MySQL 8.0.16 上并发初始化依赖的重复键/死锁重试（uk_signing_keys_active 生成列唯一索引）、CAST(? AS JSON) 写入、BEFORE INSERT 触发器注入；多进程并发初始化；Linux 产物的符号扫描；真实节点 gRPC mTLS 握手（属 3.10/3.13）。"
+    done_locally: "make lint security gate-selftest race vuln contract-check build verify-build migrate-test 全绿：见 docs/bmad/stories/1-23-*.md（生成/证书链/SAN/90 天/CA 10 年与 5–10 年范围、幂等、12 路并发恰一次、缺主密钥拒绝无残留、审计同事务回滚、lineage bump 联调、签名验证与域分隔与跨 purpose 误用、清零探针（含负向自测）、链式 keyset、API 契约与授权矩阵、私钥不外泄（全库全表扫描）、DB 层 active 唯一约束、G-5 补用例、gates trustdomain 与二进制符号扫描含负向样本）。"
+    pending: "① MySQL 8.0.16 与 Linux 验收机重跑 tests/integration/{signingkeys,sysconfig}、tests/security/{tenant_isolation,trustdomain}、make migrate-test；② 多进程并发初始化；③ Linux 产物符号扫描（1.34 发布门禁）；④ 真实节点 mTLS 握手（3.10/3.13）；⑤ ECDSA 私钥标准库内部副本无法由应用清零（Go 限制，见 1-23 文档遗留；更强保证依赖 HSM/KMS 型 KeyProvider）。"
     verified_by: ""
     verified_on: ""
   1-24-server-setup-mode-与-web-安装向导后端-含-setup-token:

@@ -370,7 +370,7 @@ func TestGateCommandsNegativeAndCleanup(t *testing.T) {
 	}
 	dst := copyRepo(t)
 	// 门禁在 gates 目录自身被跳过；副本里的 docs/ 不存在，品牌与口令门禁只看代码与配置。
-	for _, g := range []string{"arch", "testdouble", "passwords", "brand", "shell", "repo", "tasktype"} {
+	for _, g := range []string{"arch", "testdouble", "passwords", "brand", "shell", "repo", "tasktype", "trustdomain"} {
 		if code, out := runGate(t, dst, g); code != 0 {
 			t.Fatalf("干净副本的 %s 门禁应通过，退出码 %d:\n%s", g, code, out)
 		}
@@ -493,6 +493,15 @@ func TestGateCommandsNegativeAndCleanup(t *testing.T) {
 		{
 			name: "入队执行命令类任务类型", gate: "tasktype", wantRule: "tasktype-command", wantText: "不存在执行任意命令",
 			files: map[string]string{"internal/cache/enq.go": "package cache\n\nimport \"" + mod + "/internal/platform/taskrt\"\n\nvar _ = taskrt.EnqueueRequest{Type: \"shell.exec\"}\n"},
+		},
+		{
+			// 三个信任域（Story 1.23、ADR-012 §2）：Server 代码路径中不得存在加载发行清单私钥的逻辑。
+			name: "Server 代码加载发行清单私钥的函数", gate: "trustdomain", wantRule: "trust-release-key-name", wantText: "发行签名私钥离线",
+			files: map[string]string{"internal/platform/signingkeys/rel.go": "package signingkeys\n\nimport \"os\"\n\nfunc loadReleasePrivateKey(p string) ([]byte, error) { return os.ReadFile(p) }\n"},
+		},
+		{
+			name: "Server 二进制入口引用发行私钥文件", gate: "trustdomain", wantRule: "trust-release-key-literal", wantText: "发行清单私钥",
+			files: map[string]string{"cmd/lingedge-server/rel.go": "package main\n\nvar releaseKeyPath = \"/etc/lingedge/release.key\"\n"},
 		},
 		{
 			name: "字符串拼接的 exec", gate: "shell", wantRule: "shell-exec",

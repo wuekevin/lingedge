@@ -16,6 +16,7 @@ import (
 	auditrepo "github.com/wuekevin/lingedge/internal/platform/audit/repository"
 	"github.com/wuekevin/lingedge/internal/platform/httpx"
 	"github.com/wuekevin/lingedge/internal/platform/server"
+	"github.com/wuekevin/lingedge/internal/platform/signingkeys"
 	"github.com/wuekevin/lingedge/internal/platform/sysconfig"
 	"github.com/wuekevin/lingedge/internal/platform/taskrt/taskapi"
 	"github.com/wuekevin/lingedge/internal/tenant"
@@ -42,6 +43,8 @@ type Assembly struct {
 	Audit  *audit.Writer
 	// Sys 是系统设置模块（Story 1.22）：/admin/settings*、/admin/system/*、/public/*、功能开关（feature.disabled）与 /auth/me 的 features。
 	Sys *sysconfig.Module
+	// Keys 是签名/CA 密钥服务（Story 1.23）：GET /admin/system/signing-keys；Initialize 供 Story 1.24 安装向导调用，Sign 供修订发布（3.x）调用。
+	Keys *signingkeys.Service
 }
 
 // New 创建装配根。
@@ -84,6 +87,11 @@ func (a *Assembly) BuildHooks(d server.Deps) (httpx.Hooks, error) {
 		return httpx.Hooks{}, err
 	}
 	a.Sys = sys
+	keys, err := signingkeys.New(signingkeys.Options{Pool: d.DB, Box: d.Secrets, Audit: aw, IDs: d.IDs, Clock: d.Clock, Log: d.Logger})
+	if err != nil {
+		return httpx.Hooks{}, err
+	}
+	a.Keys = keys
 	m, err := auth.New(context.Background(), auth.Options{
 		Pool: d.DB, Redis: d.Redis, Clock: d.Clock, IDs: d.IDs, Log: d.Logger, Argon2: d.Config.Auth.Argon2, Box: d.Secrets, Audit: aw, Features: sys,
 	})
@@ -110,7 +118,7 @@ func assembleHooks(m auth.Module, t tenant.Module, aw *audit.Writer, sys *syscon
 	return m.Hooks(auth.HooksOptions{Tenants: t.Resolver(), Auditor: aw.Auditor(), Features: sys.Gate()})
 }
 
-// Register 注册全部路由（REST 路由的唯一装配点，Story 1.12）：认证模块的 /auth/* 与 /admin/*、租户模块的 /tenants*、任务中心、审计读取与系统设置。
+// Register 注册全部路由（REST 路由的唯一装配点，Story 1.12）：认证模块的 /auth/* 与 /admin/*、租户模块的 /tenants*、任务中心、审计读取、系统设置与签名密钥元数据（Story 1.23）。
 // 进程装配（server.Run 的 Register）与 `lingedge-server routes` 共用它，因此导出的清单就是真实会被服务的路由集合；
 // 模块实例为空（未经 BuildHooks）时只用于导出清单（ManifestOnly：不需要数据库与 Redis，处理函数不会被调用）。
 func (a *Assembly) Register(r *httpx.Router, deps server.Deps) error {
@@ -134,6 +142,13 @@ func (a *Assembly) Register(r *httpx.Router, deps server.Deps) error {
 			return err
 		}
 	}
+	keys := a.Keys
+	if keys == nil {
+		var err error
+		if keys, err = signingkeys.New(signingkeys.Options{ManifestOnly: true}); err != nil {
+			return err
+		}
+	}
 	var (
 		auditRepo *auditrepo.Repo
 		rec       audit.Recorder
@@ -142,5 +157,5 @@ func (a *Assembly) Register(r *httpx.Router, deps server.Deps) error {
 	if a.Audit != nil { // nil = 仅导出路由清单：处理函数不会被调用
 		auditRepo, rec, withTx = a.Audit.Repo(), a.Audit, deps.DB.WithTx
 	}
-	return errors.Join(m.Register(r), t.Register(r), taskapi.Register(r, deps.Tasks, rec, withTx), auditapi.Register(r, auditRepo), sys.Register(r))
+	return errors.Join(m.Register(r), t.Register(r), taskapi.Register(r, deps.Tasks, rec, withTx), auditapi.Register(r, auditRepo), sys.Register(r), keys.Register(r))
 }

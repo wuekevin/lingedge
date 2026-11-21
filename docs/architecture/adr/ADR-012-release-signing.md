@@ -64,3 +64,8 @@
 - **IMP-18**：签名输入以 tools-design §9 为准回写——清单签名对象为 `manifest.json` 文件原始字节（删除 `canonical_json`），吊销拆分为 `keys.json.revoked_key_ids` 与清单 `revoked_versions`（清单内不含 `revoked_key_ids`），包格式确定为 `.tar.gz`，包内签名对象明确；tools-design §9.6 新增示例向量供两个独立单元（离线签名流水线与 Tools 验签）交叉验证（AC-J-2）。原因：两文档按各自描述实现会互不兼容。
 - **M16**：删除 `--allow-rollback`（Tools 对 sequence 回退是硬失败、退出码 5），`--allow-expired` 改为 `--allow-expired-manifest`，与 tools-design §3/§9.2 一致。
 - **M13 / IMP-05**：§2 三信任域表中“节点 mTLS CA”一行补充 CA/叶证书有效期与分阶段轮换流程，并注明该 CA 同时签发 Server gRPC 叶证书（decisions §8）。
+
+## 修订记录 2026-11-21（Story 1.23）
+
+- **§2 落地为可执行门禁**：「发行签名私钥离线、Server 不持有」不再只是文字约束——`make security` 的 `gates trustdomain` 扫描 Server 代码路径（`internal/`（不含 `internal/tools`）、`cmd/lingedge-server`、`pkg/`）与 Server 示例配置，出现「加载发行清单私钥」的标识符/字符串字面量（含发行清单签名域前缀 `LINGEDGE-MANIFEST-V1`，它只属于 Tools 验签与离线签名流水线）即失败；`tests/security/trustdomain` 对真实编译的 `lingedge-server` 做 `go tool nm` 符号扫描；两处都带负向样本（加入 `loadReleasePrivateKey` 必被抓到）。`signing_keys.purpose` 的 CHECK 只含 `config_signing|mtls_ca|grpc_server`，schema 上也没有发行清单用途。
+- 信任域②③在 Server 的实现见 `internal/platform/signingkeys` 与 `pkg/signing`（节点侧复用的验证库，只依赖标准库）。

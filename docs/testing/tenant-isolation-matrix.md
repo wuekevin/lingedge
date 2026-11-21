@@ -54,6 +54,8 @@
 
 **Story 1.22 说明（系统设置、运行模式、版本、安装记录、公开信息）**：新增的 12 个 operation 都是 `platform`（`/admin/settings*`、`/admin/system/run-mode|version`、`/admin/installations`）或 `public`（`/public/site-info|version`）路由——按本节规则 `platform` 路由不需要登记（由骨架行统一覆盖：租户 Console 会话 401、租户令牌 403、平台主体带 `X-Tenant-ID` 400，骨架对所有已注册 operation 自动执行），`public` 路由不属于租户隔离范围；它们没有租户可寻址的资源。`GET /auth/me`（Exempt）新增的 `features` 对租户可见，其 R-T1 扫描（模块键/能力键为通用词）与「`modules_delivered` 与真实路由一致」由 `tests/integration/sysconfig` 的 `TestMeFeaturesAndCapabilityRegistry` 断言，已加入 `getMe` 的 `Refs`。
 
+**Story 1.23 说明（签名/CA 密钥元数据）**：新增的 `listSigningKeys`（`GET /admin/system/signing-keys`）是 `platform` 路由，按本节规则无需登记 Registry，由骨架行统一覆盖（租户 Console 会话 401、租户令牌 403、平台主体带 `X-Tenant-ID` 400）；`tests/integration/signingkeys` 的 `TestListSigningKeysAPI` 另外显式断言了租户会话 401、租户令牌 403（含带 `X-Tenant-ID`）、无 `system:read` 的平台用户 403、未登录 401 与「只读（无写方法）」，并断言响应只含公钥/指纹白名单字段、不含任何私钥材料。
+
 `ipAllowedOps`（`matrix_test.go`）：审计记录的 `ip` 是租户自己用户的来源地址（AuditLog schema 字段），因此这两个 operation 的响应不做「任何 IP 字面量」检查；节点/出口 IP 仍由内部取值表逐一检查。
 
 ## 3. 响应字段断言（R-T1 / BLK-02）

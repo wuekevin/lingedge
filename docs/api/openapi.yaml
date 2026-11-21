@@ -21625,7 +21625,7 @@ components:
       - components
     SigningKey:
       type: object
-      description: 签名/CA 密钥元数据（私钥永不出库、永不经 API 返回）。
+      description: 签名/CA 密钥元数据（私钥永不出库、永不经 API 返回；只含公钥与指纹）。
       properties:
         key_id:
           type: string
@@ -21634,8 +21634,20 @@ components:
           enum:
           - config_signing
           - mtls_ca
+          - grpc_server
         algorithm:
           type: string
+        public_key:
+          type: string
+          description: 公钥，标准 base64：ed25519 为 32 字节原始公钥；ecdsa_p256 为 PKIX（SPKI）DER。
+        fingerprint:
+          type: string
+          description: 小写十六进制 SHA-256：config_signing 为原始公钥的摘要；mtls_ca/grpc_server 为证书 DER 的摘要（CA 的即 enroll Token 的 ca_fp）。
+        not_after:
+          oneOf:
+          - $ref: '#/components/schemas/Timestamp'
+          - type: 'null'
+          description: 证书到期时间（仅 mtls_ca/grpc_server；config_signing 无过期，R-4）。
         status:
           type: string
           enum:
@@ -21659,6 +21671,9 @@ components:
       - key_id
       - purpose
       - status
+      - algorithm
+      - public_key
+      - fingerprint
     SigningKeyList:
       allOf:
       - $ref: '#/components/schemas/PageMeta'

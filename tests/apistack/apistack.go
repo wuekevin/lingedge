@@ -42,6 +42,7 @@ import (
 	"github.com/wuekevin/lingedge/internal/platform/migrate"
 	"github.com/wuekevin/lingedge/internal/platform/redisx"
 	"github.com/wuekevin/lingedge/internal/platform/server"
+	"github.com/wuekevin/lingedge/internal/platform/signingkeys"
 	"github.com/wuekevin/lingedge/internal/platform/sysconfig"
 	taskrepo "github.com/wuekevin/lingedge/internal/platform/taskrt/repository"
 	"github.com/wuekevin/lingedge/internal/platform/uid"
@@ -91,6 +92,9 @@ type World struct {
 	Tenant tenant.Module
 	// Sys 是系统设置模块（Story 1.22）：设置/运行模式/版本/公开信息路由、功能开关与 /auth/me 的 features（与生产装配同一实现）。
 	Sys *sysconfig.Module
+	// Keys 是签名/CA 密钥服务（Story 1.23，与生产同一实现）；Box 是装配所用的真实信封加密（运行期随机主密钥）。
+	Keys *signingkeys.Service
+	Box  *secretbox.Box
 	// Audit 是真实的审计记录器/钩子（与生产同一实现）；Store 是任务存储。
 	Audit  *audit.Writer
 	Store  *taskrepo.Repo
@@ -160,13 +164,14 @@ func New(t *testing.T, opts ...Options) *World {
 	cfg.Auth.Argon2 = testArgon
 	asm := assembly.New(assembly.Options{ExtraAuditOps: o.ExtraAuditOps, SysCacheTTL: o.SysCacheTTL, SysPublicRateLimit: o.SysPublicRateLimit,
 		DeniedWindow: o.DeniedWindow, DeniedActorCap: o.DeniedActorCap})
-	deps := server.Deps{Tasks: store, DB: w.App, Redis: w.RC, Clock: clock.System(), IDs: gen, Logger: lg, Config: &cfg, Secrets: newBox(t),
+	w.Box = newBox(t)
+	deps := server.Deps{Tasks: store, DB: w.App, Redis: w.RC, Clock: clock.System(), IDs: gen, Logger: lg, Config: &cfg, Secrets: w.Box,
 		Migrations: httpx.MigrationProbeFromApp(w.App, set)}
 	hooks, err := asm.BuildHooks(deps)
 	if err != nil {
 		t.Fatal(err)
 	}
-	w.Auth, w.Tenant, w.Audit, w.Sys = asm.Auth, asm.Tenant, asm.Audit, asm.Sys
+	w.Auth, w.Tenant, w.Audit, w.Sys, w.Keys = asm.Auth, asm.Tenant, asm.Audit, asm.Sys, asm.Keys
 	w.Router, err = httpx.NewRouter(httpx.Options{Logger: lg, IDs: gen, Hooks: hooks, Idempotency: idem, TrustedProxies: cfg.Server.TrustedProxies})
 	if err != nil {
 		t.Fatal(err)

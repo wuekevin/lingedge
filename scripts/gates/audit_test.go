@@ -111,6 +111,22 @@ func TestAuditGateRejectsViolations(t *testing.T) {
 		{"DeniedActions 引用了未声明的常量", func(a *auditInput) {
 			a.Catalog = strings.Replace(a.Catalog, "var DeniedActions = []Action{ActionAccessDenied}", "var DeniedActions = []Action{ActionAccessDenied, ActionGhost}", 1)
 		}, "audit-const-orphan", "ActionGhost"},
+		// 系统发起的动作（Story 1.23）。
+		{"系统发起的动作混进某 operation 的 Catalog", func(a *auditInput) {
+			a.Catalog = strings.Replace(a.Catalog, `{"cancelTask", []Action{ActionTaskCancel}},`, `{"cancelTask", []Action{ActionTaskCancel, ActionSigningKeysInit}},`, 1)
+		}, "audit-system-catalog", "ActionSigningKeysInit"},
+		{"登记了系统发起的动作却没有记录者", func(a *auditInput) {
+			delete(a.Sources, "internal/platform/signingkeys/service.go")
+			for k, v := range a.Sources {
+				a.Sources[k] = strings.ReplaceAll(v, "audit.ActionSigningKeysInit", "audit.ActionTaskCancel")
+			}
+		}, "audit-system-unrecorded", "ActionSigningKeysInit"},
+		{"SystemActions 引用了未声明的常量", func(a *auditInput) {
+			a.Catalog = strings.Replace(a.Catalog, "var SystemActions = []Action{ActionSigningKeysInit}", "var SystemActions = []Action{ActionSigningKeysInit, ActionGhost}", 1)
+		}, "audit-const-orphan", "ActionGhost"},
+		{"系统发起的动作常量没有登记到 SystemActions", func(a *auditInput) {
+			a.Catalog = strings.Replace(a.Catalog, "var SystemActions = []Action{ActionSigningKeysInit}", "var SystemActions = []Action{}", 1)
+		}, "audit-const-orphan", "ActionSigningKeysInit"},
 		{"无法解析的 Go 文件", func(a *auditInput) { a.Sources["internal/x/bad.go"] = "package x\n\nfunc (\n" }, "audit-record-unparseable", "无法解析"},
 		{"openapi 解析为空不得放行", func(a *auditInput) { a.OpenAPI = "openapi: 3.1.0\n" }, "audit-openapi", "解析"},
 	}
