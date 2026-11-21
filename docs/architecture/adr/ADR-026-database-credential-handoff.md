@@ -169,3 +169,16 @@
 - 真实 MySQL（本机，临时 mysqld，非常驻实例）：建账号模式与预建账号模式各一遍；`RETAIN/DISCARD CURRENT PASSWORD` 轮换；`migrate credential init/reset`；§10 的安全断言。
 - 真实 systemd 下 `lingedge` 用户写 `/var/lib/lingedge/server/secrets/`、root 写 `/etc/lingedge/server/migrate.yaml`：ENV-LNX（等待环境验证，汇总于 1.45）。
 - 宝塔：ENV-BT。
+
+## 实现记录（Story 1.24，2026-11-21）
+
+按本 ADR 与「实现指引」落地；与文字描述相比的**实现细节与偏差**（均不改变决策）：
+
+- **向导进度的落点**：`system_installations` 在冻结迁移 000002 里没有独立的 `state` 列，进度存于其 `meta_json["setup"]`（步骤名/布尔/版本号/公开配置 `base_url`/「迁移口令是否自动生成」，**不含任何口令、哈希或其长度**）；进行中行 `status='upgrading'`，完成时置 `installed` 并写 `install_locked_at`。无需新迁移（CC-12 记录）。续做时 database/redis 两步由 `runtime-credentials.json` 的对应段推导，init_db 由 `schema_migrations` 推导，其余由进度行推导。
+- **口令字段在内存里是 `[]byte`**（migrate 口令，用后 `secretbox.Zero`）；请求体由 `encoding/json` 解码成的 `string` 副本无法就地清零（Go 字符串不可变），实现只做到「请求结构体字段置空、不持有引用」，并在文档中如实说明（ADR-026 §10 已声明不做内存取证）。
+- **步骤审计与 audit_logs 的先后**：迁移完成之前 `audit_logs` 不存在，`checks/database/redis` 三步的审计事件在内存缓冲，于 `initialize` 完成后与进度行写入**同一事务**补写（Actor=系统组件 `setup`）；进程在补写前退出则这些事件丢失（同时有不含口令的结构化运行日志）。其后各步的审计与业务写入同一事务（fail-closed）。
+- **setup token 哈希删除**：`/etc/lingedge/server/` 属主是 root 时 `lingedge` 无权 `unlink`——删除失败则退而清空文件内容（属主可写；空文件对校验是非法格式，fail-closed），并提示手工删除；结果消息与日志都会说明。
+- **退出码**：`migrate` 非 TTY 且无任何口令来源时退出码取 `3`（`ExitPrecondition`，与 ADR §4、Tools 退出码表一致；与 `lint` 未通过共用数值 3，二者不会在同一命令里同时出现）。
+- **账号主机部分**固定 `'%'`（迁移 SQL 里不带主机的 `GRANT` 等价于 `'%'`）；`lingedge_app`/`lingedge_maint` 的账号名固定（迁移 lint 只允许授权给这两个名字），请求里的 `username`/`maint_username` 若不是它们则 400。授予 `lingedge_migrate` 的库级权限按字面库名转义下划线（`db\_name`），避免 `_` 通配到别的库。
+- **`db credential rotate` 的重启/健康检查**：Server 没有提权/重启通道，命令分两阶段（阶段一 `RETAIN CURRENT PASSWORD` + 重写文件；阶段二 `--finish` 执行 `DISCARD OLD PASSWORD`），中间由操作者（或 Tools 1.43）重启并确认健康。
+- **未实现/等待环境验证**：真实 systemd 下 `lingedge` 用户写数据目录、root 写 `/etc/lingedge/server/migrate.yaml` 的属主/权限路径（ENV-LNX）；宝塔 MySQL 的默认权限与 socket 可访问性（ENV-BT）；MySQL 8.0.16 最低版本与 Redis <8 的真实拒绝路径（本机只有 8.0.46 与 Redis 8.x，版本判定逻辑与 `INFO server` 解析均有构造响应的单测）；socket 连接（运行期凭据文件只存 host/port，`config.Database` 没有 socket 键，Deferred）。

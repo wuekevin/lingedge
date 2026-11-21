@@ -218,7 +218,7 @@ flowchart LR
 1. 〔待实现〕准备数据库：用独立账号创建 `lingedge_dev` 库（本机 `mysql@8.0`；不使用 root 长期连接）。
 2. `make migrate MIGRATE_ARGS=plan`：查看待执行迁移及其分类（JSON，含 `has_irreversible`），再 `MIGRATE_ARGS="up --host … --database …"`（Story 1.6 已实现）。
 3. `cp configs/server.example.yaml configs/server.local.yaml`（示例与加载器已随 Story 1.4 交付并有测试；示例不含任何口令；本地请把 `server.env` 改为 `dev`，避免与生产 Redis 键空间混用）。数据库/Redis 口令只能经环境变量 `LINGEDGE_DATABASE__PASSWORD` / `LINGEDGE_REDIS__PASSWORD` 或 `password_file`（权限不得允许其他用户访问）提供；〔待实现〕主密钥通过开发用 `KeyProvider`（file，权限 0400，**仅开发用，勿入库**）。
-4. 〔待实现〕`go run ./cmd/lingedge-server --roles=api,grpc,scheduler,worker`；首次启动进入 setup mode，终端打印一次性 setup token（对应 F-8），经向导创建管理员（无默认密码）。
+4. `go run ./cmd/lingedge-server --config configs/server.local.yaml`（Story 1.24 已实现）：无 `install.lock` 且无完成的安装记录时进入 setup mode，仅 `/setup` 与 `/api/v1/public/setup/*` 可用（其余 API 503，默认仅监听 `127.0.0.1:8080`）；setup token 由 Tools 生成并写 `/etc/lingedge/server/setup-token.hash`（开发期可用 `pkg/setuptoken` 的 `Generate`/`WriteHashFile` 自备并通过 `X-Setup-Token` 提交；Tools 的安装联调属 Story 1.35），经向导创建管理员（无默认密码）。也可用无头路径 `lingedge-server setup --from-file <0600 的 YAML>`；`complete` 之后 `/public/setup/*` 永久 410，并在同一进程内切换为正常模式（`--roles=api,grpc,scheduler,worker`）。
 5. 〔待实现〕`pnpm -C frontend dev`（admin / website）。
 6. 〔待实现〕在 Linux 验收机：`lingedge install node` → Admin 创建节点并生成注册 Token → `lingedge node enroll --token …` → Admin 看到节点在线。
 7. 每步完成后如实记录环境与结果；未实现的步骤保持"待实现"标注。

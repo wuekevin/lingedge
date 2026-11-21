@@ -26227,7 +26227,7 @@ components:
       properties:
         installed:
           type: boolean
-          description: install.lock 是否存在；true 后向导接口一律 404
+          description: install.lock 是否存在；true 后向导接口一律 410 setup.already_installed
         steps:
           type: array
           items:
@@ -26371,7 +26371,20 @@ components:
           format: password
           writeOnly: true
           minLength: 12
-          description: 由安装者设定；无任何固定默认口令（NFR-6）
+          description: 由安装者设定；无任何固定默认口令（NFR-6）。服务端另校验强度（12–128 字符；不得含邮箱本地部分或常见弱口令片段；至少三类字符，长度 ≥20 的口令短语至少两类）
+        locale:
+          type: string
+          enum:
+          - zh-CN
+          - en
+          description: 管理员界面语言，缺省 zh-CN（CC-12）
+        enable_totp:
+          type: boolean
+          description: 为 true 时为该管理员绑定 TOTP：首次提交返回密钥与 otpauth URI（one_time_secrets.totp_secret/totp_otpauth_uri，仅一次），随后带 totp_code 再次提交以确认启用并一次性取得恢复码（CC-12）
+        totp_code:
+          type: string
+          pattern: '^[0-9]{6}$'
+          description: 验证器生成的 6 位验证码，仅在 enable_totp=true 的确认提交中使用（CC-12）
       required:
       - email
       - display_name
@@ -26393,6 +26406,9 @@ components:
           enum:
           - zh-CN
           - en
+        timezone:
+          type: string
+          description: 系统默认时区（IANA 名，如 Asia/Shanghai；缺省 UTC）。存储与 API 仍一律 UTC（CC-12）
       required:
       - run_mode
     SetupStepResult:
@@ -26411,11 +26427,25 @@ components:
         one_time_secrets:
           type: object
           readOnly: true
-          description: 仅 setupComplete 在迁移口令由服务端自动生成时返回一次（Cache-Control no-store；不入日志/审计；响应后服务端清零，ADR-026 §5）
+          description: 仅返回一次的机密：setupComplete 在迁移口令由服务端自动生成时返回 migrate_password（Cache-Control no-store；不入日志/审计；响应后服务端清零，ADR-026 §5）；setupCreateAdmin 在绑定 TOTP 时返回 totp_secret/totp_otpauth_uri/recovery_codes（CC-12）
           properties:
             migrate_password:
               type: string
               format: password
+            totp_secret:
+              type: string
+              format: password
+              description: 仅 setupCreateAdmin 在 enable_totp=true 的首次提交返回一次（CC-12）
+            totp_otpauth_uri:
+              type: string
+              format: password
+              description: 与 totp_secret 同时返回一次，供验证器扫描（CC-12）
+            recovery_codes:
+              type: array
+              items:
+                type: string
+                format: password
+              description: 仅 setupCreateAdmin 在确认启用 TOTP 的提交返回一次；库内只存哈希（CC-12）
       required:
       - step
       - ok

@@ -503,7 +503,7 @@ END;
 
 | 项 | 约定 |
 |---|---|
-| 入口 | `lingedge-server migrate plan\|up\|down\|status\|recover\|lint`；开发期 `make migrate MIGRATE_ARGS="status …"`；迁移账号口令只经环境变量 `LINGEDGE_MIGRATE_DB_PASSWORD` 或 `LINGEDGE_MIGRATE_DB_PASSWORD_FILE`（绝对路径、权限 0400/0600），**不经命令行**（AA-7 已定稿：另可来自 root:root 0400 的 `migrate.yaml` 或交互输入，见 ADR-026） |
+| 入口 | `lingedge-server migrate plan\|up\|down\|status\|recover\|lint`；开发期 `make migrate MIGRATE_ARGS="status …"`；迁移账号口令只经环境变量 `LINGEDGE_MIGRATE_DB_PASSWORD` 或 `LINGEDGE_MIGRATE_DB_PASSWORD_FILE`（绝对路径、权限 0400/0600），**不经命令行**（AA-7 已定稿并由 Story 1.24 实现：环境变量 ＞ 口令文件 ＞ root:root 0400 的 `migrate.yaml`（`migrate credential init\|reset` 写入）＞ 交互输入；连接目标只取命令行/环境变量、`migrate.yaml`、root 属主的 `--config`，绝不取自 `runtime-credentials.json`，见 ADR-026） |
 | `plan` | 输出 JSON：每项 `version/name/file/class/has_down/checksum`，汇总 `has_irreversible`、`max_class`；连库时只列待执行迁移，并像 `up` 一样先校验完整性（dirty/校验和/乱序/二进制比数据库旧时拒绝，另一个 migrate 正在运行时返回退出码 7）——升级前的 plan 不应给出一份 `up` 必然拒绝的计划；不连库（`--offline` 或无连接选项）列全部内嵌迁移；`has_irreversible` 是 Tools 升级前展示与强制备份的唯一判据 |
 | `up` | 先 lint（未通过即拒绝）→ `SELECT VERSION()` ≥ 8.0.16 → 账号探针（**GRANT OPTION**：向探针表授权；`@@log_bin=1 且 trust=0` 时另建探针触发器，ERROR 1419 即拒绝并给出两种处置）→ 迁移互斥 → 校验 dirty/未知迁移/校验和/乱序 → 逐个迁移「标记 running → goose 执行 → 标记 applied」；含 `irreversible` 的待执行集须带 `--accept-irreversible`（退出码 9），否则**一个迁移都不执行** |
 | `down` | 只回退 `reversible`；缺省 1 步，`--steps N`/`--to N`/`--all`；先整体校验再执行，路径上有 `expand`/`irreversible` 则整体拒绝（`expand` 的即时回滚只需切回旧二进制，ADR-013 §1） |

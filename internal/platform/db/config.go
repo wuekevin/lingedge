@@ -26,7 +26,7 @@ const (
 )
 
 // Config 描述一个连接池的目标与限额。口令用 config.Secret（任何格式化/日志/序列化都是 ***）；
-// 三类账号各自持有一份 Config，彼此独立（口令落点见 AA-7，不在本 Story）。
+// 三类账号各自持有一份 Config，彼此独立（口令落点见 ADR-026：app/maint 经 dbcred 合并进配置；migrate 只在内存或 root 侧 migrate.yaml）。
 type Config struct {
 	// 连接目标：Socket 非空时走 Unix 域套接字（与 Host/Port 互斥）。
 	Host   string
@@ -78,19 +78,19 @@ func PoolDefaults(r Role) PoolLimits {
 	}
 }
 
-// AppConfigFrom 由服务端配置（server.yaml 的 database 节，运行期 app 账号）生成 app 池配置。
-// maint 与 migrate 的凭据不在 server.yaml（AA-7 尚未定稿），由调用方单独提供。
+// AppConfigFrom 由**合并后**的服务端配置（server.yaml 的 database 节 + 显式口令通道 + 运行期凭据文件，见 dbcred.Merge）生成 app 池配置。
+// 调用方必须先经 dbcred.Merge（server.Run 与各子命令共用同一合并入口）；本函数只做字段映射。migrate 凭据不在此处（ADR-026）。
 func AppConfigFrom(d config.Database) Config {
-	return Config{Host: d.Host, Port: d.Port, Name: d.Name, User: d.User, Password: d.Password}
+	return Config{Host: d.Host, Port: d.Port, Name: d.Name, User: d.User, Password: d.Password, TLS: d.TLS}
 }
 
-// MaintConfigFrom 由服务端配置生成 maint 池配置；维护账号未配置（用户名或口令缺失）时 ok=false。
+// MaintConfigFrom 由合并后的服务端配置生成 maint 池配置；维护账号未配置（用户名或口令缺失）时 ok=false。
 // 连接目标（host/port/name）与 app 相同，仅账号与口令不同。
 func MaintConfigFrom(d config.Database) (cfg Config, ok bool) {
 	if !d.Maint.Configured() {
 		return Config{}, false
 	}
-	return Config{Host: d.Host, Port: d.Port, Name: d.Name, User: d.Maint.User, Password: d.Maint.Password}, true
+	return Config{Host: d.Host, Port: d.Port, Name: d.Name, User: d.Maint.User, Password: d.Maint.Password, TLS: d.TLS}, true
 }
 
 var (

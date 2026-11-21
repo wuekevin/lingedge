@@ -92,6 +92,11 @@ var (
 	// 命令行标志：「--<口令类名称> <值>」空格分隔形态（等号形态已由键值规则处理）。
 	reCLIFlag = regexp.MustCompile(`(?i)(--(?:password|passwd|passphrase|secret|token|api-key|private-key)[ \t]+)[^\s-][^\s]*`)
 
+	// SQL 的口令字面量（ADR-026 §10）：`CREATE/ALTER USER … IDENTIFIED [WITH plugin] BY '<口令>'`（含 `RETAIN CURRENT PASSWORD` 前的字面量）与 `SET PASSWORD … = '<口令>'`。
+	// 向导按设计不会把这类语句写进任何日志/错误，这是兜底：即便有人误把语句文本放进日志，口令字面量也会被抹掉。字面量里的 '' 与 \' 转义被整体吞掉。
+	reSQLIdentifiedBy = regexp.MustCompile(`(?i)(\bIDENTIFIED\s+(?:WITH\s+\w+\s+)?BY\s+)'(?:[^'\\]|\\.|'')*'`)
+	reSQLSetPassword  = regexp.MustCompile(`(?i)(\bSET\s+PASSWORD\b[^=\n]{0,80}=\s*)'(?:[^'\\]|\\.|'')*'`)
+
 	// Bearer 凭据。
 	reBearer = regexp.MustCompile(`(?i)\b(bearer\s+)[A-Za-z0-9\-._~+/]{8,}=*`)
 
@@ -119,6 +124,8 @@ func String(s string) string {
 	s = reCookieHeader.ReplaceAllString(s, "${1}"+Mask)
 	s = reSessionCookie.ReplaceAllString(s, "${1}"+Mask)
 	s = maskKeyValues(s)
+	s = reSQLIdentifiedBy.ReplaceAllString(s, "${1}'"+Mask+"'")
+	s = reSQLSetPassword.ReplaceAllString(s, "${1}'"+Mask+"'")
 	s = reURLPassword.ReplaceAllString(s, "${1}"+Mask+"${3}")
 	s = reMySQLDSN.ReplaceAllString(s, "${1}"+Mask+"${3}")
 	s = reURLTokenUser.ReplaceAllString(s, "${1}"+Mask+"${3}")

@@ -10,9 +10,12 @@ import (
 	"time"
 
 	"github.com/wuekevin/lingedge/cmd/lingedge-server/assembly"
+	"github.com/wuekevin/lingedge/internal/platform/clock"
 	"github.com/wuekevin/lingedge/internal/platform/config"
 	"github.com/wuekevin/lingedge/internal/platform/logx"
+	"github.com/wuekevin/lingedge/internal/platform/migrate"
 	"github.com/wuekevin/lingedge/internal/platform/server"
+	"github.com/wuekevin/lingedge/internal/platform/setup"
 )
 
 // EnvConfig 是 --config 的环境变量形态（flag 优先）。
@@ -33,7 +36,9 @@ func loadConfig(path string, environ []string, runtime bool) (*config.Config, er
 	if path == "" {
 		path = DefaultConfigPath
 	}
-	return config.Load(path, config.Options{Environ: environ, EnvIgnore: []string{EnvConfig}, RequireRuntime: runtime})
+	// LINGEDGE_MIGRATE_*（迁移账号/管理员凭据来源，ADR-026 §4）不是配置覆盖项。
+	ignore := []string{EnvConfig, migrate.EnvUser, migrate.EnvDBPass, migrate.EnvDBPassFile, migrate.EnvMigrateYAML, migrate.EnvAdminUser, migrate.EnvAdminPass, migrate.EnvAdminPassFile}
+	return config.Load(path, config.Options{Environ: environ, EnvIgnore: ignore, RequireRuntime: runtime})
 }
 
 // serveMain 解析运行参数并运行 Server，直到收到 SIGTERM/SIGINT 并优雅停机（退出码 0）。
@@ -59,9 +64,11 @@ func serveMain(args []string, stderr io.Writer, environ []string) int {
 		_, _ = fmt.Fprintf(stderr, "%s: --shutdown-timeout 必须在 (0, 10m]\n", name)
 		return 2
 	}
-	cfg, err := loadConfig(*cfgPath, environ, true)
+	// 运行期必填项（数据库/Redis 连接目标与口令）在 setup mode 下尚不存在，且正常模式下可由运行期凭据文件合并提供（ADR-026）：
+	// 加载时只做取值校验，必填性由 server.Run 在合并之后判定（ValidateRuntime）。
+	cfg, err := loadConfig(*cfgPath, environ, false)
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "%s: 拒绝启动：配置无效（口令只经环境变量 LINGEDGE_DATABASE__PASSWORD 或 database.password_file 提供；参考 configs/server.example.yaml）\n%v\n", name, err)
+		_, _ = fmt.Fprintf(stderr, "%s: 拒绝启动：配置无效（口令不得写在 server.yaml：显式通道为环境变量 LINGEDGE_DATABASE__PASSWORD / database.password_file，缺省由安装向导写入运行期凭据文件；参考 configs/server.example.yaml）\n%v\n", name, err)
 		return 1
 	}
 	logger, err := logx.New(logx.Options{Level: cfg.Log.Level, Format: cfg.Log.Format, Output: stderr})
@@ -77,6 +84,22 @@ func serveMain(args []string, stderr io.Writer, environ []string) int {
 		<-ctx.Done()
 		stop()
 	}()
+
+	// setup mode 判定（Story 1.24 AC1）：无 install.lock 且无完成的 system_installations → 进入 setup mode；向导完成后在同一进程内切换为正常模式。
+	box, closeBox := openBoxQuiet(cfg)
+	installed := setup.DetectInstalled(ctx, cfg, box, logger, clock.System())
+	closeBox()
+	if !installed {
+		done, err := server.RunSetup(ctx, server.SetupOptions{Config: cfg, Logger: logger, NewAdmin: assembly.NewSetupAdmin, ShutdownTimeout: *timeout})
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "%s: %v\n", name, err)
+			return 1
+		}
+		if !done { // 收到停机信号，安装未完成
+			return 0
+		}
+		// 向导完成：沿用同一个信号 ctx（尚未被取消）继续以正常模式装配，不重新注册信号处理。
+	}
 
 	tasks, err := assembleTaskRegistry()
 	if err != nil {

@@ -211,6 +211,10 @@ updated: 2026-11-16
 | `origin.group_inconsistent` | 400 | 同一源站组内 `protocol/tls_verify/sni` 必须一致（ADR-004 §6） |
 | `setup.token_invalid` | 401 | 安装向导令牌错误 |
 | `setup.already_installed` | 410 | 已存在 install.lock，向导接口永久不可用（与 tools-design §13 一致） |
+| `setup.insecure_transport` | 400 | 携带口令的向导接口在监听非回环地址且请求非 TLS 时拒绝（CC-11、ADR-026 §10） |
+| `setup.database_not_empty` | 400 | 目标库不为空，向导不静默覆盖（FR-6） |
+| `setup.precheck_failed` | 400 | MySQL/Redis 预检未通过（版本 ≥8.0.16/Redis ≥8、utf8mb4、sql_mode、binlog 触发器权限 ERROR 1419、账号权限），`details` 说明原因与处置（CC-12） |
+| `setup.mode_active` | 503 | Server 处于 setup mode（未完成安装）：除 `/setup` 与 `/public/setup/*` 外所有接口 503（Story 1.24） |
 | `tenant.quota_exceeded` | 403 | 租户配额超限 |
 | `internal.error` | 500 | 内部错误（凭 request_id 排查） |
 

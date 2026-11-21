@@ -184,6 +184,32 @@ func TestEveryAuditedOperationWritesExactlyOneAuditRow(t *testing.T) {
 			catalogActions = append(catalogActions, string(a))
 		}
 	}
+	// 安装向导（Story 1.24）的 8 个 operation 只存在于 setup mode 的路由器上（正常模式下恒 410，apistack 的进程内路由里不会被驱动）：它们的动作
+	// （setup.*，Actor=系统组件 setup）由 tests/integration/setup 驱动并逐个断言（TestFullWizardCreateAccountsMode：每个动作的审计行数与 Actor），
+	// 这里只排除「所有动作都以 setup. 开头」的 operation，其余 31 个照旧必须被本用例驱动。
+	isSetupOp := func(op audit.Op) bool {
+		for _, a := range op.Actions {
+			if !strings.HasPrefix(string(a), "setup.") {
+				return false
+			}
+		}
+		return len(op.Actions) > 0
+	}
+	driven := 0
+	for _, op := range audit.Catalog {
+		if !isSetupOp(op) {
+			driven++
+		}
+	}
+	catalogActions = catalogActions[:0]
+	for _, op := range audit.Catalog {
+		if isSetupOp(op) {
+			continue
+		}
+		for _, a := range op.Actions {
+			catalogActions = append(catalogActions, string(a))
+		}
+	}
 	for _, a := range catalogActions {
 		if !seen[a] {
 			t.Errorf("Catalog 动作 %s 没有被本用例驱动（补驱动，不得放过）", a)
@@ -192,8 +218,8 @@ func TestEveryAuditedOperationWritesExactlyOneAuditRow(t *testing.T) {
 			t.Errorf("Catalog 动作 %s 声明了审计却从未被记录", a)
 		}
 	}
-	if n := len(audit.Catalog); n != 31 {
-		t.Errorf("Catalog 应登记 31 个 operation（与 x-audit: true 的已实现路由一致）: %d", n)
+	if driven != 31 {
+		t.Errorf("Catalog 里由本用例驱动的 operation 应为 31 个（与 x-audit: true 的已实现路由一致，不含 setup 向导的 8 个）: %d", driven)
 	}
 	if n := w.Audit.Missing(); n != 0 {
 		t.Errorf("运行期兜底：声明了审计却没有记录的请求数应为 0: %d", n)

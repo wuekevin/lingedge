@@ -60,7 +60,7 @@ development_status:
   1-22-系统设置-运行模式开关与能力注册表: review   # 开发完成、本机门禁全绿（真实 MySQL/Redis 临时实例的真实进程内装配，无 Mock：internal/platform/sysconfig——键注册表（27 个业务键 + 4 个只读能力状态键，类型/范围/枚举/格式校验、默认值、分组、敏感、可否经通用 PATCH）、类型化设置服务（整批校验、变更与审计同一事务、死锁/重复键整体重试；注入审计失败的 4 个写 operation 均 500 + 不残留 + 重试恰好一条审计）、敏感键 mail.smtp_password 经 secretbox 信封加密落 value_enc（AAD=表|列|uid，库扫描无明文，读取脱敏，密文挪行解密失败）；/admin/settings*（含 brand、ssrf-allowlist）、/admin/system/run-mode（x-reauth，行锁串行化并发切换：16 并发全部成功且审计 from/to 成链，无需迁移，立即生效）、/admin/system/version（真实 pkg/version + 迁移探针）、/admin/installations、/public/site-info、/public/version（匿名、字段白名单、leakguard/运行期秘密扫描、Cache-Control、按 IP 限流 429）共 12 个 operation（无 501 占位，响应经 kin-openapi 校验）；feature.disabled：httpx RouteMeta.Feature(x-feature) + FeatureGate + 中间件（认证后、授权前；开关读取失败 500、未装配默认拒绝），商业类 operation（billing 标签 43 个 + register/listPublicPlans/createTenant）契约加 x-feature: commercial（CC-9，仅加法），CI 新增 checkFeatureTags（带负向样本）与清单 feature 一致性，M1 用测试专用合成路由端到端验证（自用 403、商业放行、切换即时）；能力注册表：DeliveredModules + CheckModules 对真实路由集合核对（不虚报/不漏登/不半交付），高级能力 http3|l2_cache|dnssec|edge_compute 恒 unverified、置为 available 被拒（PATCH/服务层，带外写入不生效）；/auth/me 返回 features{run_mode,modules_delivered,capability_status} 并改走 permission_version 缓存（关闭 1.18 遗留）；认证模块键/默认值/范围别名到注册表（单一来源，三项一致性测试）；无迁移变更）；等待环境验证见下方 1-22 块
   1-22b-遗留项清理: review   # 开发完成（本机门禁见 docs/bmad/stories/1-22b-遗留项清理.md）：metrics.listen 仅回环（config 层拒绝）、server.trusted_proxies 配置化、装配根收敛为 cmd/lingedge-server/assembly、租户视角审计操作者展示名、令牌创建配额硬上限、被拒绝类审计（access.denied，防刷、best-effort）、设置跨键并发锁、setting_change 广播、安全敏感设置键分级再认证；无新迁移/无契约变更
   1-23-签名与-ca-密钥初始化-信任域②③: review   # 开发完成、本机门禁见 docs/bmad/stories/1-23-签名与-ca-密钥初始化-信任域②③.md：internal/platform/signingkeys（Initialize 幂等/并发安全/缺主密钥拒绝/与审计及 deploy.lineage 同事务，Ed25519 配置签名密钥 + ECDSA P-256 私有 CA 默认 10 年可配 5–10 年 + Server gRPC 叶证书 serverAuth/SAN/90 天，私钥信封加密 AAD=表|列|uid 用后清零）、pkg/signing（节点侧复用：修订签名 LINGEDGE-REVISION-V1 无过期、链式 keyset 防回滚/断链/篡改、指纹、CA 剩余有效期检查供 doctor）、GET /admin/system/signing-keys（仅公钥与指纹）、gates trustdomain + 二进制符号扫描（Server 无发行私钥加载逻辑）；无新迁移（lingedge_app 权限已足够，AA-7 无依赖）、CC-10 仅加法；setup 子命令未注册（1.24）
-  1-24-server-setup-mode-与-web-安装向导后端-含-setup-token: backlog
+  1-24-server-setup-mode-与-web-安装向导后端-含-setup-token: review   # 开发完成、本机门禁见 docs/bmad/stories/1-24-*.md：internal/platform/setup（向导 Service：与传输无关，HTTP 与 setup --from-file 共用）+ dbcred（runtime-credentials.json：信封加密/0600/原子写/启动校验/Merge/重包装）+ migrate.Window（migrate 池仅 setup 窗口可构造，complete 后 ErrWindowClosed）+ migrate credential init|reset + db credential rotate（RETAIN/DISCARD）；setup mode（无 install.lock 且无完成记录：仅 /setup 与 /public/setup/*，其余 503，默认 127.0.0.1:8080，完成后同进程切换正常模式）、X-Setup-Token（常量时间比对+节流）、非回环非 TLS 拒绝携带口令接口、目标库必须为空、MySQL ≥8.0.16/utf8mb4/sql_mode/binlog 触发器 1419 预检、Redis ≥8、18 个迁移逐个显示分类、管理员口令强度+可选 TOTP、完成事务+最后写 install.lock+删 token+并发 complete 仅一个成功、中断续做；无新迁移，契约加法 CC-12；等待环境验证：ENV-LNX/ENV-BT/MySQL 8.0.16/Redis<8 真实拒绝
   1-25-tools-骨架-命令树-退出码-json-envelope-非交互约定: backlog
   1-26-security-叶子包-安全解压-安全执行-脱敏-权限: backlog
   1-27-manifest-与发行信任域①-验签-sequence-吊销-密钥轮换: backlog
@@ -468,7 +468,7 @@ sprint_plan:
       - key: "1-24-server-setup-mode-与-web-安装向导后端-含-setup-token"
         id: "1.24"
         depends_on: ["1.13", "1.20", "1.22", "1.23"]
-        env: "本机 MySQL + Redis；宝塔 MySQL 场景需 ENV-BT"
+        env: "本机 MySQL + Redis；宝塔 MySQL 场景需 ENV-BT；真实 systemd 属主/权限路径需 ENV-LNX"
         waiting_env_verification: true
       - key: "1-25-tools-骨架-命令树-退出码-json-envelope-非交互约定"
         id: "1.25"
@@ -681,9 +681,11 @@ environment_verification:   # 『等待环境验证』登记（验证人/日期�
     verified_by: ""
     verified_on: ""
   1-24-server-setup-mode-与-web-安装向导后端-含-setup-token:
-    status: not_started
-    required_env: "本机 MySQL + Redis；宝塔 MySQL 场景需 ENV-BT"
-    condition: "本机真实 MySQL/Redis 路径完成即可验证主体；宝塔 MySQL 专用库创建场景待 ENV-BT；AA-7 凭据落点（ADR-026）在真实 systemd 下 lingedge 用户写 /var/lib/lingedge/server/secrets、root 写 migrate.yaml 的权限路径待 ENV-LNX（本机仅验证权限/属主判定逻辑）。"
+    status: partial
+    required_env: "本机 MySQL + Redis；宝塔 MySQL 场景需 ENV-BT；真实 systemd 下属主/权限路径需 ENV-LNX；MySQL 8.0.16；Redis <8 实例"
+    condition: "本机通过仅代表 macOS + 8.0.46 临时 mysqld（log_bin=ON/trust=0，另起 NoBinlog/Trust 实例）+ Redis 8.x 临时实例 + 单用户（非 root）下的行为；宝塔 MySQL 专用库创建场景待 ENV-BT；AA-7 凭据落点（ADR-026）在真实 systemd 下 lingedge 用户写 /var/lib/lingedge/server/secrets、root 写 /etc/lingedge/server/migrate.yaml、root 运行时对 --config/migrate.yaml 的属主与权限判定待 ENV-LNX（本机仅验证权限位与当前用户属主判定逻辑）；MySQL 8.0.16 最低版本与 Redis <8 的真实拒绝待环境（版本判定/INFO 解析有构造输入单测，未伪造真实结果）。"
+    done_locally: "make lint security gate-selftest race vuln contract-check build verify-build migrate-test 全绿：见 docs/bmad/stories/1-24-*.md（完整向导端到端含 TOTP/18 个迁移/三类账号负向权限/凭据文件转储与权限、抢占与节流、传输安全、非空库、MySQL 预检各分支含 ERROR 1419、Redis 步骤、每步后重启续做、并发 complete、--from-file 清理与残留、db credential rotate 双口令、migrate credential init|reset 与目标信任规则、真实进程 setup mode 生命周期含 SIGKILL 续做与 lock 自愈、G-5 注入扫描、G-6 无豁免）。"
+    pending: "① ENV-LNX：真实 systemd/root 属主文件路径；② ENV-BT：宝塔 MySQL 专用库与账号；③ MySQL 8.0.16 实例重跑 tests/integration/setup 与 make migrate-test；④ Redis <8 实例的真实拒绝；⑤ 向导前端 SPA（1.37）、secrets.rewrap 任务接线（Tools 密钥轮换/备份 Story）、Tools 写哈希文件（1.35）。"
     verified_by: ""
     verified_on: ""
   1-26-security-叶子包-安全解压-安全执行-脱敏-权限:

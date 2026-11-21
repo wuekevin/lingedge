@@ -6,6 +6,12 @@
 #       1) 环境变量  LINGEDGE_DATABASE__PASSWORD / LINGEDGE_REDIS__PASSWORD
 #       2) 配置键    database.password_file / redis.password_file，指向只含口令的文件
 #          （绝对路径；权限不得允许「其他用户」访问，例如 root:lingedge 0440；文件末尾换行会被忽略）
+#       3) 缺省（推荐）：安装向导把 lingedge_app/lingedge_maint/Redis 口令以信封加密写入运行期凭据文件
+#          secrets.runtime_credentials_file（缺省 <data_dir>/secrets/runtime-credentials.json，lingedge:lingedge 0600），
+#          上面两种显式通道给出的值优先于它（ADR-026）。向导尚未运行（无 install.lock）时 Server 进入 setup mode，此时本文件
+#          不需要任何 database/redis 配置。lingedge_migrate 的口令不在这里，见 docs/operations/secrets.md §8。
+#   - setup token 的哈希文件（缺省 /etc/lingedge/server/setup-token.hash，由 Tools 生成）可用 secrets.setup_token_hash_file 改路径；
+#     它只在 setup mode 读取，向导完成后被删除（Story 1.24）。
 #   - 主密钥 master.key 不在此文件中，由 Tools 安装步骤生成并经 systemd LoadCredential 提供（ADR-011）。
 # 任何键都可用环境变量覆盖：LINGEDGE_<节>__<键>（双下划线分隔层级，全大写），例如 LINGEDGE_HTTP__LISTEN。
 # 配置中出现未知键、重复键、类型不符会被拒绝，错误信息只含键路径、不回显取值。
@@ -40,10 +46,12 @@ database:
   port: 3306
   name: lingedge
   user: lingedge_app
-  # 口令：见文件头说明（password_file 或 LINGEDGE_DATABASE__PASSWORD）。
+  # 口令：见文件头说明（password_file 或 LINGEDGE_DATABASE__PASSWORD；缺省由安装向导写入的运行期凭据文件提供）。
+  # TLS 模式（可选；非回环主机必须显式设置）：true | false | skip-verify | preferred；缺省由运行期凭据文件提供。
+  # tls: preferred
   # 维护账号（可选，Story 1.15）：Scheduler 的 partition.maintain 用它对分区表做 REORGANIZE PARTITION（滚动预建未来分区，database/README §5.1）。
   # 不配置则该作业明确跳过并持续告警（audit_logs 等将写入 pmax 兜底分区，不影响写入但分区不再滚动）。
-  # 口令同样只能经环境变量 LINGEDGE_DATABASE__MAINT__PASSWORD 或 maint 下的口令文件键提供（见文件头说明）。
+  # 口令同样只能经环境变量 LINGEDGE_DATABASE__MAINT__PASSWORD 或 maint 下的口令文件键显式提供；缺省由安装向导写入的运行期凭据文件提供（见文件头说明）。
   # maint:
   #   user: lingedge_maint
 

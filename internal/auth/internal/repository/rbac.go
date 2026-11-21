@@ -134,11 +134,11 @@ func (r *Repo) UserPlatformRoleCodes(ctx context.Context, userID uint64) ([]stri
 	return codes, err
 }
 
-// InsertPlatformUser 创建平台用户（must_change_password=1：创建后首次登录强制改密）；邮箱冲突返回 db.IsDuplicate 为真的错误。
+// InsertPlatformUser 创建平台用户（缺省 must_change_password=1：创建后首次登录强制改密；NewUser.KeepPassword 为真时为 0，用于安装向导的本人设定口令）；邮箱冲突返回 db.IsDuplicate 为真的错误。
 // lingedge:platform-table=users
 func (r *Repo) InsertPlatformUser(ctx context.Context, u domain.NewUser) (uint64, error) {
 	res, err := r.ex(ctx).Exec(ctx, db.Q(`INSERT INTO users (uid, created_at, user_type, email, display_name, password_hash, status, locale, must_change_password)
-		VALUES (?, ?, 'platform', ?, ?, ?, 'active', ?, 1)`), u.UID, u.Now, u.Email, u.DisplayName, u.PasswordHash, u.Locale)
+		VALUES (?, ?, 'platform', ?, ?, ?, 'active', ?, ?)`), u.UID, u.Now, u.Email, u.DisplayName, u.PasswordHash, u.Locale, !u.KeepPassword)
 	if err != nil {
 		return 0, err
 	}

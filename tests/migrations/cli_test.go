@@ -136,7 +136,8 @@ func TestLingedgeServerBinaryMigrateSubcommand(t *testing.T) {
 	if code != 0 || json.Unmarshal([]byte(out), &p) != nil || p.Mode != "all" {
 		t.Fatalf("离线 plan: %d %s %s", code, out, errs)
 	}
-	if code, _, errs := run(nil, "migrate", "up", "--host", e.inst.Host(), "--database", e.dbName); code != migrate.ExitFailure || !strings.Contains(errs, migrate.EnvDBPass) {
+	// ADR-026 §4：非交互且无任何口令来源 → 退出码 3（前置条件），并说明环境变量与 credential init。
+	if code, _, errs := run(nil, "migrate", "up", "--host", e.inst.Host(), "--database", e.dbName); code != migrate.ExitPrecondition || !strings.Contains(errs, migrate.EnvDBPass) {
 		t.Fatalf("缺口令: %d %s", code, errs)
 	}
 	// 嵌入的迁移（当前尚无，1.7 起落库）：连库 up/status 都应成功且不改动业务表。

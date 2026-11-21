@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>凌界云 · 安装向导</title>
+<style>
+  body{font:16px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif;max-width:46rem;margin:3rem auto;padding:0 1rem;color:#1f2937}
+  code{background:#f3f4f6;padding:.1rem .35rem;border-radius:.25rem}
+  .note{border-left:4px solid #2563eb;background:#eff6ff;padding:.75rem 1rem;margin:1.5rem 0}
+  ol li{margin:.35rem 0}
+</style>
+</head>
+<body>
+<h1>凌界云 LingEdge · 安装向导</h1>
+<p>Server 正处于 <strong>setup mode</strong>：尚未完成安装，除本页与 <code>/api/v1/public/setup/*</code> 外所有接口均返回 503。</p>
+<div class="note">
+  向导的图形界面随 Admin 前端交付（Story 1.37）。本页是内嵌的最小占位页；后端接口已完整可用，所有接口都需要请求头
+  <code>X-Setup-Token</code>（安装器在终端一次性显示的 setup token）。默认只监听 <code>127.0.0.1:8080</code>，远程访问请使用 SSH 隧道。
+</div>
+<h2>步骤</h2>
+<ol>
+  <li>环境检查 <code>POST /api/v1/public/setup/checks</code></li>
+  <li>MySQL <code>PUT /api/v1/public/setup/database</code>（可用临时管理员凭据创建专用库与三类账号）</li>
+  <li>Redis <code>PUT /api/v1/public/setup/redis</code></li>
+  <li>数据库初始化 <code>POST /api/v1/public/setup/initialize</code></li>
+  <li>创建管理员 <code>POST /api/v1/public/setup/admin</code>（口令由你设定，无任何默认口令）</li>
+  <li>系统基础配置 <code>PUT /api/v1/public/setup/system</code></li>
+  <li>内部身份与密钥 <code>POST /api/v1/public/setup/keys</code></li>
+  <li>完成 <code>POST /api/v1/public/setup/complete</code></li>
+</ol>
+<p>也可以使用无头路径：<code>lingedge-server setup --from-file &lt;0600 的 YAML&gt;</code>。进度查询：<code>GET /api/v1/public/setup/status</code>。</p>
+</body>
+</html>

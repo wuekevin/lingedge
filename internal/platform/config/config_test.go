@@ -797,3 +797,33 @@ func TestTrustedProxiesConfig(t *testing.T) {
 		}
 	}
 }
+
+// Story 1.24（CC-11/CC-12）：secrets.runtime_credentials_file 与 database.tls。
+func TestRuntimeCredentialsFileAndDatabaseTLSKeys(t *testing.T) {
+	base := "server:\n  env: test\n"
+	cfg, err := Parse([]byte(base+"secrets:\n  runtime_credentials_file: /var/lib/lingedge/server/secrets/rc.json\ndatabase:\n  tls: preferred\n"), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Secrets.RuntimeCredentialsFile != "/var/lib/lingedge/server/secrets/rc.json" || cfg.Database.TLS != "preferred" {
+		t.Errorf("新键应被解析: %+v %+v", cfg.Secrets, cfg.Database)
+	}
+	for name, y := range map[string]string{
+		"相对路径":     "secrets:\n  runtime_credentials_file: secrets/rc.json\n",
+		"含 .. 的路径": "secrets:\n  runtime_credentials_file: /var/lib/../etc/rc.json\n",
+		"非法 tls":   "database:\n  tls: maybe\n",
+	} {
+		if _, err := Parse([]byte(base+y), Options{}); err == nil {
+			t.Errorf("%s 应被拒绝", name)
+		}
+	}
+	// 环境变量覆盖（LINGEDGE_<节>__<键>）。
+	cfg, err = Parse([]byte(base), Options{Environ: []string{"LINGEDGE_SECRETS__RUNTIME_CREDENTIALS_FILE=/x/y.json", "LINGEDGE_DATABASE__TLS=true"}})
+	if err != nil || cfg.Secrets.RuntimeCredentialsFile != "/x/y.json" || cfg.Database.TLS != "true" {
+		t.Errorf("环境变量应能覆盖新键: %v %+v", err, cfg)
+	}
+	// 缺省：不设置时为空（缺省路径由 dbcred.Path 取 <data_dir>/secrets/runtime-credentials.json）。
+	if cfg, err := Parse([]byte(base), Options{}); err != nil || cfg.Secrets.RuntimeCredentialsFile != "" || cfg.Database.TLS != "" {
+		t.Errorf("缺省应为空: %v", err)
+	}
+}

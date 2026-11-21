@@ -25,6 +25,10 @@ const (
 	KeyDocsURL          = "general.docs_url"
 	KeyStatusURL        = "general.status_url"
 	KeyLocales          = "general.locales"
+	// KeyBaseURL 是 Server 的公开 URL（安装向导「系统基础配置」，Story 1.24）：enroll Token 与 gRPC 叶证书 SAN 的 server_url 来源。
+	KeyBaseURL = "general.base_url"
+	// KeyTimezone 是系统默认时区（IANA 名；安装向导设置，展示与调度默认值，存储与 API 仍一律 UTC，NFR/database/README §2.2）。
+	KeyTimezone = "general.timezone"
 
 	KeyBrandName         = "brand.name"
 	KeyBrandNameEN       = "brand.name_en"
@@ -129,7 +133,7 @@ type Def struct {
 	MaxItems int
 	// Nullable：允许 null（= 恢复默认）之外还接受空字符串以外的「无值」语义（TString 的 URL/uid 键：默认 null）。
 	Nullable bool
-	// Format 是 TString 的附加格式：url | email | color | uid | ""。
+	// Format 是 TString 的附加格式：url | email | color | uid | timezone | ""。
 	Format string
 	// Sensitive：值经信封加密落 value_enc，读取一律脱敏为 {"configured": bool}。
 	Sensitive bool
@@ -168,6 +172,7 @@ var reauthRequiredKeys = map[string]bool{
 	KeyRetentionAuditDays: true, KeyRetentionLoginDays: true,
 	KeyRegistrationOpen: true,
 	KeyGRPCSANExtra:     true, // 改变节点 mTLS 信任的 Server 叶证书身份范围
+	KeyBaseURL:          true, // server_url：节点注册令牌与 gRPC 叶证书的信任边界
 }
 
 func secs(d time.Duration) int64 { return int64(d / time.Second) }
@@ -193,6 +198,8 @@ func buildDefs() []Def {
 		{Key: KeyConsoleURL, Group: GroupGeneral, Type: TString, Default: nil, Nullable: true, MaxLen: 512, Format: "url", Patchable: true, Doc: "Console 入口 URL（已配置 = 控制台已安装）"},
 		{Key: KeyDocsURL, Group: GroupGeneral, Type: TString, Default: nil, Nullable: true, MaxLen: 512, Format: "url", Patchable: true, Doc: "文档站 URL"},
 		{Key: KeyStatusURL, Group: GroupGeneral, Type: TString, Default: nil, Nullable: true, MaxLen: 512, Format: "url", Patchable: true, Doc: "状态页 URL"},
+		{Key: KeyBaseURL, Group: GroupGeneral, Type: TString, Default: nil, Nullable: true, MaxLen: 512, Format: "url", Patchable: true, Doc: "Server 公开 URL（enroll Token 与 gRPC 叶证书 SAN 的 server_url；安装向导设置）"},
+		{Key: KeyTimezone, Group: GroupGeneral, Type: TString, Default: "UTC", MaxLen: 48, Format: "timezone", Patchable: true, Doc: "系统默认时区（IANA 名；存储与 API 仍一律 UTC）"},
 		{Key: KeyLocales, Group: GroupGeneral, Type: TStringList, Default: defaultLocales, Enum: []string{"zh-CN", "en"}, MaxItems: 2, Patchable: true, Doc: "官网/控制台可用语言"},
 
 		{Key: KeyBrandName, Group: GroupBrand, Type: TString, Default: "凌界云", MaxLen: 64, Patchable: true, Doc: "品牌名（中文）"},
@@ -501,6 +508,10 @@ func (d Def) checkString(s string) *ValidationError {
 	case "uid":
 		if !uid.Valid(s) {
 			return bad(d.Key, "must be a valid uid")
+		}
+	case "timezone":
+		if _, err := time.LoadLocation(s); err != nil {
+			return bad(d.Key, "must be an IANA time zone name (e.g. Asia/Shanghai, UTC)")
 		}
 	}
 	return nil

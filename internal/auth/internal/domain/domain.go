@@ -307,6 +307,8 @@ type NewUser struct {
 	PasswordHash string
 	Locale       string
 	Now          time.Time
+	// KeepPassword 为真表示口令由本人当场设定（安装向导创建首个超级管理员，Story 1.24）：不强制首次登录改密（must_change_password=0）。
+	KeepPassword bool
 }
 
 // Role 是 roles 行（模板角色：tenant_id 为 NULL）。

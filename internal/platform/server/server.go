@@ -3,7 +3,8 @@
 //
 // 装配顺序（任何一步失败都拒绝启动并回收已打开的资源）：
 //
-//	主密钥（secretbox.FileKeyProvider；缺失/权限不符即拒绝，ADR-011）→ app 连接池（MySQL）→ Redis（不可达只降级，ADR-025）
+//	主密钥（secretbox.FileKeyProvider；缺失/权限不符即拒绝，ADR-011）→ 合并运行期凭据（显式通道优先，缺省读 runtime-credentials.json，ADR-026）
+//	→ app 连接池（MySQL）→ Redis（不可达只降级，ADR-025）
 //	→ 内嵌迁移集合与迁移版本探针（app 池只读 schema_migrations，CC-3）→ 幂等存储 → metrics 监听 → 按角色装配组件 → 全部就绪后 sd_notify READY=1。
 //
 // 角色与现状（诚实声明，没有任何占位功能被伪装成真实功能）：
@@ -35,6 +36,7 @@ import (
 	"github.com/wuekevin/lingedge/internal/platform/clock"
 	"github.com/wuekevin/lingedge/internal/platform/config"
 	"github.com/wuekevin/lingedge/internal/platform/db"
+	"github.com/wuekevin/lingedge/internal/platform/dbcred"
 	"github.com/wuekevin/lingedge/internal/platform/httpx"
 	"github.com/wuekevin/lingedge/internal/platform/idempotency"
 	idemrepo "github.com/wuekevin/lingedge/internal/platform/idempotency/repository"
@@ -197,11 +199,31 @@ func Run(ctx context.Context, o Options) error {
 	}
 	closers = append(closers, closer{"主密钥", func(context.Context) error { keys.Close(); return nil }})
 	log.Info("主密钥已加载", zap.String("current_kek_id", keys.CurrentKeyID()))
+	box, err := secretbox.New(keys)
+	if err != nil {
+		return fail(err)
+	}
+
+	// 1b. 运行期凭据合并（ADR-026 §3）：server.yaml/环境变量/*.password_file 显式给出的值优先，缺省才读安装向导写入的 runtime-credentials.json
+	// （只解当前角色需要的字段：maint 口令仅 scheduler 角色需要）。在副本上合并，不改调用方的 Config。
+	merged := *o.Config
+	used, err := dbcred.Merge(ctx, &merged, box, dbcred.MergeOptions{NeedMaint: o.Roles.Has(RoleScheduler)})
+	if err != nil {
+		return fail(fmt.Errorf("运行期凭据不可用: %w。指引：运行期凭据文件 %s 由安装向导写入（lingedge 属主 0600，口令信封加密），需要与 master.key 匹配；"+
+			"也可改用环境变量 LINGEDGE_DATABASE__PASSWORD / database.password_file 显式提供", err, dbcred.Path(o.Config)))
+	}
+	if err := merged.ValidateRuntime(); err != nil {
+		return fail(fmt.Errorf("配置无效: %w。指引：数据库与 Redis 的连接目标与口令可由安装向导写入的运行期凭据文件提供（%s），或经 server.yaml 与环境变量 LINGEDGE_DATABASE__PASSWORD / database.password_file 显式给出", err, dbcred.Path(o.Config)))
+	}
+	if len(used.Used) > 0 {
+		log.Info("已从运行期凭据文件合并配置", zap.Strings("fields", used.Used)) // 只记字段名，不记任何值
+	}
+	cfg, o.Config = &merged, &merged
 
 	// 2. MySQL（app 账号）。
 	app, err := db.OpenApp(ctx, db.AppConfigFrom(cfg.Database))
 	if err != nil {
-		return fail(fmt.Errorf("无法连接数据库（app 账号）: %w。指引：核对 database.host/port/name/user 与口令（环境变量 LINGEDGE_DATABASE__PASSWORD 或 database.password_file）", err))
+		return fail(fmt.Errorf("无法连接数据库（app 账号）: %w。指引：核对 database.host/port/name/user 与口令（运行期凭据文件、环境变量 LINGEDGE_DATABASE__PASSWORD 或 database.password_file）", err))
 	}
 	closers = append(closers, closer{"MySQL 连接池", func(context.Context) error { return app.Close() }})
 
@@ -242,10 +264,6 @@ func Run(ctx context.Context, o Options) error {
 		return fail(err)
 	}
 	enq.InTx = func(ctx context.Context) bool { _, in := db.TxFromContext(ctx, app); return in }
-	box, err := secretbox.New(keys)
-	if err != nil {
-		return fail(err)
-	}
 	deps := Deps{Tasks: taskStore, Enqueuer: enq, DB: app, Redis: rc, Clock: o.Clock, IDs: ids, Logger: o.Logger, Config: cfg, Secrets: box, Migrations: probe,
 		OnShutdown: func(name string, fn func(context.Context) error) { closers = append(closers, closer{name, fn}) }}
 

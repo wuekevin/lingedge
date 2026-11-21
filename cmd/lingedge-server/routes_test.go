@@ -31,13 +31,14 @@ func TestRoutesSubcommandExportsManifest(t *testing.T) {
 		"listTenants", "getCurrentTenant", "getTenant", "updateTenant", "listTenantMembers", "addTenantMember", "getTenantQuotas", "putTenantQuotas",
 		"listAuditLogs", "getAuditLog", "listLoginLogs",
 		"getSettings", "patchSettings", "getBrandSettings", "putBrandSettings", "getSsrfAllowlist", "putSsrfAllowlist", "getRunMode", "putRunMode",
-		"getVersionInfo", "listInstallations", "getPublicVersion", "getPublicSiteInfo", "listSigningKeys"} {
+		"getVersionInfo", "listInstallations", "getPublicVersion", "getPublicSiteInfo", "listSigningKeys",
+		"getSetupStatus", "runSetupChecks", "setupDatabase", "setupRedis", "setupInitializeDb", "setupCreateAdmin", "setupSystemConfig", "setupInitKeys", "setupComplete"} {
 		if !got[id] {
 			t.Errorf("清单缺少路由 %s", id)
 		}
 	}
-	if len(m) != 62 {
-		t.Errorf("当前应恰有 62 条路由（任务中心 4 + 认证 13 + 用户/角色/权限管理 16 + API Token 5 + 租户 8 + 审计/登录日志 3（Story 1.21）+ 系统设置/运行模式/版本/安装记录/公开信息 12（Story 1.22）+ 签名密钥元数据 1（Story 1.23）；createTenant 属 P5 不在此），实际 %d", len(m))
+	if len(m) != 71 {
+		t.Errorf("当前应恰有 71 条路由（任务中心 4 + 认证 13 + 用户/角色/权限管理 16 + API Token 5 + 租户 8 + 审计/登录日志 3（Story 1.21）+ 系统设置/运行模式/版本/安装记录/公开信息 12（Story 1.22）+ 签名密钥元数据 1（Story 1.23）+ 安装向导 9（Story 1.24，/public/setup/*，正常模式下恒 410）；createTenant 属 P5 不在此），实际 %d", len(m))
 	}
 	for _, e := range m {
 		if e["operation_id"] == "" {

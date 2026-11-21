@@ -610,7 +610,7 @@ Tools 负责**物化与准备**，Web 向导负责**业务初始化**，边界�
 
 **setup mode 与 setup token**：
 - 无 `install.lock`（`/var/lib/lingedge/server/install.lock`，且无 `system_installations` 完成记录）时，Server 以 setup mode 启动：**仅**提供 `/setup` 向导 UI（`go:embed` 的轻量 SPA，不依赖 Admin Web）与 `/api/v1/public/setup/*` 接口，其余 API 返回 503。
-- Tools 生成 256 位随机 setup token，仅在终端**显示一次**，哈希（SHA-256）写入 `/etc/lingedge/server/setup-token.hash`（lingedge:lingedge 0600）。向导所有写接口要求请求头 `X-Setup-Token`；失败节流（Redis 不可用时本地计数）。
+- Tools 生成 256 位随机 setup token，仅在终端**显示一次**，哈希（SHA-256）写入 `/etc/lingedge/server/setup-token.hash`（lingedge:lingedge 0600）。向导所有写接口要求请求头 `X-Setup-Token`；失败节流（Redis 不可用时本地计数）。**实现（Story 1.24）**：生成与哈希文件创建用共享原语 `pkg/setuptoken`（`Generate`/`Hash`/`WriteHashFile`，Tools 步骤 18 附近调用，Story 1.35 接线；Server 只读取并校验，`complete` 后删除——无权删除 root 属主目录里的文件时清空内容使其失效）；`status` 也要求 token；哈希路径可经 `secrets.setup_token_hash_file` 覆盖（CC-12）。
 - 向导默认只监听 `127.0.0.1:8080`；远程访问需 SSH 隧道，或用户显式 `--setup-listen 0.0.0.0:8080`（Tools 打印风险提示，且 token 必须通过 TLS 前置反代传输的建议）。防止「安装完成前被他人抢先初始化」。
 
 **向导步骤（基线 §21.1）**：

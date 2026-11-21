@@ -108,6 +108,14 @@ const (
 	SetupTokenInvalid Code = "setup.token_invalid"
 	// SetupAlreadyInstalled 已存在 install.lock，向导接口永久不可用。
 	SetupAlreadyInstalled Code = "setup.already_installed"
+	// SetupInsecureTransport 向导接口携带口令，但监听非回环地址且请求不是 TLS（ADR-026 §10）。
+	SetupInsecureTransport Code = "setup.insecure_transport"
+	// SetupDatabaseNotEmpty 目标库不为空（FR-6：不静默覆盖）。
+	SetupDatabaseNotEmpty Code = "setup.database_not_empty"
+	// SetupPrecheckFailed MySQL/Redis 预检未通过（版本、字符集、sql_mode、binlog 触发器权限、账号权限、Redis 主版本）。
+	SetupPrecheckFailed Code = "setup.precheck_failed"
+	// SetupModeActive Server 处于 setup mode（尚未完成安装）：除 /setup 与 /public/setup/* 外的接口一律 503。
+	SetupModeActive Code = "setup.mode_active"
 	// TenantQuotaExceeded 租户配额超限。
 	TenantQuotaExceeded Code = "tenant.quota_exceeded"
 	// InternalError 内部错误。
@@ -166,6 +174,10 @@ var table = map[Code]int{
 	OriginGroupInconsistent:       400,
 	SetupTokenInvalid:             401,
 	SetupAlreadyInstalled:         410,
+	SetupInsecureTransport:        400,
+	SetupDatabaseNotEmpty:         400,
+	SetupPrecheckFailed:           400,
+	SetupModeActive:               503,
 	TenantQuotaExceeded:           403,
 	InternalError:                 500,
 }

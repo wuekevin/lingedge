@@ -2,7 +2,7 @@
 // signing_keys、system_settings 都是平台级表（无 tenant_id）：方法的文档注释登记 lingedge:platform-table（repo-check 的 Scope 首参豁免）。
 //
 // 权限（核对迁移 000005、000002、000003）：lingedge_app 对 signing_keys、system_settings 均有 SELECT/INSERT/UPDATE/DELETE，对 audit_logs 有 INSERT；
-// 初始化只需 app 池，不需要也不接受 migrate/maint 账号（AA-7：安装向导的迁移凭据交接未决，本包不依赖它）。
+// 初始化只需 app 池，不需要也不接受 migrate/maint 账号（迁移凭据交接见 ADR-026：本包不依赖它）。
 //
 // 「每个 purpose 至多一个 active」由数据库保证：迁移 000005 的生成列 active_key = IF(status='active', purpose, NULL) 上的唯一索引 uk_signing_keys_active
 // （NULL 不参与唯一性，故 pending/retiring/revoked 可以有多行），无需新迁移。并发初始化时后到者在 INSERT 处得到重复键错误（db.IsDuplicate）。

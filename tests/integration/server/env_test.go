@@ -129,6 +129,13 @@ func newEnv(t *testing.T, through int) *env {
 	t.Cleanup(func() { _ = os.RemoveAll(e.dir) })
 	e.keyFile = filepath.Join(e.dir, "master.key")
 	e.writeKey(t, 0o400)
+	// 这些用例测的是「已安装」的正常模式：有 install.lock（Story 1.24：无 install.lock 且无完成安装记录时 Server 进入 setup mode）。
+	if err := os.MkdirAll(filepath.Join(e.dir, "data"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(e.dir, "data", "install.lock"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	e.ports = ports{freePort(t), freePort(t), freePort(t), freePort(t)}
 	e.writeConfig(t)
 	return e

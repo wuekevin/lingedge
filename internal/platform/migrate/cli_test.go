@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -70,8 +71,8 @@ func TestCLIUsageErrors(t *testing.T) {
 
 func TestCLIRequiresPasswordAndNeverTakesItFromFlags(t *testing.T) {
 	code, _, errs := runCLI(samplePlanFS(), nil, "up", "--host", "127.0.0.1", "--port", "3306", "--database", "x")
-	if code != ExitFailure || !strings.Contains(errs, EnvDBPass) {
-		t.Fatalf("缺口令应失败并指明环境变量: code=%d err=%q", code, errs)
+	if code != ExitPrecondition || !strings.Contains(errs, EnvDBPass) || !strings.Contains(errs, "credential init") {
+		t.Fatalf("非交互缺口令应以退出码 3（前置条件）失败并指明环境变量与 credential init（ADR-026 §4）: code=%d err=%q", code, errs)
 	}
 	// 命令行上没有任何口令类参数（运行期拼出参数名，避免本文件被固定口令扫描误报）。
 	if code, _, _ := runCLI(samplePlanFS(), nil, "up", "--host", "127.0.0.1", "--"+"password", "x"); code != ExitUsage {
@@ -176,7 +177,7 @@ func TestCLIEnvDatabaseHostWithoutFlags(t *testing.T) {
 	if !c.wantsDB(m) {
 		t.Fatal("LINGEDGE_DATABASE__HOST 应使 wantsDB 为真")
 	}
-	cfg, err := c.dbConfig(env, m)
+	cfg, err := c.dbConfig(env, m, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,11 +189,11 @@ func TestCLIEnvDatabaseHostWithoutFlags(t *testing.T) {
 	}
 	// flag 覆盖环境变量；--socket 优先于主机。
 	c.host, c.port = "10.0.0.9", 3307
-	if cfg, _ = c.dbConfig(env, m); cfg.Host != "10.0.0.9" || cfg.Port != 3307 {
+	if cfg, _ = c.dbConfig(env, m, io.Discard); cfg.Host != "10.0.0.9" || cfg.Port != 3307 {
 		t.Fatalf("flag 应覆盖环境变量: %+v", cfg)
 	}
 	c.socket = "/tmp/m.sock"
-	if cfg, _ = c.dbConfig(env, m); cfg.Socket != "/tmp/m.sock" || cfg.Host != "" || cfg.Port != 0 {
+	if cfg, _ = c.dbConfig(env, m, io.Discard); cfg.Socket != "/tmp/m.sock" || cfg.Host != "" || cfg.Port != 0 {
 		t.Fatalf("--socket 应优先于主机: %+v", cfg)
 	}
 }

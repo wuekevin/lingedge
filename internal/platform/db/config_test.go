@@ -173,3 +173,24 @@ func TestOpenRejectsInvalidConfigBeforeConnecting(t *testing.T) {
 		t.Fatal("无效配置必须在连接前被拒绝（migrate）")
 	}
 }
+
+// Story 1.24：AppConfigFrom/MaintConfigFrom 接受合并后的配置（含 TLS），口令与连接目标原样映射。
+func TestConfigFromMergedDatabase(t *testing.T) {
+	d := config.Database{Host: "db.example.test", Port: 3307, Name: "lingedge", User: "lingedge_app", Password: config.NewSecret("x-pw"), TLS: "true",
+		Maint: config.DatabaseMaint{User: "lingedge_maint", Password: config.NewSecret("y-pw")}}
+	app := AppConfigFrom(d)
+	if app.Host != d.Host || app.Port != 3307 || app.Name != "lingedge" || app.User != "lingedge_app" || app.Password.Reveal() != "x-pw" || app.TLS != "true" {
+		t.Errorf("app: %+v", app)
+	}
+	m, ok := MaintConfigFrom(d)
+	if !ok || m.User != "lingedge_maint" || m.Password.Reveal() != "y-pw" || m.TLS != "true" || m.Host != d.Host || m.Name != d.Name {
+		t.Errorf("maint: %+v %v", m, ok)
+	}
+	if err := app.Validate(); err != nil {
+		t.Errorf("远程主机显式 TLS 应通过校验: %v", err)
+	}
+	d.Maint = config.DatabaseMaint{}
+	if _, ok := MaintConfigFrom(d); ok {
+		t.Error("未配置 maint 时 ok 应为 false")
+	}
+}

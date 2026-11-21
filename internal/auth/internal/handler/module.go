@@ -116,6 +116,39 @@ func (m *Module) ReauthChecker() httpx.ReauthChecker {
 	return reauthChecker{svc: m.svc}
 }
 
+// Bootstrapper 是安装向导的管理员引导入口（Story 1.24，见 service/bootstrap.go）：复用既有口令哈希、TOTP 与超级管理员授予，不要求已认证主体。
+type Bootstrapper struct{ svc *service.Service }
+
+// BootstrapAdminInput / BootstrapAdminResult / TOTPEnrollment 是引导入口的输入输出。
+type (
+	BootstrapAdminInput  = service.BootstrapAdminInput
+	BootstrapAdminResult = service.BootstrapAdminResult
+	TOTPEnrollment       = service.TOTPSetup
+)
+
+// CreateAdmin 创建（或幂等确认）首个超级管理员。
+func (b Bootstrapper) CreateAdmin(ctx context.Context, in BootstrapAdminInput) (BootstrapAdminResult, error) {
+	return b.svc.BootstrapAdmin(ctx, in)
+}
+
+// BeginTOTP 生成待确认的 TOTP 密钥。
+func (b Bootstrapper) BeginTOTP(ctx context.Context, userUID string) (*TOTPEnrollment, error) {
+	return b.svc.BootstrapBeginTOTP(ctx, userUID)
+}
+
+// ConfirmTOTP 验证首个验证码并启用 TOTP，返回恢复码（仅此一次）。
+func (b Bootstrapper) ConfirmTOTP(ctx context.Context, userUID, code string) ([]string, error) {
+	return b.svc.BootstrapConfirmTOTP(ctx, userUID, code)
+}
+
+// HasAdmin 报告是否已有有效的超级管理员。
+func (b Bootstrapper) HasAdmin(ctx context.Context) (bool, error) {
+	return b.svc.BootstrapHasAdmin(ctx)
+}
+
+// Bootstrap 返回安装向导的管理员引导入口；ManifestOnly 时返回的入口不可用（svc 为 nil）。
+func (m *Module) Bootstrap() Bootstrapper { return Bootstrapper{svc: m.svc} }
+
 // Flush 等待认证模块已派发的后台写入（DB 兜底失败计数）完成；停机前与测试断言前调用。
 func (m *Module) Flush() {
 	if m.svc != nil {

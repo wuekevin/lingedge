@@ -43,6 +43,18 @@ const (
 	ActionSettingBrandUpdate  Action = "setting.brand.update"
 	ActionSSRFAllowlistUpdate Action = "setting.ssrf_allowlist.update"
 	ActionRunModeUpdate       Action = "system.run_mode.update"
+
+	// 安装向导（Story 1.24）：/public/setup/* 的各步骤。这些 operation 在已认证体系建立之前运行（Actor 为系统组件 setup，经 Event.Actor 给出），
+	// 审计只记「步骤已执行/账号已创建/口令已自动生成：是否」，绝不含口令、哈希、长度或 token（ADR-026 §10）。迁移完成之前 audit_logs 尚不存在的步骤
+	// （checks/database/redis/initialize）由 setup 服务缓冲事件，并在迁移完成后、与 initialize 的状态写入同一事务内补写。
+	ActionSetupChecks     Action = "setup.checks"
+	ActionSetupDatabase   Action = "setup.database"
+	ActionSetupRedis      Action = "setup.redis"
+	ActionSetupInitialize Action = "setup.initialize"
+	ActionSetupAdmin      Action = "setup.admin"
+	ActionSetupSystem     Action = "setup.system"
+	ActionSetupKeys       Action = "setup.keys"
+	ActionSetupComplete   Action = "setup.complete"
 )
 
 // 系统发起的动作（Story 1.23）：不是任何 REST operation 触发的、由安装向导/CLI/后台流程在业务事务内写入的审计动作（Actor 为系统组件，经 Event.Actor 显式给出）。
@@ -130,6 +142,15 @@ var Catalog = []Op{
 	{"putBrandSettings", []Action{ActionSettingBrandUpdate}},
 	{"putSsrfAllowlist", []Action{ActionSSRFAllowlistUpdate}},
 	{"putRunMode", []Action{ActionRunModeUpdate}},
+
+	{"runSetupChecks", []Action{ActionSetupChecks}},
+	{"setupDatabase", []Action{ActionSetupDatabase}},
+	{"setupRedis", []Action{ActionSetupRedis}},
+	{"setupInitializeDb", []Action{ActionSetupInitialize}},
+	{"setupCreateAdmin", []Action{ActionSetupAdmin}},
+	{"setupSystemConfig", []Action{ActionSetupSystem}},
+	{"setupInitKeys", []Action{ActionSetupKeys}},
+	{"setupComplete", []Action{ActionSetupComplete}},
 }
 
 // ActionsFor 返回 operationId 登记的动作；未登记返回 nil。

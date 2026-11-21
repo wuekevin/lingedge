@@ -5,8 +5,9 @@
 //     不虚构待基线的参数（UD-27）；
 //   - 优先级：环境变量 > YAML 文件 > Defaults()。环境变量名 LINGEDGE_<节>__<键>（双下划线分隔层级，键内下划线保留，
 //     全大写），如 LINGEDGE_DATABASE__PASSWORD、LINGEDGE_GRPC__ENROLL_LISTEN；带 LINGEDGE_ 前缀但不对应任何键的变量拒绝；
-//   - 秘密：口令不得写在 server.yaml（NFR-6、AA-7；写了即拒绝）。通道有二：环境变量 / `<x>.password_file`（文件内容为口令，
-//     不得被「其他用户」读取）。Secret 类型在任何格式化、序列化、日志里都是 ***；
+//   - 秘密：口令不得写在 server.yaml（NFR-6、AA-7/ADR-026；写了即拒绝）。显式通道有二：环境变量 / `<x>.password_file`（文件内容为口令，
+//     不得被「其他用户」读取），它们优先；缺省时由安装向导写入的运行期凭据文件 `secrets.runtime_credentials_file`（信封加密，
+//     ADR-026 §3）经 internal/platform/dbcred 合并进来。Secret 类型在任何格式化、序列化、日志里都是 ***；
 //   - 错误文本只含键路径与规则说明，永不回显任何配置值（避免把写错位置的口令带进错误与日志）。
 package config
 
@@ -86,13 +87,16 @@ type Database struct {
 	User         string `yaml:"user"`
 	Password     Secret `yaml:"password"`
 	PasswordFile string `yaml:"password_file"`
+	// TLS 是 app/maint 连接的 TLS 模式（true|false|skip-verify|preferred，缺省空）；非回环主机必须显式设置（db.Config 校验）。
+	// 缺省由运行期凭据文件提供（ADR-026 §3），可经环境变量 LINGEDGE_DATABASE__TLS 覆盖（CC-12，加法）。
+	TLS string `yaml:"tls"`
 	// Maint 是 lingedge_maint 账号（分区维护 partition.maintain 专用，database/README §5.1；Story 1.15）。
 	// 可选：未配置（user 为空）时 Scheduler 的分区维护作业明确跳过并告警，绝不假装成功；连接目标（host/port/name）与 app 相同。
 	Maint DatabaseMaint `yaml:"maint"`
 }
 
-// DatabaseMaint 是维护账号的凭据。口令与 app 一样只能经环境变量（LINGEDGE_DATABASE__MAINT__PASSWORD）或 password_file 提供。
-// 口令落点（AA-7）尚未定稿，本节是 Story 1.15 的暂行形态：定稿后若变更须走 contract-changes。
+// DatabaseMaint 是维护账号的凭据。口令只能经环境变量（LINGEDGE_DATABASE__MAINT__PASSWORD）或 password_file 显式提供（优先），
+// 缺省时由运行期凭据文件（ADR-026 §3，安装向导写入）合并；二者都没有则分区维护作业明确跳过并告警。
 type DatabaseMaint struct {
 	User         string `yaml:"user"`
 	Password     Secret `yaml:"password"`
@@ -120,6 +124,12 @@ type Secrets struct {
 	// MasterKeyFile 是主密钥文件的绝对路径；留空则读取 $CREDENTIALS_DIRECTORY/master.key（systemd LoadCredential）。
 	// 文件须 0400/0440 且属主正确，否则拒绝启动（pkg/secretbox.FileKeyProvider）。
 	MasterKeyFile string `yaml:"master_key_file"`
+	// RuntimeCredentialsFile 是运行期凭据文件的绝对路径（ADR-026 §3；缺省 `<server.data_dir>/secrets/runtime-credentials.json`）：
+	// 安装向导把 lingedge_app/lingedge_maint/Redis 口令以信封加密写在这里（lingedge 属主 0600）。显式通道（环境变量/*.password_file）优先于它。
+	RuntimeCredentialsFile string `yaml:"runtime_credentials_file"`
+	// SetupTokenHashFile 是 setup token 的 SHA-256 哈希文件（tools-design §13；缺省 /etc/lingedge/server/setup-token.hash）。仅 setup mode 读取，
+	// complete 之后删除（无权删除时清空）。可选键，供非标准部署与测试改路径（CC-12，加法）。
+	SetupTokenHashFile string `yaml:"setup_token_hash_file"`
 }
 
 // Auth 是认证设置（Story 1.16、ADR-018 §4）。会话时长与登录节流阈值是系统设置（system_settings，UD-27），不在此处。
@@ -218,7 +228,7 @@ func Parse(data []byte, o Options) (*Config, error) {
 	var probs []Problem
 
 	probs = append(probs, decodeYAML(data, &cfg)...)
-	// 口令不得写在配置文件里（NFR-6、AA-7）：此刻 Password 若非空，只可能来自 YAML（Defaults 不含口令，环境变量尚未应用）。
+	// 口令不得写在配置文件里（NFR-6、ADR-026）：此刻 Password 若非空，只可能来自 YAML（Defaults 不含口令，环境变量尚未应用）。
 	if cfg.Database.Password.IsSet() {
 		probs = append(probs, Problem{Path: "database.password", Reason: "不得写在配置文件中；请改用环境变量 LINGEDGE_DATABASE__PASSWORD 或 database.password_file"})
 	}
@@ -449,7 +459,7 @@ func resolveSecretFiles(c *Config) []Problem {
 const maxSecretFileSize = 64 << 10
 
 // readSecretFile 读取口令文件：绝对路径、普通文件、权限不得允许「其他用户」任何访问且不得被同组写入
-// （允许 0400/0440/0600/0640；root:lingedge 0440 即 AA-7 建议形态）、非空。打开后对同一句柄 fstat，避免检查与读取之间被替换。
+// （允许 0400/0440/0600/0640）、非空。打开后对同一句柄 fstat，避免检查与读取之间被替换。
 func readSecretFile(path string) (Secret, string) {
 	if !filepath.IsAbs(path) {
 		return Secret{}, "必须是绝对路径"
@@ -636,6 +646,17 @@ func (c *Config) validateProblems() []Problem {
 	}
 	if d.User != "" && !reDBUser.MatchString(d.User) {
 		add("database.user", "必须是 1–32 位的字母/数字/_/./-")
+	}
+	switch d.TLS {
+	case "", "true", "false", "skip-verify", "preferred":
+	default:
+		add("database.tls", "必须是 true|false|skip-verify|preferred 之一或留空")
+	}
+	if c.Secrets.RuntimeCredentialsFile != "" && !cleanAbs(c.Secrets.RuntimeCredentialsFile) {
+		add("secrets.runtime_credentials_file", "必须是规范化的绝对路径")
+	}
+	if c.Secrets.SetupTokenHashFile != "" && !cleanAbs(c.Secrets.SetupTokenHashFile) {
+		add("secrets.setup_token_hash_file", "必须是规范化的绝对路径")
 	}
 
 	// database.maint：用户名与口令要么都不配（分区维护将被跳过并告警），要么都配（半配置是笔误，拒绝）。

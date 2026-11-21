@@ -79,9 +79,9 @@ k2:<base64url 无填充，32 字节随机值>
 3. 其他长度（16/24/64 字节密钥）、被换行/空格折断或再编码（如二次 base64）的密钥不识别；约 0.1% 的随机 32 字节密钥缺某一类字符而不满足条件；
 4. 因此纪律仍是：主密钥永不进入任何日志调用——`FileKeyProvider` 自身从不格式化输出密钥，裸串识别只是兜底。
 
-## 8. 数据库凭据（AA-7；ADR-026、tools-design §13.1，UD-31 默认采纳、可推翻）
+## 8. 数据库凭据（AA-7 已解决；ADR-026、tools-design §13.1，UD-31 默认采纳、可推翻）
 
-> 本节是运维视角摘要；设计与理由见 ADR-026。**实现随 Story 1.24；在其落地前仓库只有 1.6/1.15 的过渡通道（环境变量/`*_file`），下表为目标形态。**
+> 本节是运维视角摘要；设计与理由见 ADR-026。**已由 Story 1.24 实现**（`internal/platform/{dbcred,setup,migrate}`、`lingedge-server setup|migrate credential|db credential rotate`）；环境变量/`*_file` 通道保留为最高优先级的显式覆盖。真实 systemd 下 `lingedge` 用户写 `/var/lib/lingedge/server/secrets`、root 写 `/etc/lingedge/server/migrate.yaml` 的属主/权限路径仍为「等待环境验证」（ENV-LNX，本机只验证权限位与属主判定逻辑）。
 
 | 凭据 | 位置 | 属主/权限 | 读取方 | 轮换 |
 |---|---|---|---|---|
@@ -96,4 +96,6 @@ k2:<base64url 无填充，32 字节随机值>
 3. **备份**：`runtime-credentials.json` 随 `/var/lib/lingedge/server/` 备份（密文，须有对应 `master.key`；备份清单 `kek_ids_required` 含其 `kek_id`）；`migrate.yaml` **默认不进备份**（`--include-migrate-credential` 且 `--encrypt` 才含）；恢复后需重新 `credential init`，并视口令是否已轮换执行 `credential rotate/reset` 对齐。
 4. **主密钥轮换**：`runtime-credentials.json` 不在数据库，须作为 `secrets.rewrap` 的额外目标（ADR-011 修订 2026-11-21）；移除旧 KEK 前也要核对它。
 5. 日志里不应出现任何口令；若怀疑泄露，先 `rotate/reset`，再排查。
-6. 宝塔 MySQL：推荐让向导用宝塔 MySQL 管理员口令（内存中一次）建账号；用面板预建账号常缺 `GRANT OPTION`/`SET_USER_ID`，预检会阻断并给出指引（具体默认权限待 ENV-BT 验证）。
+6. **setup token 与向导**：token 由 Tools 生成并只显示一次，哈希在 `/etc/lingedge/server/setup-token.hash`；向导 `complete` 之后哈希文件被删除（若 `lingedge` 无权删除 root 属主目录里的文件，则清空其内容使 token 永久失效，并提示手工删除）。失败节流默认同一来源 5 分钟内 10 次（Redis 可用时全局精确，否则进程内计数）。
+7. **`--from-file` 清理的局限**：进程对文件内容 0 覆盖后 `unlink`；日志型/COW 文件系统、快照与备份上可能残留旧块，故文件只应放在受控的 tmpfs/加密卷，用后检查结果里的 `from_file_residual`。
+8. 宝塔 MySQL：推荐让向导用宝塔 MySQL 管理员口令（内存中一次）建账号；用面板预建账号常缺 `GRANT OPTION`/`SET_USER_ID`，预检会阻断并给出指引（具体默认权限待 ENV-BT 验证）。

@@ -19,8 +19,8 @@ import (
 	"github.com/wuekevin/lingedge/internal/platform/db"
 )
 
-// 迁移账号凭据的来源（AA-7 尚未定稿，见 docs/bmad/decisions-adopted.md §3；此处是过渡约定，定稿后只改本文件）：
-// 口令绝不经命令行参数（会出现在 ps 里）；只经环境变量或口令文件。
+// 迁移账号凭据的来源（ADR-026 §4，AA-7 已定稿）：口令绝不经命令行参数（会出现在 ps 里）；来源优先级为
+// 环境变量 ＞ 口令文件 ＞ root 侧 migrate.yaml ＞ 交互输入（credsource.go）。环境变量/口令文件通道保留（测试与 make migrate 使用）。
 const (
 	EnvUser       = "LINGEDGE_MIGRATE_DB_USER"
 	EnvDBPass     = "LINGEDGE_MIGRATE_DB_PASSWORD"
@@ -38,11 +38,14 @@ const usage = `用法: lingedge-server migrate <子命令> [选项]
   status    显示版本、待执行迁移、dirty 与校验和状态（--json）
   recover   清除 dirty 标记（--version N；确认可重跑之后）
   lint      静态检查内嵌迁移（分类标注、命名、DDL 预检、逐表授权；--dir 检查指定目录）
+  credential  init|reset：写入/重置 root 侧 lingedge_migrate 凭据文件（用 ` + "`migrate credential help`" + ` 查看）
 
 连接选项（plan 不给任何连接选项时为离线模式）:
   --config FILE       server.yaml（取 database.host/port/name）
   --host H --port P   或 --socket PATH；--database NAME；--user NAME（缺省 ` + DefaultUser + `）；--tls true|false|skip-verify|preferred
-  口令:               环境变量 ` + EnvDBPass + ` 或 ` + EnvDBPassFile + `（口令文件，绝对路径，权限 0400/0600）；用户名可用 ` + EnvUser + `
+  口令（优先级）:     环境变量 ` + EnvDBPass + ` ＞ ` + EnvDBPassFile + `（口令文件，绝对路径，权限 0400/0600）＞ ` + DefaultMigrateYAML + `（root:root 0400，
+                      由 ` + "`migrate credential init`" + ` 写入）＞ 交互输入（仅 TTY；非 TTY 退出码 3）；用户名可用 ` + EnvUser + `
+  连接目标:           命令行/环境变量 ＞ migrate.yaml ＞ root 属主的 --config server.yaml；绝不读取 runtime-credentials.json（ADR-026 §4）
   --lock-timeout D    等待迁移互斥的时长（缺省 ` + "30s" + `）
 
 退出码: 0 成功；1 失败；2 用法错误；3 lint 未通过；4 dirty；5 校验和不一致；6 数据库版本不受支持；7 迁移互斥超时；8 迁移账号预检失败；9 含不可逆迁移但未确认；10 数据库与二进制的迁移集合不一致（二进制比数据库旧/乱序/记录矛盾）
@@ -90,18 +93,59 @@ func (c connFlags) wantsDB(env map[string]string) bool {
 	return c.config != "" || c.host != "" || c.socket != "" || env["LINGEDGE_DATABASE__HOST"] != ""
 }
 
-// dbConfig 汇集连接配置：flag > 环境变量 > server.yaml。
-func (c connFlags) dbConfig(environ []string, env map[string]string) (db.Config, error) {
+// wantsDBOrFile：up/status/down/recover 还接受 root 侧 migrate.yaml 作为连接目标来源（plan 不接受：它无连接选项时保持离线）。
+func (c connFlags) wantsDBOrFile(env map[string]string) bool {
+	if c.wantsDB(env) {
+		return true
+	}
+	p, explicit := migrateYAMLPath(env)
+	if explicit {
+		return true
+	}
+	_, err := os.Lstat(p)
+	return err == nil
+}
+
+// target 汇集连接目标（不含口令）：命令行/环境变量显式值 ＞ migrate.yaml ＞ root 属主的 --config server.yaml。
+// 不读取 runtime-credentials.json（ADR-026 §4 信任规则）。返回的 Config 已含用户名（flag ＞ 环境变量 ＞ migrate.yaml ＞ 缺省）。
+func (c connFlags) target(environ []string, env map[string]string) (db.Config, error) {
+	cfg, _, err := c.targetWithFile(environ, env, nil)
+	return cfg, err
+}
+
+func (c connFlags) targetWithFile(environ []string, env map[string]string, fc *FileCreds) (db.Config, *FileCreds, error) {
 	var cfg db.Config
 	if c.config != "" {
+		if err := checkRootOwnedConfig(c.config); err != nil {
+			return cfg, fc, err
+		}
 		loaded, err := config.Load(c.config, config.Options{
 			Environ:   environ,
-			EnvIgnore: []string{EnvUser, EnvDBPass, EnvDBPassFile},
+			EnvIgnore: []string{EnvUser, EnvDBPass, EnvDBPassFile, EnvMigrateYAML, EnvAdminUser, EnvAdminPass, EnvAdminPassFile},
 		})
 		if err != nil {
-			return cfg, err
+			return cfg, fc, err
 		}
-		cfg.Host, cfg.Port, cfg.Name = loaded.Database.Host, loaded.Database.Port, loaded.Database.Name
+		cfg.Host, cfg.Port, cfg.Name, cfg.TLS = loaded.Database.Host, loaded.Database.Port, loaded.Database.Name, loaded.Database.TLS
+	}
+	// migrate.yaml 覆盖 server.yaml，但不覆盖环境变量/命令行的显式值。
+	if fc != nil {
+		set := func(envKey string) bool { return env[envKey] != "" }
+		if !set("LINGEDGE_DATABASE__HOST") && fc.Host != "" {
+			cfg.Host = fc.Host
+		}
+		if !set("LINGEDGE_DATABASE__PORT") && fc.Port != 0 {
+			cfg.Port = fc.Port
+		}
+		if !set("LINGEDGE_DATABASE__NAME") && fc.Database != "" {
+			cfg.Name = fc.Database
+		}
+		if !set("LINGEDGE_DATABASE__TLS") && fc.TLS != "" {
+			cfg.TLS = fc.TLS
+		}
+		if fc.Socket != "" && cfg.Host == "" {
+			cfg.Socket = fc.Socket
+		}
 	}
 	// 环境变量 LINGEDGE_DATABASE__*（与 server.yaml 覆盖语义一致）：--config 已由 config.Load 应用；无 --config 时在这里读取。
 	if c.config == "" {
@@ -111,12 +155,15 @@ func (c connFlags) dbConfig(environ []string, env map[string]string) (db.Config,
 		if v := env["LINGEDGE_DATABASE__PORT"]; v != "" {
 			n, err := strconv.Atoi(v)
 			if err != nil {
-				return cfg, fmt.Errorf("LINGEDGE_DATABASE__PORT 不是合法端口")
+				return cfg, fc, fmt.Errorf("LINGEDGE_DATABASE__PORT 不是合法端口")
 			}
 			cfg.Port = n
 		}
 		if v := env["LINGEDGE_DATABASE__NAME"]; v != "" {
 			cfg.Name = v
+		}
+		if v := env["LINGEDGE_DATABASE__TLS"]; v != "" {
+			cfg.TLS = v
 		}
 	}
 	if c.host != "" {
@@ -142,30 +189,38 @@ func (c connFlags) dbConfig(environ []string, env map[string]string) (db.Config,
 		cfg.User = c.user
 	case env[EnvUser] != "":
 		cfg.User = env[EnvUser]
+	case fc != nil && fc.User != "":
+		cfg.User = fc.User
 	default:
 		cfg.User = DefaultUser
 	}
-	switch {
-	case env[EnvDBPass] != "" && env[EnvDBPassFile] != "":
-		return cfg, fmt.Errorf("%s 与 %s 只能设置其一", EnvDBPass, EnvDBPassFile)
-	case env[EnvDBPass] != "":
-		cfg.Password = config.NewSecret(env[EnvDBPass])
-	case env[EnvDBPassFile] != "":
-		s, err := config.ReadSecretFile(env[EnvDBPassFile])
-		if err != nil {
-			return cfg, fmt.Errorf("%s: %w", EnvDBPassFile, err)
-		}
-		cfg.Password = s
-	default:
-		return cfg, fmt.Errorf("缺少迁移账号口令：请设置 %s 或 %s（不提供默认口令，NFR-6）", EnvDBPass, EnvDBPassFile)
+	return cfg, fc, nil
+}
+
+// dbConfig 汇集连接配置与口令：目标见 target；口令优先级见 credsource.go。
+func (c connFlags) dbConfig(environ []string, env map[string]string, stderr io.Writer) (db.Config, error) {
+	path, explicit := migrateYAMLPath(env)
+	fc, err := loadMigrateYAML(path, explicit)
+	if err != nil {
+		return db.Config{}, fmt.Errorf("%s: %w", path, err)
 	}
+	cfg, _, err := c.targetWithFile(environ, env, fc)
+	if err != nil {
+		return cfg, err
+	}
+	// 目标取自 migrate.yaml 时，口令优先用它（环境变量仍然优先）。
+	pw, err := resolveCreds(env, fc, stderr)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.Password = pw
 	// 迁移进程需要同时持有：互斥连接 + goose 执行连接 + 状态读写；池缺省的 1 个连接会死锁。
 	cfg.MaxOpenConns, cfg.MaxIdleConns = 4, 2
 	return cfg, nil
 }
 
 func (c connFlags) open(ctx context.Context, environ []string, env map[string]string, fsys fs.FS, stderr io.Writer) (*Runner, func(), error) {
-	cfg, err := c.dbConfig(environ, env)
+	cfg, err := c.dbConfig(environ, env, stderr)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -199,6 +254,9 @@ func Main(args []string, stdout, stderr io.Writer, environ []string, fsys fs.FS)
 
 	fail := func(err error) int {
 		_, _ = fmt.Fprintf(stderr, "lingedge-server migrate %s: %v\n", sub, err)
+		if errors.Is(err, ErrNoCredentials) {
+			return ExitPrecondition
+		}
 		return ExitCode(err)
 	}
 	usageErr := func(err error) int {
@@ -224,6 +282,9 @@ func Main(args []string, stdout, stderr io.Writer, environ []string, fsys fs.FS)
 	}
 
 	switch sub {
+	case "credential":
+		return credentialMain(rest, stdout, stderr, environ, env, fsys)
+
 	case "lint":
 		f := newFlags()
 		dir := f.String("dir", "", "检查指定目录而不是内嵌迁移")
@@ -294,7 +355,7 @@ func Main(args []string, stdout, stderr io.Writer, environ []string, fsys fs.FS)
 		if err := c.validate(); err != nil {
 			return usageErr(err)
 		}
-		if !c.wantsDB(env) {
+		if !c.wantsDBOrFile(env) {
 			return usageErr(errors.New("status 需要连接选项（--config 或 --host/--socket）"))
 		}
 		r, closeFn, err := c.open(ctx, environ, env, fsys, stderr)
@@ -338,7 +399,7 @@ func Main(args []string, stdout, stderr io.Writer, environ []string, fsys fs.FS)
 		if *to < 0 {
 			return usageErr(errors.New("--to 不得为负数"))
 		}
-		if !c.wantsDB(env) {
+		if !c.wantsDBOrFile(env) {
 			return usageErr(errors.New("up 需要连接选项（--config 或 --host/--socket）"))
 		}
 		r, closeFn, err := c.open(ctx, environ, env, fsys, stderr)
@@ -393,7 +454,7 @@ func Main(args []string, stdout, stderr io.Writer, environ []string, fsys fs.FS)
 		if toSet && *to == 0 { // 显式的 --to 0 即「回退全部」，不能静默退化成回退一步
 			*all = true
 		}
-		if !c.wantsDB(env) {
+		if !c.wantsDBOrFile(env) {
 			return usageErr(errors.New("down 需要连接选项（--config 或 --host/--socket）"))
 		}
 		r, closeFn, err := c.open(ctx, environ, env, fsys, stderr)
@@ -425,7 +486,7 @@ func Main(args []string, stdout, stderr io.Writer, environ []string, fsys fs.FS)
 		if *ver <= 0 {
 			return usageErr(errors.New("recover 必须指定 --version N（dirty 的迁移序号，见 migrate status）"))
 		}
-		if !c.wantsDB(env) {
+		if !c.wantsDBOrFile(env) {
 			return usageErr(errors.New("recover 需要连接选项（--config 或 --host/--socket）"))
 		}
 		r, closeFn, err := c.open(ctx, environ, env, fsys, stderr)
@@ -480,4 +541,17 @@ func writeStatusText(w io.Writer, st *Status) {
 		}
 		_, _ = fmt.Fprintf(w, "  %06d  %-10s %-12s %-14s 校验和:%-9s %s\n", it.Version, it.State, it.Class, it.Name, it.ChecksumState, at)
 	}
+}
+
+// fsFS 是 fs.FS 的别名（credsource.go 使用，避免与局部变量名冲突）。
+type fsFS = fs.FS
+
+func newFlagSet(name string, stderr io.Writer) *flag.FlagSet {
+	f := flag.NewFlagSet(name, flag.ContinueOnError)
+	f.SetOutput(stderr)
+	return f
+}
+
+func notifyContext() (context.Context, context.CancelFunc) {
+	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 }

@@ -16,6 +16,7 @@ import (
 	auditrepo "github.com/wuekevin/lingedge/internal/platform/audit/repository"
 	"github.com/wuekevin/lingedge/internal/platform/httpx"
 	"github.com/wuekevin/lingedge/internal/platform/server"
+	"github.com/wuekevin/lingedge/internal/platform/setup"
 	"github.com/wuekevin/lingedge/internal/platform/signingkeys"
 	"github.com/wuekevin/lingedge/internal/platform/sysconfig"
 	"github.com/wuekevin/lingedge/internal/platform/taskrt/taskapi"
@@ -46,6 +47,37 @@ type Assembly struct {
 	// Keys 是签名/CA 密钥服务（Story 1.23）：GET /admin/system/signing-keys；Initialize 供 Story 1.24 安装向导调用，Sign 供修订发布（3.x）调用。
 	Keys *signingkeys.Service
 }
+
+// NewSetupAdmin 是安装向导（setup mode，Story 1.24）创建管理员所需的认证能力：用向导迁移完成后装配的 app 池与 Redis 构造一个认证模块，
+// 把它的 Bootstrap 入口适配给 internal/platform/setup（platform 层不得 import internal/auth，经装配层注入）。
+func NewSetupAdmin(d setup.PostDeps) (setup.AdminService, error) {
+	m, err := auth.New(d.Ctx, auth.Options{Pool: d.Pool, Redis: d.Redis, Clock: d.Clock, IDs: d.IDs, Log: d.Log, Argon2: d.Argon2, Box: d.Box, Audit: d.Audit})
+	if err != nil {
+		return nil, err
+	}
+	return setupAdmin{b: m.Bootstrap()}, nil
+}
+
+type setupAdmin struct{ b auth.Bootstrapper }
+
+func (a setupAdmin) CreateAdmin(ctx context.Context, in setup.AdminCreate) (setup.AdminCreated, error) {
+	r, err := a.b.CreateAdmin(ctx, auth.BootstrapAdminInput{Email: in.Email, DisplayName: in.DisplayName, Password: in.Password, Locale: in.Locale})
+	return setup.AdminCreated{UserUID: r.UserUID, Created: r.Created, TOTPEnabled: r.TOTPEnabled}, err
+}
+
+func (a setupAdmin) BeginTOTP(ctx context.Context, userUID string) (setup.TOTPEnrollment, error) {
+	e, err := a.b.BeginTOTP(ctx, userUID)
+	if err != nil {
+		return setup.TOTPEnrollment{}, err
+	}
+	return setup.TOTPEnrollment{Secret: e.Secret, OTPAuthURI: e.OTPAuthURI}, nil
+}
+
+func (a setupAdmin) ConfirmTOTP(ctx context.Context, userUID, code string) ([]string, error) {
+	return a.b.ConfirmTOTP(ctx, userUID, code)
+}
+
+func (a setupAdmin) HasAdmin(ctx context.Context) (bool, error) { return a.b.HasAdmin(ctx) }
 
 // New 创建装配根。
 func New(o ...Options) *Assembly {
@@ -157,5 +189,11 @@ func (a *Assembly) Register(r *httpx.Router, deps server.Deps) error {
 	if a.Audit != nil { // nil = 仅导出路由清单：处理函数不会被调用
 		auditRepo, rec, withTx = a.Audit.Repo(), a.Audit, deps.DB.WithTx
 	}
-	return errors.Join(m.Register(r), t.Register(r), taskapi.Register(r, deps.Tasks, rec, withTx), auditapi.Register(r, auditRepo), sys.Register(r), keys.Register(r))
+	// 安装向导路由（Story 1.24）：正常模式（已安装）与清单导出都注册——每个 operation 返回 410 setup.already_installed（MIN-04），setup mode 由
+	// server.RunSetup 另行装配（只含这些路由、/setup 页与 /healthz，其余 503）。
+	wiz, err := setup.New(setup.Options{Installed: true})
+	if err != nil {
+		return err
+	}
+	return errors.Join(m.Register(r), t.Register(r), taskapi.Register(r, deps.Tasks, rec, withTx), auditapi.Register(r, auditRepo), sys.Register(r), keys.Register(r), wiz.Register(r))
 }

@@ -12,20 +12,23 @@ func runCLI(args ...string) (string, string, int) {
 	return so.String(), se.String(), code
 }
 
-// AC2：setup 在 1.24 前不注册（不假装可用）；未知子命令同样 2。
-func TestSetupIsNotRegisteredBeforeStory124(t *testing.T) {
-	for _, sub := range []string{"setup", "bogus"} {
-		_, se, code := runCLI(sub)
-		if code != 2 || !strings.Contains(se, "未知子命令") {
-			t.Errorf("%s: code=%d stderr=%q", sub, code, se)
-		}
+// Story 1.24：setup 子命令已注册（无头安装，--from-file）；未知子命令仍然 2；help 提及 setup 与 db。
+func TestSetupSubcommandRegisteredAndUnknownStillRejected(t *testing.T) {
+	_, se, code := runCLI("bogus")
+	if code != 2 || !strings.Contains(se, "未知子命令") {
+		t.Errorf("bogus: code=%d stderr=%q", code, se)
 	}
-	if _, se, _ := runCLI("help"); strings.Contains(se, "setup") {
-		t.Error("用法文本不应出现 setup")
+	// setup 缺 --from-file：用法错误 2，且不是「未知子命令」。
+	_, se, code = runCLI("setup")
+	if code != 2 || strings.Contains(se, "未知子命令") || !strings.Contains(se, "--from-file") {
+		t.Errorf("setup 无参数应为用法错误: code=%d stderr=%q", code, se)
 	}
 	so, _, code := runCLI("help")
-	if code != 0 || strings.Contains(so, "setup") {
-		t.Errorf("help 输出不得提及 setup: %q", so)
+	if code != 0 || !strings.Contains(so, "setup") {
+		t.Errorf("help 应列出 setup: %q", so)
+	}
+	if _, _, code := runCLI("db"); code != 2 {
+		t.Errorf("db 缺子命令应 2: %d", code)
 	}
 }
 

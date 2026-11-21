@@ -466,8 +466,9 @@ func TestSubcommandSurface(t *testing.T) {
 		}
 		return string(out), code
 	}
-	if out, code := run("setup"); code != 2 || !strings.Contains(out, "未知子命令") {
-		t.Errorf("setup 在 1.24 前不应注册: %d %s", code, out)
+	// Story 1.24：setup 子命令已注册（无头安装）：缺 --from-file 是用法错误（2），而不是「未知子命令」。
+	if out, code := run("setup"); code != 2 || strings.Contains(out, "未知子命令") || !strings.Contains(out, "--from-file") {
+		t.Errorf("setup 应已注册（缺 --from-file 为用法错误）: %d %s", code, out)
 	}
 	if out, code := run("bogus"); code != 2 || !strings.Contains(out, "未知子命令") {
 		t.Errorf("未知子命令: %d %s", code, out)

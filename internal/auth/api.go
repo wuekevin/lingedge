@@ -7,6 +7,17 @@ import (
 	"github.com/wuekevin/lingedge/internal/platform/httpx"
 )
 
+// Bootstrapper 是安装向导（Story 1.24）的管理员引导入口：创建首个超级管理员（口令由安装者设定、强度校验）、可选绑定 TOTP；
+// 复用 1.16/1.17/1.18 的口令哈希、TOTP 与角色授予，审计动作 setup.admin（Actor = 系统组件 setup）。装配层把它适配给 internal/platform/setup。
+type Bootstrapper = handler.Bootstrapper
+
+// BootstrapAdminInput / BootstrapAdminResult / TOTPEnrollment 是 Bootstrapper 的输入输出类型。
+type (
+	BootstrapAdminInput  = handler.BootstrapAdminInput
+	BootstrapAdminResult = handler.BootstrapAdminResult
+	TOTPEnrollment       = handler.TOTPEnrollment
+)
+
 // HooksOptions 是 Module.Hooks 的装配参数（租户目录与审计钩子）。
 type HooksOptions = handler.HooksOptions
 
@@ -31,6 +42,8 @@ type Module interface {
 	// Hooks 返回 REST 钩子的完整装配（认证 + RBAC 授权 + 再认证 + 完整租户 Scope 钩子 + 真实审计钩子（HooksOptions.Auditor）+ 自助最小授权）：装配点与集成测试共用。
 	// o.Tenants 是租户目录（租户模块）：未装配时 acting-as 保持安全拒绝。
 	Hooks(o HooksOptions) httpx.Hooks
+	// Bootstrap 返回安装向导的管理员引导入口（Story 1.24）。
+	Bootstrap() Bootstrapper
 	// Flush 等待已派发的后台写入（DB 兜底失败计数）完成；停机前与测试断言前调用。
 	Flush()
 }

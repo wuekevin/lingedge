@@ -42,8 +42,8 @@ func TestCatalogIsConsistent(t *testing.T) {
 	if knownAction("no.such_action") || Registered("noSuchOperation") || !Registered("createUser") || ActionsFor("noSuchOperation") != nil {
 		t.Error("Registered/ActionsFor/knownAction 判定不正确")
 	}
-	if len(ops) != 31 {
-		t.Errorf("应登记 31 个 operation: %d", len(ops))
+	if len(ops) != 39 {
+		t.Errorf("应登记 39 个 operation（含安装向导 8 个，Story 1.24）: %d", len(ops))
 	}
 }
 

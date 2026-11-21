@@ -12,7 +12,7 @@ var requiredRegistered = []taskrt.Type{}
 
 // pendingHandlers 登记「TaskType 已在 OpenAPI/taskrt 白名单中、处理函数属后续 Story、当前**有意**未登记」的类型及其归属（Story 1.22b）：
 // 这是「仅登记不实现」——不写假处理函数。当前唯一一项：secrets.rewrap 的原语（pkg/secretbox.Box.RewrapAll）与库表仓储（internal/platform/secrets/repository）
-// 均已就绪并有真实 MySQL 测试（Story 1.11），worker 任务接线随 Tools 密钥轮换/备份流程的 Story（tools-design §13/§17）交付。
+// 均已就绪并有真实 MySQL 测试（Story 1.11）；Story 1.24 另提供运行期凭据文件的重包装原语（internal/platform/dbcred.RewrapFile/KEKIDs，ADR-026 §8：该文件不在数据库，须作为 secrets.rewrap 的额外目标，并把其 kek_id 计入「仍被引用」），worker 任务接线随 Tools 密钥轮换/备份流程的 Story（tools-design §13/§17）交付。
 // 一旦某类型被登记（实现了处理函数），测试要求把它从这里移到 requiredRegistered，防止清单陈旧。
 var pendingHandlers = []struct {
 	Type  taskrt.Type

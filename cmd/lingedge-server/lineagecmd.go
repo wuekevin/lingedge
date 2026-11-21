@@ -25,7 +25,7 @@ const lineageUsage = `用法: lingedge-server lineage <show|bump> [--config FILE
          供 Tools 在「数据库恢复」之后、启动 Server 之前调用（ADR-002 §12、tools-design §17.5）。
          设置项不存在（安装未完成）时拒绝。
 
-使用 server.yaml 的 app 账号（database.*；口令经 LINGEDGE_DATABASE__PASSWORD 或 database.password_file），不需要迁移账号。
+使用 app 账号（database.*；口令经环境变量 LINGEDGE_DATABASE__PASSWORD / database.password_file 显式提供，缺省由安装向导写入的运行期凭据文件合并，ADR-026），不需要迁移账号。
 退出码: 0 成功；1 失败；2 用法错误
 `
 
@@ -53,6 +53,13 @@ func lineageMain(args []string, stdout, stderr io.Writer, environ []string) int 
 	cfg, err := loadConfig(*cfgPath, environ, false)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "lineage: %v\n", err)
+		return 1
+	}
+	ctx0, stop0 := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	err = mergeRuntime(ctx0, cfg, false) // 统一合并入口：显式通道优先，缺省读运行期凭据文件（ADR-026 §3）
+	stop0()
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "lineage: 运行期凭据不可用: %v\n", err)
 		return 1
 	}
 	if err := requireDatabase(cfg); err != nil {
@@ -108,7 +115,7 @@ func lineageMain(args []string, stdout, stderr io.Writer, environ []string) int 
 // requireDatabase 检查 database 节的必需项（lineage/迁移类命令不需要 Redis 与 server.env）。
 func requireDatabase(c *config.Config) error {
 	if c.Database.Host == "" || c.Database.Name == "" || c.Database.User == "" || !c.Database.Password.IsSet() {
-		return errors.New("缺少数据库连接配置：需要 database.host/name/user 与口令（环境变量 LINGEDGE_DATABASE__PASSWORD 或 database.password_file）")
+		return errors.New("缺少数据库连接配置：需要 database.host/name/user 与口令（运行期凭据文件、环境变量 LINGEDGE_DATABASE__PASSWORD 或 database.password_file）")
 	}
 	return nil
 }

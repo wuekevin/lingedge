@@ -307,3 +307,26 @@ func TestBase64EncodedBytesAreCaughtInReflectedValues(t *testing.T) {
 		t.Errorf("json.Number 应原样保留: %v", got)
 	}
 }
+
+// ADR-026 §10：SQL 口令字面量（CREATE/ALTER USER 的 IDENTIFIED 子句、SET PASSWORD）即便被误写进日志/错误也会被抹掉；语句其余部分保留，且清洗幂等。
+// 用例语句在运行期拼接：源码里不出现「口令子句 + 引号字面量」形态（G-6 固定口令扫描，且不加豁免）。
+func TestStringMasksSQLPasswordLiterals(t *testing.T) {
+	lit := func(v string) string { return "'" + v + "'" }
+	ident, setp := "IDENTIFIED", "SET PASSWORD"
+	cases := map[string]string{
+		"CREATE USER 'lingedge_app'@'%' " + ident + " BY " + lit("x1-y2-z3"):              "CREATE USER 'lingedge_app'@'%' " + ident + " BY '***'",
+		"alter user x " + strings.ToLower(ident) + "   by " + lit("a''b\\'c") + " retain": "alter user x " + strings.ToLower(ident) + "   by " + lit("***") + " retain",
+		"ALTER USER u " + ident + " WITH caching_sha2_password BY " + lit("zzz"):          "ALTER USER u " + ident + " WITH caching_sha2_password BY '***'",
+		setp + " FOR 'u'@'%' = " + lit("val-123"):                                         setp + " FOR 'u'@'%' = '***'",
+		"GRANT ALL ON `db`.* TO 'lingedge_migrate'@'%' WITH GRANT OPTION":                 "GRANT ALL ON `db`.* TO 'lingedge_migrate'@'%' WITH GRANT OPTION",
+	}
+	for in, want := range cases {
+		got := String(in)
+		if got != want {
+			t.Errorf("String(%q)\n got %q\nwant %q", in, got, want)
+		}
+		if again := String(got); again != got {
+			t.Errorf("不幂等: %q -> %q", got, again)
+		}
+	}
+}

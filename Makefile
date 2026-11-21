@@ -130,7 +130,8 @@ check-scaffold:
 
 # --- 迁移框架（Story 1.6）----------------------------------------------------------------------------
 # `make migrate MIGRATE_ARGS="status --host 127.0.0.1 --database lingedge"`：构建 lingedge-server 并运行其 migrate 子命令
-# （迁移账号口令经环境变量 LINGEDGE_MIGRATE_DB_PASSWORD 或 LINGEDGE_MIGRATE_DB_PASSWORD_FILE，不经命令行）。
+# （迁移账号口令经环境变量 LINGEDGE_MIGRATE_DB_PASSWORD 或 LINGEDGE_MIGRATE_DB_PASSWORD_FILE，不经命令行；其后依次是
+# root 侧 migrate.yaml 与交互输入，见 docs/operations/secrets.md §8、ADR-026 §4）。
 MIGRATE_ARGS ?= help
 migrate:
 	@mkdir -p bin
