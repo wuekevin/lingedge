@@ -64,6 +64,8 @@ func collectOpts(t *testing.T, scripts externalScripts, bt string) Options {
 	le := true
 	return Options{Runner: r, FS: baota.OSFS{Root: filepath.Join(fixtureRoot, "baota", bt)}, ProcRoot: materializeProc(t),
 		UserDBPath: filepath.Join(fixtureRoot, "passwd"), LittleEndian: &le, DialTimeout: 2 * time.Second,
+		// 1.31b：既有用例只验证 TCP 路径；关闭 unix socket 自动发现，以免探测到开发机上常驻的 /tmp/mysql.sock
+		MySQLSockets: []string{}, RedisSockets: []string{},
 		Now: time.Date(2026, 11, 21, 1, 2, 3, 0, time.UTC)}
 }
 

@@ -30,7 +30,7 @@ context:
 ## 只读证明（测试）
 
 - **不打开口令文件**：测试把「金丝雀」口令文件（`default.pl`、`default.db`、`other.db`、`mysql_root.pl`、`redis.conf`、`my.cnf`、`*.pem`、`root_pass_hint`…）写进夹具的**临时副本**（仓库里没有任何固定口令），用记录式 `FS`（包装真实 `OSFS`，只记录访问）探测：断言没有任何读取指向这些文件、序列化结果不含金丝雀串，且直接读取每一个都被 `readGuard` 拒绝；非敏感文件仍可读（防 guard 误伤）。
-- **不写入**：探测前后对整棵文件树做快照（路径/模式/mtime/内容）逐项比较。`OSFS` 不跟随符号链接（`TestOSFSDoesNotFollowSymlinks`、`TestVhostSymlinkOutsideNginxIsNotFollowed`）。
+- **不写入**：探测前后对整棵文件树做快照（路径/模式/mtime/内容）逐项比较。`OSFS` 不跟随符号链接（`TestOSFSDoesNotFollowSymlinks`、`TestVhostSymlinkOutsideNginxIsNotFollowed`）。（1.31b：vhost 的 `include` 经 `Includer` 受控跟随，规则见 1.31b 与 tools-design §11.4。）
 - **只读命令**：`readOnlyRun` 的 argv 表（`systemctl stop/restart/daemon-reload`、`ss -K`、`nginx -s stop`、`mysqld --initialize`、改写 mysql 语句/追加 `-p` 口令等全部在 safeexec 之前被拒绝）；`Collect` 经脚本化的外部程序验证 `ss`/`systemctl` 各只被以 `-H -lntup`/`list-units …` 调用一次。服务器端证明：真实临时 MySQL 的 `general_log` 里探测用户只执行了 `SELECT VERSION()`（至多外加客户端自带的只读 `select @@version_comment`），真实临时 Redis 的 `INFO commandstats` 增量只含 `auth`/`info`（`ping` 在 NOAUTH 下计入 rejected）。口令（正确/错误）不出现在任何结果、错误、警告里；向非环回地址的 Redis 端点即使被要求 `AUTH` 也不发送口令。
 
 ## 测试（真实、无 Mock）
@@ -70,5 +70,6 @@ context:
 ## 遗留与风险
 
 - **代码已完成、待环境验证（ENV-LNX / ENV-BT，Story 1.45）**：真实 Linux 上的 `ss -H -lntup` 与 `/proc/net/*`、`/proc/<pid>/fd` 输出与夹具的一致性（夹具是按真实格式构造）；`/proc/meminfo`、`mountinfo`、`statfs` 的真实值与 `platform_linux_test.go`（本机只编译）；真实 `systemctl list-units` 输出；cgroup v1/v2 单元推导；**真实宝塔面板**：目录布局、`port.pl`、`bt` 命令位置、面板版本来源文件（`class/common.py` 的 `version`、`config/version.pl`）与各 `version.pl`、vhost 生成样式、WAF/插件目录名；真实 Linux 机上的 MySQL/Redis 版本探测（`mysqld --version` 等）与非 root 运行时的降级行为。
-- **属后续 Story**：1.33 编排接线（调用 `Collect`、展示 Plan、在预检里处理 `ListenersKnown=false` 与 `Assess` 的结果、把 `RecordHostBaota` 放进安装步骤）；1.42 doctor（复用 `Result`/`Report`，展示 `host.baota`、对 `state.drift` 等）；Server 向导（1.39/向导族）负责 MySQL/Redis 的配置引导与凭据收集——本 Story 只提供 `Creds` 入口与只读探测；`status`/`list` 展示 host 信息；Node.js 经 nvm 等非固定目录安装的识别（固定目录解析之外）。
-- **已知限制**：`Result.System.Listeners` 对 `*`/`0.0.0.0`/`::` 的双栈语义沿用 resolver 的保守处理（`ss` 不给 `IPV6_V6ONLY`）；站点解析不处理 `include`（不跟随文件引用，设计如此）；MySQL 的 unix socket 端点不探测（TCP 端点与握手）。
+- **属后续 Story**：1.33 编排接线（调用 `Collect`、展示 Plan、在预检里处理 `ListenersKnown=false` 与 `Assess` 的结果、把 `RecordHostBaota` 放进安装步骤）；1.42 doctor（复用 `Result`/`Report`，展示 `host.baota`、对 `state.drift` 等）；Server 向导（1.39/向导族）负责 MySQL/Redis 的配置引导与凭据收集——本 Story 只提供 `Creds` 入口与只读探测；`status`/`list` 展示 host 信息（归 1.42）。
+- **已在 1.31b 处理（见 `docs/bmad/stories/1-31b-遗留项清理.md`）**：站点 vhost 的 `include` 受控跟随、MySQL/Redis unix socket 端点探测、nvm/fnm/volta/n/asdf/宝塔 Node 项目管理器等非固定目录的 Node.js 识别。
+- **已知限制**：`Result.System.Listeners` 对 `*`/`0.0.0.0`/`::` 的双栈语义沿用 resolver 的保守处理（`ss` 不给 `IPV6_V6ONLY`）。（原「站点解析不处理 `include`」「MySQL 的 unix socket 端点不探测」两项已在 1.31b 解除。）

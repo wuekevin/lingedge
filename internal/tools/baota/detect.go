@@ -23,6 +23,8 @@ type Options struct {
 	FS   FS        // 默认 OSFS{Root: "/"}
 	Exec Exec      // 可选
 	Now  time.Time // 零值取 time.Now()
+	// Include 配置 vhost 的受控 include 跟随（白名单根、上限）；零值取默认，见 include.go。
+	Include IncludeOptions
 }
 
 // 宝塔默认布局（tools-design §11；真实机器上的核对属 ENV-BT）。
@@ -56,7 +58,7 @@ func Probe(ctx context.Context, o Options) Report {
 	if now.IsZero() {
 		now = time.Now()
 	}
-	p := &prober{o: o, ctx: ctx}
+	p := &prober{o: o, ctx: ctx, inc: NewIncluder(o.FS, o.Include)}
 	r := Report{ProbedAt: now.UTC().Format("2006-01-02T15:04:05.000Z"),
 		Evidence: []Evidence{}, WebServers: []WebServer{}, Databases: []DBInstall{}, PHP: []PHP{}, Sites: []Site{},
 		Firewalls: []Firewall{}, WAF: []WAF{}, Plugins: []string{}, Services: []Service{}, Notes: []string{}}
@@ -81,6 +83,7 @@ type prober struct {
 	o   Options
 	ctx context.Context
 	r   *Report
+	inc *Includer
 }
 
 func (p *prober) note(f string, a ...any) {
@@ -360,22 +363,36 @@ const maxVhostFiles = 2000
 
 func (p *prober) sites() {
 	type dirSrc struct {
-		dir, source string
-		anyName     bool // sites-enabled 的条目通常没有 .conf 后缀
+		dir, source, prefix string
+		anyName             bool // sites-enabled 的条目通常没有 .conf 后缀
 	}
 	var dirs []dirSrc
 	for _, w := range p.r.WebServers {
 		if w.VhostDir != "" {
-			dirs = append(dirs, dirSrc{dir: w.VhostDir, source: w.Variant})
+			dirs = append(dirs, dirSrc{dir: w.VhostDir, source: w.Variant, prefix: path.Dir(w.Conf)})
 		}
 	}
 	for _, c := range webCands {
 		for _, d := range c.vhostDirs {
 			if p.isDir(d) {
-				dirs = append(dirs, dirSrc{dir: d, source: "system", anyName: strings.HasSuffix(d, "sites-enabled")})
+				dirs = append(dirs, dirSrc{dir: d, source: "system", prefix: path.Dir(c.conf), anyName: strings.HasSuffix(d, "sites-enabled")})
 			}
 		}
 	}
+	seenSite := map[string]bool{}
+	add := func(s Site) {
+		k := siteKey(p.inc.Canon(s.File), s)
+		if seenSite[k] || len(p.r.Sites) >= maxList {
+			return
+		}
+		seenSite[k] = true
+		p.r.Sites = append(p.r.Sites, s)
+	}
+	defer func() {
+		for _, w := range p.inc.Warnings() {
+			p.note("%s", w)
+		}
+	}()
 	seen := map[string]bool{}
 	files := 0
 	for _, d := range dirs {
@@ -409,7 +426,8 @@ func (p *prober) sites() {
 				p.note("无法读取 vhost 文件 %s", file)
 				continue
 			}
-			ss, perr := ParseVhost(file, d.source, b)
+			p.inc.SetPrefix(d.prefix)
+			ss, perr := p.inc.ParseData(file, d.source, b)
 			if perr != nil {
 				p.note("vhost 文件 %s 解析不完整：%v", file, perr)
 				if len(ss) == 0 {
@@ -417,12 +435,37 @@ func (p *prober) sites() {
 				}
 			}
 			for _, s := range ss {
-				if len(p.r.Sites) < maxList {
-					p.r.Sites = append(p.r.Sites, s)
-				}
+				add(s)
 			}
 		}
 	}
+	// 主配置文件：跟随其中的 include（vhost 常经 `include .../vhost/*.conf;` 引入），补全目录扫描没有覆盖到的 server 块。
+	doneConf := map[string]bool{}
+	for _, w := range p.r.WebServers {
+		if w.Conf == "" || doneConf[w.Conf] {
+			continue
+		}
+		doneConf[w.Conf] = true
+		ss, err := p.inc.ParseConf(w.Conf, w.Variant)
+		if err != nil {
+			p.note("无法跟随主配置 %s 的 include：%v", w.Conf, err)
+		}
+		for _, s := range ss {
+			add(s)
+		}
+	}
+}
+
+// siteKey 是站点的去重键：同一真实文件里内容相同的 server 块视为同一站点（目录扫描与 include 跟随会各看到一次）。
+func siteKey(canonFile string, s Site) string {
+	var b strings.Builder
+	b.WriteString(canonFile)
+	b.WriteString("|")
+	b.WriteString(strings.Join(s.ServerNames, " "))
+	for _, l := range s.Listens {
+		b.WriteString(sprintf("|%s/%d/%s/%v/%v/%v", l.Addr, l.Port, l.Unix, l.SSL, l.Default, l.UDP))
+	}
+	return b.String()
 }
 
 // readVhost 读取 vhost 文件。符号链接（Debian 的 sites-enabled → sites-available）仅当目标落在 /etc/nginx/ 之下时才读取目标——

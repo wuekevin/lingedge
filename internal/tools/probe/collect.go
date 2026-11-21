@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"os"
+	"regexp"
 	"runtime"
 	"sort"
 	"time"
@@ -15,13 +17,20 @@ import (
 
 // Options 配置 Collect。零值即生产默认（真实根文件系统、/proc、固定目录解析、127.0.0.1:3306/6379）。
 type Options struct {
-	Runner      *safeexec.Runner // 默认 NewRunner(nil)
-	FS          baota.FS         // 宝塔与既有环境的文件读取；默认 baota.OSFS{Root: "/"}
-	ProcRoot    string           // 默认 /proc（Linux）；非 Linux 默认空 = 不可用
-	UserDBPath  string           // 默认 /etc/passwd
-	MySQL       []Endpoint       // 默认 127.0.0.1:3306
-	Redis       []Endpoint       // 默认 127.0.0.1:6379
-	Creds       Creds            // 可选；见 Creds
+	Runner     *safeexec.Runner // 默认 NewRunner(nil)
+	FS         baota.FS         // 宝塔与既有环境的文件读取；默认 baota.OSFS{Root: "/"}
+	ProcRoot   string           // 默认 /proc（Linux）；非 Linux 默认空 = 不可用
+	UserDBPath string           // 默认 /etc/passwd
+	MySQL      []Endpoint       // 默认 127.0.0.1:3306；可含 unix 端点（UnixEndpoint），声明了就一定探测
+	Redis      []Endpoint       // 默认 127.0.0.1:6379；同上
+	// MySQLSockets / RedisSockets 是 unix socket 候选路径。nil：所有 TCP 端点都不可达时，自动探测默认位置
+	// （DefaultMySQLSockets/DefaultRedisSockets）与 /proc/net/unix 里发现的 socket，存在且是 socket 才探测；
+	// 非 nil（含空切片）：恰好探测这些路径（空 = 完全不探测 socket），不存在的记为不可达，不做自动发现。
+	MySQLSockets []string
+	RedisSockets []string
+	// NodeHomes 是扫描 nvm/fnm/volta 等的用户主目录；nil = /root、/home/* 与当前用户主目录；空切片 = 不扫描主目录。
+	NodeHomes   []string
+	Creds       Creds // 可选；见 Creds
 	DialTimeout time.Duration
 	Now         time.Time
 	// LittleEndian 指明 /proc/net 的主机字节序；nil = 运行主机的字节序。
@@ -47,7 +56,9 @@ type Result struct {
 	ListenersKnown  bool        `json:"listeners_known"`
 	ListenersSource string      `json:"listeners_source"` // ss | proc | none
 	Deps            []DepStatus `json:"deps"`
-	Warnings        []Warning   `json:"warnings"`
+	// NodeInstalls 是在非固定目录（nvm/fnm/volta/n/asdf/宝塔 Node 项目管理器）识别到的 Node.js（追加字段）。
+	NodeInstalls []NodeInstall `json:"node_installs"`
+	Warnings     []Warning     `json:"warnings"`
 }
 
 func hostLittleEndian() bool { return binary.NativeEndian.Uint16([]byte{1, 0}) == 1 }
@@ -85,7 +96,7 @@ func Collect(ctx context.Context, o Options) (Result, error) {
 	}
 	c := &collector{o: o, le: le}
 	c.res.System = resolver.System{OS: runtime.GOOS, Arch: runtime.GOARCH, Disks: []resolver.Disk{}, Listeners: []resolver.Listener{}, Deps: map[string]resolver.Dep{}}
-	c.res.Sockets, c.res.Deps, c.res.Warnings = []Socket{}, []DepStatus{}, []Warning{}
+	c.res.Sockets, c.res.Deps, c.res.Warnings, c.res.NodeInstalls = []Socket{}, []DepStatus{}, []Warning{}, []NodeInstall{}
 
 	c.memoryAndDisks()
 	if err := ctx.Err(); err != nil {
@@ -295,7 +306,7 @@ func (c *collector) services(ctx context.Context) {
 func (c *collector) deps(ctx context.Context) {
 	// MySQL / MariaDB
 	var my *DepStatus
-	for _, ep := range c.o.MySQL {
+	probeMy := func(ep Endpoint) {
 		st := ProbeMySQL(ctx, c.o.Runner, ep, c.o.Creds, c.o.DialTimeout)
 		c.res.Deps = append(c.res.Deps, st)
 		if st.Reachable && my == nil {
@@ -303,8 +314,14 @@ func (c *collector) deps(ctx context.Context) {
 			my = &cp
 		}
 	}
+	for _, ep := range c.o.MySQL {
+		probeMy(ep)
+	}
+	for _, ep := range c.socketEndpoints(c.o.MySQLSockets, my == nil, DefaultMySQLSockets, reMySQLSockName) {
+		probeMy(ep)
+	}
 	if my != nil {
-		c.res.System.Deps["mysql"] = resolver.Dep{Detected: true, Version: my.Version, Source: "tcp " + my.Endpoint.addr(), Flavor: my.Flavor}
+		c.res.System.Deps["mysql"] = resolver.Dep{Detected: true, Version: my.Version, Source: my.Endpoint.source(), Flavor: my.Flavor}
 	} else if d, ok := c.installedDB("mysql"); ok {
 		c.res.System.Deps["mysql"] = d
 		c.warn("dep.mysql.unreachable", "检测到本机已安装 MySQL/MariaDB（%s）但 %s 不可达：不会代装或改动；请在 Server 安装向导中提供连接信息%s", d.Source, c.o.MySQL[0].addr(), btHint(c.res.Baota))
@@ -313,13 +330,19 @@ func (c *collector) deps(ctx context.Context) {
 	}
 	// Redis
 	var rd *DepStatus
-	for _, ep := range c.o.Redis {
+	probeRd := func(ep Endpoint) {
 		st := ProbeRedis(ctx, ep, c.o.Creds, c.o.DialTimeout)
 		c.res.Deps = append(c.res.Deps, st)
 		if st.Reachable && rd == nil {
 			cp := st
 			rd = &cp
 		}
+	}
+	for _, ep := range c.o.Redis {
+		probeRd(ep)
+	}
+	for _, ep := range c.socketEndpoints(c.o.RedisSockets, rd == nil, DefaultRedisSockets, reRedisSockName) {
+		probeRd(ep)
 	}
 	switch {
 	case rd != nil:
@@ -329,7 +352,7 @@ func (c *collector) deps(ctx context.Context) {
 				ver = d.Version
 			}
 		}
-		c.res.System.Deps["redis"] = resolver.Dep{Detected: true, Version: ver, Source: "tcp " + rd.Endpoint.addr(), Flavor: orDefault(rd.Flavor, "redis")}
+		c.res.System.Deps["redis"] = resolver.Dep{Detected: true, Version: ver, Source: rd.Endpoint.source(), Flavor: orDefault(rd.Flavor, "redis")}
 		if rd.AuthRequired && !rd.Authenticated {
 			c.warn("dep.redis.auth_required", "Redis %s 需要口令：未提供凭据，版本取自本机二进制；连通性验证由 Server 向导完成", rd.Endpoint.addr())
 		}
@@ -341,10 +364,44 @@ func (c *collector) deps(ctx context.Context) {
 			c.warn("dep.redis.absent", "未探测到 Redis（%s 不可达，也未发现本机安装）：Tools 不代装依赖；Server 向导会引导配置", c.o.Redis[0].addr())
 		}
 	}
-	// Node.js（website ssr 的运行时）
+	c.nodejs(ctx)
+}
+
+// nodejs 探测 Node.js（website ssr 的运行时）：PATH 上的 node（固定目录解析，经 safeexec）优先——那是实际会被执行的；
+// 没有时从 nvm/fnm/volta/n/asdf/宝塔等目录里只读识别（不执行），取版本最高者并提示它不在固定目录。
+func (c *collector) nodejs(ctx context.Context) {
+	cur, _ := os.UserHomeDir()
+	c.res.NodeInstalls = FindNodeInstalls(c.o.FS, nodeHomes(c.o.FS, c.o.NodeHomes, cur))
 	if v, flavor, err := (VersionExec{Runner: c.o.Runner}).Version(ctx, "node", "node"); err == nil {
 		c.res.System.Deps["nodejs"] = resolver.Dep{Detected: true, Version: v, Source: "node", Flavor: flavor}
+		return
 	}
+	if len(c.res.NodeInstalls) == 0 {
+		return
+	}
+	best := c.res.NodeInstalls[0]
+	c.res.System.Deps["nodejs"] = resolver.Dep{Detected: true, Version: best.Version, Source: best.Bin, Flavor: "nodejs"}
+	c.warn("dep.nodejs.not_in_path", "Node.js 不在固定目录/PATH 上，识别到 %d 个非固定目录安装（%s %s，来源 %s），取最高版本 %s；版本取自目录名/node_version.h，未执行；启动 website 时须使用该绝对路径", len(c.res.NodeInstalls), best.Manager, best.Bin, best.VersionSource, best.Version)
+}
+
+// socketEndpoints 给出要探测的 unix socket 端点。declared 非 nil：恰好这些；否则 auto 为真时发现候选并仅保留已存在的 socket。
+func (c *collector) socketEndpoints(declared []string, auto bool, defaults []string, re *regexp.Regexp) []Endpoint {
+	var eps []Endpoint
+	if declared != nil {
+		for _, p := range declared {
+			eps = append(eps, UnixEndpoint(p))
+		}
+		return eps
+	}
+	if !auto {
+		return nil
+	}
+	for _, p := range discoverSockets(defaults, c.o.ProcRoot, re) {
+		if _, err := CheckSocket(p); err == nil {
+			eps = append(eps, UnixEndpoint(p))
+		}
+	}
+	return eps
 }
 
 func orDefault(s, d string) string {

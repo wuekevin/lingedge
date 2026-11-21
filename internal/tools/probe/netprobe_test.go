@@ -177,9 +177,9 @@ func TestMySQLArgvShapeAndValidation(t *testing.T) {
 		ep   Endpoint
 		user string
 	}{
-		{Endpoint{"127.0.0.1", 3306}, "u; DROP"}, {Endpoint{"127.0.0.1", 3306}, "-e"}, {Endpoint{"127.0.0.1", 3306}, ""},
-		{Endpoint{"--host", 3306}, "u"}, {Endpoint{"a b", 3306}, "u"}, {Endpoint{"127.0.0.1", 0}, "u"}, {Endpoint{"127.0.0.1", 70000}, "u"},
-		{Endpoint{"h$(x)", 3306}, "u"}, {Endpoint{"127.0.0.1", 3306}, "u`x`"}, {Endpoint{"127.0.0.1", 3306}, "u\nx"},
+		{Endpoint{Host: "127.0.0.1", Port: 3306}, "u; DROP"}, {Endpoint{Host: "127.0.0.1", Port: 3306}, "-e"}, {Endpoint{Host: "127.0.0.1", Port: 3306}, ""},
+		{Endpoint{Host: "--host", Port: 3306}, "u"}, {Endpoint{Host: "a b", Port: 3306}, "u"}, {Endpoint{Host: "127.0.0.1", Port: 0}, "u"}, {Endpoint{Host: "127.0.0.1", Port: 70000}, "u"},
+		{Endpoint{Host: "h$(x)", Port: 3306}, "u"}, {Endpoint{Host: "127.0.0.1", Port: 3306}, "u`x`"}, {Endpoint{Host: "127.0.0.1", Port: 3306}, "u\nx"},
 	} {
 		if _, err := mysqlArgs(bad.ep, bad.user, time.Second); err == nil {
 			t.Errorf("%+v 应被拒绝", bad)

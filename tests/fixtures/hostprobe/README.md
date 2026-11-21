@@ -28,3 +28,11 @@ macOS 上没有 `ss`、`/proc`、宝塔，下列样本是**按真实 Linux/宝�
 | `baota/*` | 宝塔常见默认布局（`/www/server/panel`、`data/port.pl`、`/etc/init.d/bt`、`/www/server/nginx|mysql|redis|php/<ver>|btwaf`、`panel/vhost/nginx/*.conf`、`panel/plugin/*`）。**面板版本来源文件（`class/common.py` 的 `version = '…'`）与各 `version.pl` 是按经验构造，须在 ENV-BT 真机核对**；vhost 样本按宝塔生成的站点配置风格编写（含 `#SSL-START` 注释、多 listen、`default_server`、正则/通配 server_name、畸形配置） |
 
 `baota/*` 中不包含任何口令类文件。测试在运行时把「金丝雀」口令文件（`default.pl`、`default.db`、`redis.conf`、`my.cnf` 等）写进**临时副本**，以证明探测从不打开它们——这样仓库里也不存在固定口令。
+
+## C. Story 1.31b 追加（同样是按真实格式构造，待 ENV-LNX 复验）
+
+| 路径 | 格式依据 |
+|---|---|
+| `proc/net/unix` | Linux `/proc/net/unix`：`Num RefCount Protocol Flags Type St Inode Path`；监听的流式 socket 为 Flags `00010000`（SO_ACCEPTCON）、Type `0001`、St `01`；含已连接（Flags 0）、抽象命名空间（`@…`）、数据报（Type 0002）、无路径、路径含空格等边界行。用于从监听 socket 发现 MySQL/Redis 的非常规 socket 位置 |
+
+Node.js 的 nvm/fnm/volta/n/宝塔 Node 项目管理器布局与 vhost include 样本均在测试运行时按真实目录结构于临时目录构造（见 `internal/tools/probe/nodefind_test.go`、`internal/tools/baota/include_test.go`）；这些布局来自各工具的公开文档/惯例，**宝塔 Node 项目管理器的真实目录（`/www/server/nodejs/v<版本>/bin/node`）待 ENV-BT 真机核对**。MySQL/Redis 的 unix socket 探测使用本机真实临时 mysqld/redis-server 的真实 socket（`tests/integration/hostprobe`）。

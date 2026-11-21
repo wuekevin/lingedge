@@ -8,7 +8,8 @@ import (
 
 // Nginx 配置只读解析（用于预警同名域名/端口冲突，tools-design §11「站点配置」）。
 // 只做词法 + 块结构：注释、引号、转义、多 listen、嵌套块；畸形输入不 panic，返回已解析部分与 error。
-// 不处理 include（不跟随文件引用，避免读到范围外的文件），也不求值变量。
+// ParseVhost 本身不处理 include；include 的受控跟随由 include.go 的 Includer 完成（白名单根、深度/文件数/字节上限、防环、符号链接不越界）。
+// 也不求值变量。
 
 const (
 	maxConfBytes   = 1 << 20
@@ -43,6 +44,7 @@ type directive struct {
 	args  []string
 	block []directive
 	hasB  bool
+	file  string // 该指令所在的配置文件（include 展开后用于标注 Site.File 与畸形判定）
 }
 
 type tok struct {
@@ -170,12 +172,11 @@ func parseTree(toks []tok) ([]directive, error) {
 	return ds, err
 }
 
-// ParseVhost 解析一个 nginx 配置文件内容，返回其中全部 server 块（任意嵌套层）。
-// 畸形配置：返回能解析出的 server 块且 malformed=true，error 说明原因；永不 panic。
-func ParseVhost(file, source string, data []byte) (sites []Site, err error) {
+// lexParse 对一个配置文件的内容做词法+块结构解析（超大截断、panic 兜底）。
+func lexParse(data []byte) (tree []directive, err error) {
 	defer func() {
 		if r := recover(); r != nil { // 纵深防御：解析器不应 panic，但探测不能因配置畸形而崩溃
-			sites, err = nil, errors.New("baota: nginx 配置解析异常")
+			tree, err = nil, errors.New("baota: nginx 配置解析异常")
 		}
 	}()
 	if len(data) > maxConfBytes {
@@ -189,6 +190,21 @@ func ParseVhost(file, source string, data []byte) (sites []Site, err error) {
 	} else if parseErr != nil {
 		err = parseErr
 	}
+	return tree, err
+}
+
+// tagFile 把整棵树的指令标注为来自 file。
+func tagFile(ds []directive, file string) {
+	for i := range ds {
+		ds[i].file = file
+		if ds[i].hasB {
+			tagFile(ds[i].block, file)
+		}
+	}
+}
+
+// collectSites 取出树中全部 server 块（任意嵌套层）；bad 中的文件里的 server 标记 Malformed。
+func collectSites(tree []directive, source string, bad map[string]bool) (sites []Site) {
 	var walk func(ds []directive)
 	walk = func(ds []directive) {
 		for _, d := range ds {
@@ -196,7 +212,7 @@ func ParseVhost(file, source string, data []byte) (sites []Site, err error) {
 				return
 			}
 			if d.name == "server" && d.hasB {
-				sites = append(sites, buildSite(file, source, d.block, err != nil))
+				sites = append(sites, buildSite(d.file, source, d.block, bad[d.file]))
 				continue
 			}
 			if d.hasB {
@@ -205,7 +221,20 @@ func ParseVhost(file, source string, data []byte) (sites []Site, err error) {
 		}
 	}
 	walk(tree)
-	return sites, err
+	return sites
+}
+
+// ParseVhost 解析一个 nginx 配置文件内容，返回其中全部 server 块（任意嵌套层）。不跟随 include。
+// 畸形配置：返回能解析出的 server 块且 malformed=true，error 说明原因；永不 panic。
+func ParseVhost(file, source string, data []byte) (sites []Site, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			sites, err = nil, errors.New("baota: nginx 配置解析异常")
+		}
+	}()
+	tree, err := lexParse(data)
+	tagFile(tree, file)
+	return collectSites(tree, source, map[string]bool{file: err != nil}), err
 }
 
 func buildSite(file, source string, blk []directive, malformed bool) Site {

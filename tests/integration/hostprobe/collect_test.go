@@ -79,7 +79,9 @@ func options(t *testing.T, sc scripts, bt string, my, rd probe.Endpoint, mysqlBi
 	le := true
 	return probe.Options{Runner: r, FS: baota.OSFS{Root: filepath.Join(fixtureRoot, "baota", bt)}, ProcRoot: procRoot(t),
 		UserDBPath: filepath.Join(fixtureRoot, "passwd"), LittleEndian: &le, DialTimeout: 2 * time.Second,
-		MySQL: []probe.Endpoint{my}, Redis: []probe.Endpoint{rd}, Now: time.Date(2026, 11, 21, 1, 2, 3, 0, time.UTC)}
+		MySQL: []probe.Endpoint{my}, Redis: []probe.Endpoint{rd},
+		MySQLSockets: []string{}, RedisSockets: []string{}, // 1.31b：既有用例只验证 TCP 路径，不自动发现开发机上常驻的 socket
+		Now: time.Date(2026, 11, 21, 1, 2, 3, 0, time.UTC)}
 }
 
 // 真实临时 MySQL/Redis 参与的完整 Collect：依赖版本来自真实实例；宝塔/监听/服务来自夹具；结果可 JSON 往返。

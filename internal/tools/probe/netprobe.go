@@ -17,15 +17,47 @@ import (
 	"github.com/wuekevin/lingedge/internal/tools/security/safeexec"
 )
 
-// Endpoint 是一个待探测的 TCP 端点。
+// Endpoint 是一个待探测的端点：TCP（Host+Port，默认）或 unix socket（Type="unix"，Socket 为路径）。
+// Type/Socket 是追加式字段（omitempty）：既有 TCP 端点的 JSON 与字面量写法完全不变，空 Type 等于 "tcp"。
 type Endpoint struct {
-	Host string `json:"host"`
-	Port int    `json:"port"`
+	Host   string `json:"host,omitempty"`
+	Port   int    `json:"port,omitempty"`
+	Type   string `json:"type,omitempty"`   // tcp（缺省）| unix
+	Socket string `json:"socket,omitempty"` // Type=unix 时的 socket 路径
 }
 
-func (e Endpoint) addr() string { return net.JoinHostPort(e.Host, strconv.Itoa(e.Port)) }
+// UnixEndpoint 构造 unix socket 端点。
+func UnixEndpoint(socket string) Endpoint { return Endpoint{Type: "unix", Socket: socket} }
+
+// IsUnix 报告是否为 unix socket 端点。
+func (e Endpoint) IsUnix() bool { return e.Type == "unix" }
+
+func (e Endpoint) addr() string {
+	if e.IsUnix() {
+		return e.Socket
+	}
+	return net.JoinHostPort(e.Host, strconv.Itoa(e.Port))
+}
+
+// source 是写入 resolver.Dep.Source 的证据文本：`tcp host:port` 或 `unix /path`。
+func (e Endpoint) source() string {
+	if e.IsUnix() {
+		return "unix " + e.Socket
+	}
+	return "tcp " + e.addr()
+}
+
+func (e Endpoint) dial() (network, address string) {
+	if e.IsUnix() {
+		return "unix", e.Socket
+	}
+	return "tcp", e.addr()
+}
 
 func (e Endpoint) loopback() bool {
+	if e.IsUnix() {
+		return true // 本机 socket
+	}
 	if e.Host == "localhost" {
 		return true
 	}
@@ -69,6 +101,19 @@ func ProbeMySQL(ctx context.Context, r *safeexec.Runner, ep Endpoint, c Creds, t
 		timeout = defaultDialTimeout
 	}
 	st := DepStatus{Kind: "mysql", Endpoint: ep}
+	refused := false
+	if ep.IsUnix() {
+		info, err := CheckSocket(ep.Socket)
+		if err != nil {
+			st.Error = sanitize(err, c.MySQLPassword)
+			return st
+		}
+		if c.MySQLUser != "" && !info.Trusted {
+			// 凭据只发给「真实服务的 socket」：属主不是 root/当前用户/mysql 账号的 socket 可能是别人伪造的，口令会被截获。
+			st.Error = fmt.Sprintf("拒绝向属主 uid=%d 的 socket 发送 MySQL 凭据（属主不是 root、当前用户或 mysql/mariadb 账号）", info.UID)
+			c.MySQLUser, refused = "", true
+		}
+	}
 	if c.MySQLUser != "" {
 		v, err := mysqlSelectVersion(ctx, r, ep, c, timeout)
 		if err == nil {
@@ -91,7 +136,7 @@ func ProbeMySQL(ctx context.Context, r *safeexec.Runner, ep Endpoint, c Creds, t
 	}
 	st.Reachable, st.Version = true, ver
 	st.Flavor = flavorOfMySQL(ver)
-	if c.MySQLUser == "" {
+	if c.MySQLUser == "" && !refused {
 		st.Error = ""
 	}
 	return st
@@ -107,7 +152,8 @@ func flavorOfMySQL(v string) string {
 // mysqlGreeting 读取服务器握手包（Initial Handshake Packet）：3 字节长度 + 1 字节序号 + 载荷（协议版本 0x0a + 以 NUL 结尾的服务器版本串…）。
 func mysqlGreeting(ctx context.Context, ep Endpoint, timeout time.Duration) (string, error) {
 	d := net.Dialer{Timeout: timeout}
-	conn, err := d.DialContext(ctx, "tcp", ep.addr())
+	network, addr := ep.dial()
+	conn, err := d.DialContext(ctx, network, addr)
 	if err != nil {
 		return "", err
 	}
@@ -160,31 +206,49 @@ var (
 // mysqlSelectSQL 是认证探测唯一执行的语句。
 const mysqlSelectSQL = "SELECT VERSION()"
 
-// mysqlArgs 构造客户端的 argv（参数数组，不经 shell）。主机/用户名经严格字符集校验：不含空白与 shell 元字符，也不会以 - 开头被当成选项。
+// mysqlArgs 构造客户端的 argv（参数数组，不经 shell）。主机/用户名/socket 路径经严格字符集校验：不含空白与 shell 元字符，也不会以 - 开头被当成选项。
+// TCP：--protocol=tcp -h host -P port；unix：--protocol=socket --socket=path（只走本机 socket，不会回退到 TCP）。
 func mysqlArgs(ep Endpoint, user string, timeout time.Duration) ([]string, error) {
 	if !reMyUser.MatchString(user) || strings.HasPrefix(user, "-") {
 		return nil, errors.New("probe: MySQL 用户名含不允许的字符")
-	}
-	if !reMyHost.MatchString(ep.Host) || strings.HasPrefix(ep.Host, "-") || ep.Port < 1 || ep.Port > 65535 {
-		return nil, errors.New("probe: MySQL 地址不合法")
 	}
 	secs := int(timeout / time.Second)
 	if secs < 1 {
 		secs = 1
 	}
-	return []string{"--no-defaults", "--protocol=tcp", "-h", ep.Host, "-P", strconv.Itoa(ep.Port), "-u", user,
-		"--connect-timeout=" + strconv.Itoa(secs), "-N", "-B", "-e", mysqlSelectSQL}, nil
+	tail := []string{"-u", user, "--connect-timeout=" + strconv.Itoa(secs), "-N", "-B", "-e", mysqlSelectSQL}
+	if ep.IsUnix() {
+		if err := ValidateSocketPath(ep.Socket); err != nil {
+			return nil, err
+		}
+		return append([]string{"--no-defaults", "--protocol=socket", "--socket=" + ep.Socket}, tail...), nil
+	}
+	if !reMyHost.MatchString(ep.Host) || strings.HasPrefix(ep.Host, "-") || ep.Port < 1 || ep.Port > 65535 {
+		return nil, errors.New("probe: MySQL 地址不合法")
+	}
+	return append([]string{"--no-defaults", "--protocol=tcp", "-h", ep.Host, "-P", strconv.Itoa(ep.Port)}, tail...), nil
 }
 
-// mysqlArgvAllowed 校验一个 mysql 客户端 argv 恰好是 mysqlArgs 的形状（供只读 argv 表使用）。
+// mysqlArgvAllowed 校验一个 mysql 客户端 argv 恰好是 mysqlArgs 的两种形状之一（供只读 argv 表使用）。
 func mysqlArgvAllowed(args []string) bool {
-	if len(args) != 13 || args[0] != "--no-defaults" || args[1] != "--protocol=tcp" || args[2] != "-h" || args[4] != "-P" || args[6] != "-u" ||
-		!strings.HasPrefix(args[8], "--connect-timeout=") || args[9] != "-N" || args[10] != "-B" || args[11] != "-e" || args[12] != mysqlSelectSQL {
+	var tail []string
+	switch {
+	case len(args) == 13 && args[0] == "--no-defaults" && args[1] == "--protocol=tcp" && args[2] == "-h" && args[4] == "-P":
+		port, err := strconv.Atoi(args[5])
+		if err != nil || port < 1 || port > 65535 || !reMyHost.MatchString(args[3]) || strings.HasPrefix(args[3], "-") {
+			return false
+		}
+		tail = args[6:]
+	case len(args) == 10 && args[0] == "--no-defaults" && args[1] == "--protocol=socket" && strings.HasPrefix(args[2], "--socket="):
+		if ValidateSocketPath(strings.TrimPrefix(args[2], "--socket=")) != nil {
+			return false
+		}
+		tail = args[3:]
+	default:
 		return false
 	}
-	port, err := strconv.Atoi(args[5])
-	return err == nil && port >= 1 && port <= 65535 && reMyHost.MatchString(args[3]) && !strings.HasPrefix(args[3], "-") &&
-		reMyUser.MatchString(args[7]) && !strings.HasPrefix(args[7], "-")
+	return len(tail) == 7 && tail[0] == "-u" && strings.HasPrefix(tail[2], "--connect-timeout=") && tail[3] == "-N" && tail[4] == "-B" && tail[5] == "-e" && tail[6] == mysqlSelectSQL &&
+		reMyUser.MatchString(tail[1]) && !strings.HasPrefix(tail[1], "-")
 }
 
 func mysqlSelectVersion(ctx context.Context, r *safeexec.Runner, ep Endpoint, c Creds, timeout time.Duration) (string, error) {
@@ -291,8 +355,18 @@ func ProbeRedis(ctx context.Context, ep Endpoint, c Creds, timeout time.Duration
 		timeout = defaultDialTimeout
 	}
 	st := DepStatus{Kind: "redis", Endpoint: ep}
+	trusted := true // 凭据只发给环回地址，或属主受信的 unix socket
+	if ep.IsUnix() {
+		info, err := CheckSocket(ep.Socket)
+		if err != nil {
+			st.Error = sanitize(err, c.RedisPassword)
+			return st
+		}
+		trusted = info.Trusted
+	}
 	d := net.Dialer{Timeout: timeout}
-	conn, err := d.DialContext(ctx, "tcp", ep.addr())
+	network, addr := ep.dial()
+	conn, err := d.DialContext(ctx, network, addr)
 	if err != nil {
 		st.Error = sanitize(err, c.RedisPassword)
 		return st
@@ -333,6 +407,10 @@ func ProbeRedis(ctx context.Context, ep Endpoint, c Creds, timeout time.Duration
 		}
 		if !ep.loopback() {
 			st.Error = "拒绝向非环回地址明文发送 Redis 口令"
+			return st
+		}
+		if !trusted {
+			st.Error = "拒绝向属主不受信的 unix socket 发送 Redis 口令（属主不是 root、当前用户或 redis 账号）"
 			return st
 		}
 		args := []string{"AUTH", c.RedisPassword}

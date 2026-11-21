@@ -52,6 +52,8 @@ const dirPrefix = "leredis"
 type Options struct {
 	Password string // 非空则 requirepass
 	TLS      bool   // 仅 TLS 端口（--port 0）；CA 证书见 Instance.CAFile
+	// UnixSocket 同时开启 unix socket（Instance.Socket；权限 0700，仅本用户）。TCP 端口照常监听，既有用例不受影响。
+	UnixSocket bool
 }
 
 // Instance 是一个独立临时 redis-server。
@@ -60,6 +62,7 @@ type Instance struct {
 	Port   int
 	Opts   Options
 	CAFile string // TLS 时的 CA（PEM）
+	Socket string // Options.UnixSocket 时的 unix socket 路径
 
 	bin    string
 	cmd    *exec.Cmd
@@ -200,6 +203,10 @@ func (in *Instance) launch(port int) error {
 			"--maxmemory", "64mb", "--maxmemory-policy", "volatile-lru"}
 		if in.Opts.Password != "" {
 			args = append(args, "--requirepass", in.Opts.Password)
+		}
+		if in.Opts.UnixSocket {
+			in.Socket = filepath.Join(in.Dir, "r.sock") // 目录名很短，路径远小于 sun_path 上限
+			args = append(args, "--unixsocket", in.Socket, "--unixsocketperm", "700")
 		}
 		if in.Opts.TLS {
 			args = append(args, "--port", "0", "--tls-port", strconv.Itoa(p),
