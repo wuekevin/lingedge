@@ -105,7 +105,7 @@
 - **22 步标签与基线 §4.5 顺序逐一对应**，步号固定（脚本/日志可引用）；`✓` 完成、`●` 进行中、`○` 待办、`✗` 失败、`↷` 跳过（说明原因）。
 - 下载/校验步骤显示**真实**速度与字节；校验步骤明确写出「清单签名已验证（密钥指纹 SHA256:…）」「包 SHA256 与签名均通过」——这是供应链信任的可见确认。
 - 中段步骤失败 → 立即停止并进入 §4 的错误呈现，同时显示**恢复选项**：`[r] 重试此步  [b] 回滚本次安装  [q] 保留现场退出`。
-- **非 TTY 进度**：每步一行日志式输出（`[13/22] 校验 SHA256 与签名 … ok`），不做动画；`--json --stream` 输出 JSON Lines 事件（§7.3）。
+- **非 TTY 进度**：每步一行日志式输出（`[13/22] 校验 SHA256 与签名 … ok`），不做动画；`--json` 时 stderr 输出 NDJSON 进度事件（§7.3）。
 
 ### 3.4 完成输出（第 21–22 步）
 
@@ -162,7 +162,7 @@
 | 12 | ROLLBACK_FAILED | 回滚本身失败，**需人工恢复**（保留 journal 与备份） | 回滚也失败 |
 | 13 | INTERRUPTED | 存在未完成事务，需 `lingedge recover` | 上次被 kill/断电 |
 | 14 | NOT_INSTALLED | 目标组件未安装 | `service start node` 而未装 |
-| 130 | — | 用户中断（Ctrl+C），已按 journal 处理 | 已在安全点停止 |
+| 130 | SIGINT | 用户中断（Ctrl+C），已按 journal 处理 | 已在安全点停止 |
 
 - **10 与 12 的区分是关键 UX**：脚本/运维者必须能区分「失败但已恢复到可用状态」与「失败且需要人救」（二者互斥）。
 - `doctor`/`config validate` 的专用语义：存在**警告**但无错误 → 退出码 `0` 且 JSON 里 `warnings` 非空；`--strict` 把警告升为失败（退出码 `1`）。`config validate` 失败时指出**文件、行号/键路径**（FR-15）。
@@ -250,52 +250,67 @@
 
 ## 7. JSON 输出约定
 
+> **以 `docs/architecture/tools-design.md` §5/§6 为唯一事实源**（2026-11-21，Story 1.25 起与实现一致；此前本节的 `schema_version`/单个 `error` 对象/`--stream` 写法已废止）。schema 文件：`internal/tools/cli/schema/`（`envelope.schema.json` + 每命令 `data.<命令>.schema.json`），CI 以快照测试校验真实输出。
+
 ### 7.1 通则
-- 所有命令支持 `--json`：**stdout 仅输出一个 JSON 文档**（或 `--stream` 下的 JSON Lines）；人类可读日志、进度、警告一律走 stderr；`--json` 自动关闭色彩与交互。
-- 字段名 `snake_case`；时间用 RFC 3339 UTC；枚举值为稳定英文标识；**不本地化**；字段**只增不删不改义**（前向兼容），带 `schema_version`。
-- 退出码与 JSON 的 `ok`/`error` 一致；`ok=false` 时退出码非零。
+- 所有命令支持 `--json`：**stdout 仅输出一个 JSON 文档**；人类可读日志、警告、一次性提示与进度事件一律走 stderr（进度/提示为 NDJSON，`--progress=none` 可关闭）；`--json` 自动关闭色彩与交互（等价 `--non-interactive`）。`--json --help` 的帮助文本放在 `data.help`。
+- 字段名 `snake_case`；时间用 RFC 3339 UTC（毫秒）；枚举值为稳定英文标识；**不本地化**；字段**只增不删不改义**（前向兼容），版本标识为 `schema: "lingedge.cli/v1"`。
+- `ok == (exit_code == 0)`；`exit_code`/`exit_name` 取自 §4.2；失败时 `data` 为 `{}`，错误在 `errors[]`。
 
 ### 7.2 结果文档形状
 ```json
 {
-  "schema_version": "1",
+  "schema": "lingedge.cli/v1",
   "ok": true,
   "command": "status",
-  "tools_version": "1.0.0",
+  "run_id": "01JD5Y3C8Q5G7M0V1N2P3R4S5T",
   "exit_code": 0,
-  "data": { "components": [ { "name": "server", "version": "1.0.0", "state": "running", "health": "healthy" } ] },
-  "warnings": [ { "code": "CERT_EXPIRING", "message": "…" } ]
+  "exit_name": "OK",
+  "started_at": "2026-11-16T14:03:11.000Z",
+  "duration_ms": 25,
+  "dry_run": false,
+  "data": { "components": [ { "name": "server", "version": "1.0.0", "state": "running" } ] },
+  "warnings": [ { "code": "cert.expiring", "message": "…" } ],
+  "errors": []
 }
 ```
 失败：
 ```json
 {
-  "schema_version": "1",
+  "schema": "lingedge.cli/v1",
   "ok": false,
-  "command": "install server",
-  "exit_code": 3,
-  "error": {
-    "code": "PREFLIGHT_PORT_CONFLICT",
-    "category": "preflight",
-    "message": "端口 80/tcp 已被占用",
-    "details": { "port": 80, "proto": "tcp", "holder": "nginx", "pid": 1234 },
-    "hint": "释放端口或使用 --node-http-port 指定其他端口",
-    "system_state": "unchanged"
-  },
-  "warnings": []
+  "command": "install node",
+  "run_id": "01JD5Y3C8Q5G7M0V1N2P3R4S5T",
+  "exit_code": 4,
+  "exit_name": "PORT_CONFLICT",
+  "started_at": "2026-11-16T14:03:11.000Z",
+  "duration_ms": 1830,
+  "dry_run": false,
+  "data": {},
+  "warnings": [],
+  "errors": [
+    {
+      "code": "port.conflict",
+      "message": "TCP 80 已被进程 nginx(pid 1234) 占用",
+      "step": 4,
+      "hint": "释放端口或使用 --set 指定其他端口",
+      "system_state": "unchanged",
+      "details": { "port": 80, "proto": "tcp", "holder": "nginx", "pid": 1234 }
+    }
+  ]
 }
 ```
-- `error.code` 为稳定标识（大写蛇形）；`error.system_state` ∈ `unchanged | rolled_back | partial | needs_manual`，对应 §4.2 的 9/10/11 语义。
-- **绝不**在 JSON 中包含令牌、密码、私钥；需要输出的凭据类字段只给指纹/末四位。
+- `errors[].code` 为稳定小写点分标识；`errors[].system_state` ∈ `unchanged | rolled_back | partial | needs_manual`（可选，对应 §4.2 的 9/10/11 语义；本 Story 交付的错误恒为 `unchanged`）。
+- **绝不**在 JSON 中包含令牌、密码、私钥；envelope 在输出前对 `data/errors/warnings` 统一脱敏；需要输出的凭据类字段只给指纹/末四位。
 
-### 7.3 流式事件（`--json --stream`）
-每行一个事件，便于脚本与 CI 跟踪长任务：
+### 7.3 进度事件（stderr，NDJSON）
+`--json` 时 stderr 每行一个事件（`--progress=none` 关闭），便于脚本与 CI 跟踪长任务；结果仍只在 stdout 的 envelope 中：
 ```
-{"type":"step","step":13,"total":22,"name":"verify_package","state":"ok","ts":"2026-11-16T14:03:11Z"}
+{"type":"notice","code":"cli.non_interactive_auto","message":"…","ts":"2026-11-16T14:03:10.000Z"}
+{"type":"step","step":13,"total":22,"name":"verify_package","state":"ok","ts":"2026-11-16T14:03:11.000Z"}
 {"type":"progress","name":"download","bytes":13002342,"total_bytes":13002342}
-{"type":"result","ok":true,"exit_code":0,"data":{…}}
 ```
-- 最后一行必为 `type:"result"`；中途被中断则输出 `{"type":"result","ok":false,"exit_code":130,…}`。
+- 事件类型 `notice` 已由 Story 1.25 交付；`step`/`progress` 随 installer/downloader Story 交付。
 
 ## 8. 非交互、任务锁与中断恢复
 

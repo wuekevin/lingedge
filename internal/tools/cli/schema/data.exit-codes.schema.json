@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "--help exit-codes 的 data（退出码公开契约，CF-5）",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["exit_codes"],
+  "properties": {
+    "exit_codes": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["code", "name", "meaning", "typical"],
+        "properties": {"code": {"type": "integer"}, "name": {"type": "string"}, "meaning": {"type": "string"}, "typical": {"type": "string"}}
+      }
+    }
+  }
+}

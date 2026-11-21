@@ -242,8 +242,9 @@ security:
 	$(GATES) shell
 	$(GATES) tasktype
 	$(GATES) trustdomain
+	$(GATES) flags
 	$(GO) test -count=1 ./tests/security/...
-	@echo "make security: 已覆盖 G-2（租户隔离矩阵）/G-5/G-6/G-11/G-12（含任务类型白名单 tasktype）/三个信任域（trustdomain）/品牌；未接入（随对应 Story 追加）: G-1 G-3 G-4 G-7 G-8 G-9 G-10 G-13" >&2
+	@echo "make security: 已覆盖 G-2（租户隔离矩阵）/G-5/G-6/G-11/G-12（含任务类型白名单 tasktype）/三个信任域（trustdomain）/CLI 旧标志名（flags，MIN-04）/品牌；未接入（随对应 Story 追加）: G-1 G-3 G-4 G-7 G-8 G-9 G-10 G-13" >&2
 
 release:
 	$(call not_implemented,1.34)

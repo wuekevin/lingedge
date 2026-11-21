@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "list 的 data（tools-design §6）",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["components"],
+  "properties": {
+    "components": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["name", "version", "state", "unit", "run_user", "ports", "release_dir", "config_dir", "data_dir", "installed_at"],
+        "properties": {
+          "name": {"type": "string"}, "version": {"type": "string"}, "state": {"type": "string"}, "unit": {"type": "string"},
+          "run_user": {"type": "string"}, "ports": {"type": "array", "items": {"type": "integer", "minimum": 1}},
+          "release_dir": {"type": "string"}, "config_dir": {"type": "string"}, "data_dir": {"type": "string"},
+          "installed_at": {"type": "string"}, "prev_version": {"type": "string"}
+        }
+      }
+    }
+  }
+}

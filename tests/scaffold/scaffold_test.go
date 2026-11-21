@@ -167,6 +167,10 @@ func TestCmdEntriesAreVersionOnly(t *testing.T) {
 			imports = append(imports, p)
 		}
 		want := "os,github.com/wuekevin/lingedge/pkg/version"
+		if c == "lingedge" {
+			// Story 1.25：Tools 入口只做 wiring，命令树/退出码/输出全部在 internal/tools/cli。
+			want = "os,github.com/wuekevin/lingedge/internal/tools/cli"
+		}
 		if c == "lingedge-server" {
 			// Story 1.6/1.13：子命令分发（migrate 的迁移框架与嵌入的迁移文件；其余子命令与运行逻辑在同目录其他文件与 internal/platform/server）。
 			want = "fmt,io,os,strings,github.com/wuekevin/lingedge/internal/platform/migrate,github.com/wuekevin/lingedge/migrations,github.com/wuekevin/lingedge/pkg/version"
@@ -214,6 +218,20 @@ func TestCmdsPrintRealVersion(t *testing.T) {
 				t.Errorf("输出 %q，期望 %q", out, want)
 			}
 			var stderr bytes.Buffer
+			if c == "lingedge" {
+				// Story 1.25：lingedge 已有真实命令树。无参数且非 TTY（此处为管道）= 打印帮助、退出码 0；未知命令是用法错误（退出码 2）。
+				var stdout bytes.Buffer
+				help := exec.Command(bin)
+				help.Stdout, help.Stderr = &stdout, &stderr
+				if err := help.Run(); err != nil || !strings.Contains(stdout.String(), "version") {
+					t.Errorf("lingedge 无参数应打印帮助并以 0 退出：err=%v stdout=%q", err, stdout.String())
+				}
+				var ee *exec.ExitError
+				if err := exec.Command(bin, "no-such-command").Run(); !errors.As(err, &ee) || ee.ExitCode() != 2 {
+					t.Errorf("lingedge 未知命令应以退出码 2 退出，实际 %v", err)
+				}
+				return
+			}
 			bad := exec.Command(bin)
 			bad.Stderr = &stderr
 			var ee *exec.ExitError

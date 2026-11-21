@@ -61,7 +61,7 @@ development_status:
   1-22b-遗留项清理: review   # 开发完成（本机门禁见 docs/bmad/stories/1-22b-遗留项清理.md）：metrics.listen 仅回环（config 层拒绝）、server.trusted_proxies 配置化、装配根收敛为 cmd/lingedge-server/assembly、租户视角审计操作者展示名、令牌创建配额硬上限、被拒绝类审计（access.denied，防刷、best-effort）、设置跨键并发锁、setting_change 广播、安全敏感设置键分级再认证；无新迁移/无契约变更
   1-23-签名与-ca-密钥初始化-信任域②③: review   # 开发完成、本机门禁见 docs/bmad/stories/1-23-签名与-ca-密钥初始化-信任域②③.md：internal/platform/signingkeys（Initialize 幂等/并发安全/缺主密钥拒绝/与审计及 deploy.lineage 同事务，Ed25519 配置签名密钥 + ECDSA P-256 私有 CA 默认 10 年可配 5–10 年 + Server gRPC 叶证书 serverAuth/SAN/90 天，私钥信封加密 AAD=表|列|uid 用后清零）、pkg/signing（节点侧复用：修订签名 LINGEDGE-REVISION-V1 无过期、链式 keyset 防回滚/断链/篡改、指纹、CA 剩余有效期检查供 doctor）、GET /admin/system/signing-keys（仅公钥与指纹）、gates trustdomain + 二进制符号扫描（Server 无发行私钥加载逻辑）；无新迁移（lingedge_app 权限已足够，AA-7 无依赖）、CC-10 仅加法；setup 子命令未注册（1.24）
   1-24-server-setup-mode-与-web-安装向导后端-含-setup-token: review   # 开发完成、本机门禁见 docs/bmad/stories/1-24-*.md：internal/platform/setup（向导 Service：与传输无关，HTTP 与 setup --from-file 共用）+ dbcred（runtime-credentials.json：信封加密/0600/原子写/启动校验/Merge/重包装）+ migrate.Window（migrate 池仅 setup 窗口可构造，complete 后 ErrWindowClosed）+ migrate credential init|reset + db credential rotate（RETAIN/DISCARD）；setup mode（无 install.lock 且无完成记录：仅 /setup 与 /public/setup/*，其余 503，默认 127.0.0.1:8080，完成后同进程切换正常模式）、X-Setup-Token（常量时间比对+节流）、非回环非 TLS 拒绝携带口令接口、目标库必须为空、MySQL ≥8.0.16/utf8mb4/sql_mode/binlog 触发器 1419 预检、Redis ≥8、18 个迁移逐个显示分类、管理员口令强度+可选 TOTP、完成事务+最后写 install.lock+删 token+并发 complete 仅一个成功、中断续做；无新迁移，契约加法 CC-12；等待环境验证：ENV-LNX/ENV-BT/MySQL 8.0.16/Redis<8 真实拒绝
-  1-25-tools-骨架-命令树-退出码-json-envelope-非交互约定: backlog
+  1-25-tools-骨架-命令树-退出码-json-envelope-非交互约定: review   # 开发完成、本机门禁见 docs/bmad/stories/1-25-*.md：internal/tools/cli（Cobra 命令树按 tools-design §3 全量声明，未交付命令 Hidden + 调用时 cli.not_implemented 退出码 1 绝不假成功；退出码表 0/1–14/130 与 tools-design §4/cli-tui §4.2 由测试解析文档逐项一致；`--help exit-codes`；lingedge.cli/v1 envelope + 7 个 JSON Schema（go:embed）+ 11 个真实输出快照；非交互自动判定/确认退出码 9/root 检查退出码 3+sudo 提示/参数校验退出码 2；argv 与日志经 pkg/redact 脱敏）+ gates flags（旧标志名全仓 0 命中，接入 make security）；版本/list/status 已交付、state.json 存在时如实报 state.reader_unavailable（1.29）；等待环境验证：ENV-LNX 真实 root / 缺省日志与 state 路径 / 进程级 SIGINT；CF-5 冻结点 = 退出码表 + JSON schema
   1-26-security-叶子包-安全解压-安全执行-脱敏-权限: backlog
   1-27-manifest-与发行信任域①-验签-sequence-吊销-密钥轮换: backlog
   1-28-downloader-与离线-bundle-完整校验链: backlog
@@ -473,8 +473,8 @@ sprint_plan:
       - key: "1-25-tools-骨架-命令树-退出码-json-envelope-非交互约定"
         id: "1.25"
         depends_on: ["1.1", "1.2"]
-        env: "本机（Go）"
-        waiting_env_verification: false
+        env: "本机（Go）；真实 root 执行、Linux 缺省日志/state 路径、进程级 SIGINT 需 ENV-LNX"
+        waiting_env_verification: true
       - key: "1-26-security-叶子包-安全解压-安全执行-脱敏-权限"
         id: "1.26"
         depends_on: ["1.25"]

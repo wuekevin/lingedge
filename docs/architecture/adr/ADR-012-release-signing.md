@@ -15,7 +15,7 @@
 3. **包**：`lingedge-<component>-<version>-<os>-<arch>.tar.gz`（标准库 `compress/gzip`，已定，不再保留 `.tar.zst` 备选）；包内 `META/SHA256SUMS` + `META/SHA256SUMS.sig`（同一发行密钥；签名对象 = `"LINGEDGE-PKG-V1\n<component>\n<version>\n<platform>\n"` ‖ `SHA256SUMS` 字节，tools-design §9.3）覆盖包内每个文件，所以"清单摘要"与"包内签名"是**双重校验**：外层 sha256（防传输损坏/替换）与内层签名（防清单被替换后包体不匹配的组合攻击）。
 4. **公钥集**：`keys.json` 内置于 `lingedge`（`go:embed`），含多公钥 `{key_id, public_key, status, not_before}`；校验时接受清单声明 `key_id` 且状态为 `active|retiring` 的公钥；**密钥吊销列表** `revoked_key_ids` 位于 `keys.json`（内置 + `trust/keys.d/` 合并，随新版 Tools 发行分发），任一为吊销即拒绝；**版本吊销** `revoked_versions` 位于清单。**公钥轮换**：新版 Tools（用旧 key 签名发布）内置新旧两组公钥，重叠期后移除旧 key。
 5. **私钥保管**：发行签名私钥**离线保管**（隔离环境/硬件密钥，不在 Server、不在 CI 明文），发布流水线产出待签清单 → 人工/离线签名 → 回传 `.sig`。CI 中不存放私钥（供应链风险）。
-6. **防回滚/冻结**：Tools 本地记录已见最大 `sequence`（`state.json`）；清单 `sequence` 小于本地记录**一律硬失败**（退出码 5，**没有** `--allow-rollback` 之类的绕过开关；确需回到旧版本须由发行方发布更高 `sequence` 的清单）；`valid_until` 过期拒绝（`--offline` 且附"离线包"时给明确警告与 `--allow-expired-manifest`，不静默接受）。
+6. **防回滚/冻结**：Tools 本地记录已见最大 `sequence`（`state.json`）；清单 `sequence` 小于本地记录**一律硬失败**（退出码 5，**没有**任何放行回滚的绕过开关；确需回到旧版本须由发行方发布更高 `sequence` 的清单）；`valid_until` 过期拒绝（`--offline` 且附"离线包"时给明确警告与 `--allow-expired-manifest`，不静默接受）。
 7. **校验顺序**（每次 install/update，任一步失败退出码 5）：下载清单与 `.sig` → 校验 `key_id` 可用且未吊销 → 验证签名 → 检查 `sequence/valid_until` → 选版本 → 下载包 → 校验 `size` 与外层 `sha256` → 安全解压到临时目录 → 校验 `SHA256SUMS.sig` → 逐文件校验 → 才允许进入安装（防路径穿越见 tools-design §18）。
 8. **离线包**：`lingedge-offline-<release>.tar`，内含 `manifest.json`、`manifest.json.sig`、各包与 `keys.json` 增量；用**同一条**校验链；`--offline <bundle>` 不联网。
 9. **透明度**（可选，后续）：把清单哈希发布到独立渠道（官网/Git 标签）供交叉核对；M1 不强制。
@@ -62,7 +62,7 @@
 ## 修订记录 2026-11-16
 
 - **IMP-18**：签名输入以 tools-design §9 为准回写——清单签名对象为 `manifest.json` 文件原始字节（删除 `canonical_json`），吊销拆分为 `keys.json.revoked_key_ids` 与清单 `revoked_versions`（清单内不含 `revoked_key_ids`），包格式确定为 `.tar.gz`，包内签名对象明确；tools-design §9.6 新增示例向量供两个独立单元（离线签名流水线与 Tools 验签）交叉验证（AC-J-2）。原因：两文档按各自描述实现会互不兼容。
-- **M16**：删除 `--allow-rollback`（Tools 对 sequence 回退是硬失败、退出码 5），`--allow-expired` 改为 `--allow-expired-manifest`，与 tools-design §3/§9.2 一致。
+- **M16**：删除回滚放行开关（Tools 对 sequence 回退是硬失败、退出码 5），清单过期放行标志统一为 `--allow-expired-manifest`，与 tools-design §3/§9.2 一致（旧写法由 CI 门禁 `gates flags` 保证全仓 0 命中）。
 - **M13 / IMP-05**：§2 三信任域表中“节点 mTLS CA”一行补充 CA/叶证书有效期与分阶段轮换流程，并注明该 CA 同时签发 Server gRPC 叶证书（decisions §8）。
 
 ## 修订记录 2026-11-21（Story 1.23）

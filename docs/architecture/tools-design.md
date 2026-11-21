@@ -182,7 +182,7 @@ lingedge recover [--resume|--rollback]   # 处理被中断的事务（§12.3）
 | 12 | `ROLLBACK_FAILED` | 回滚本身失败，需人工恢复 | journal 保留，输出恢复指引 |
 | 13 | `INTERRUPTED` | 存在未完成事务，需要 `recover` | 新命令启动时发现未完成 journal |
 | 14 | `NOT_INSTALLED` | 目标组件未安装 | `service start node` 而未装 |
-| 130 | — | 用户中断（SIGINT），已按 journal 处理 | Ctrl-C |
+| 130 | `SIGINT` | 用户中断（SIGINT），已按 journal 处理 | Ctrl-C |
 
 约定：10 与 12 互斥；10 表示**状态已恢复为操作前**，脚本可据此继续；人类输出同时给出原因与下一步。
 
@@ -1021,3 +1021,11 @@ LockPersonality=yes
 - **IMP-16**：§17.1 备份清单删除“修订 blob”文件（块内容在 MySQL）；增 `kek_ids_required`、`deploy.lineage`。
 - **MIN-05**：§17.2 expand 迁移“回退二进制即可”限定为升级失败的即时回滚；KEK 移除前核对保留备份。
 - **MIN-04 / M16**：`node enroll` 令牌推荐 `--token-file`/stdin，`--force-reenroll`；enroll 失败统一 `enroll.token_invalid`（不再有 `enroll.token_used`）；release 保留默认 2、`master.key` 由 Tools 步骤 18 生成（root:root 0400）与 ADR-011 对齐。
+
+## 修订记录 2026-11-21（Story 1.25：Tools 骨架）
+
+- **§4 退出码 130 命名**：常量名由 `—` 定为 `SIGINT`（JSON envelope 的 `exit_name` 必须有稳定名称；`docs/ux/cli-tui.md` §4.2 同步）。码值与其余各项不变；`internal/tools/cli/exitcode_test.go` 解析本表与 cli-tui 表逐项断言与 Go 常量表一致。
+- **§3 帮助与全局标志**：`lingedge --help exit-codes` 与 `lingedge help exit-codes` 等价（M1 阶段退出码公开契约的载体，Docs 在 6.13）；全局标志增加 `--progress json|none|text`（§5）；`install`/`update` 增 `--no-rollback`（§4 的 11 号码语义已引用该标志）。`--version` 保留脚手架阶段的单行输出（`lingedge <ver> (commit …)`）。
+- **§6 envelope**：`errors[]` 增可选字段 `system_state`（`unchanged|rolled_back|partial|needs_manual`，沿用 cli-tui §4 的「系统状态」语义；只增字段，向前兼容）。`command` 对带组件的命令包含合法组件名（如 `install node`），非法输入不回显进 `command`。
+- **未实现命令的约定**：命令树按 §3 全量注册，未交付的命令 Hidden；被调用时先做参数/root/确认校验，最后以退出码 1、错误码 `cli.not_implemented` 失败，绝不假成功。
+- **JSON 约定唯一事实源**：`docs/ux/cli-tui.md` §7 已改为引用本文 §5/§6（原 `schema_version`/单个 `error`/`--stream` 写法废止）。

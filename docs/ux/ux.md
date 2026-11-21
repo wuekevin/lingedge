@@ -60,7 +60,7 @@ produces: [DESIGN.md, EXPERIENCE.md, ia.md, screens.md, cli-tui.md, website.md]
 | UX-14 | 节点注册采用**一次性、限时、绑定节点（及角色）的注册令牌**（前缀 `lenr1.`，有效期最短 1 小时）；明文只显示一次；节点侧推荐 `--token-file`/stdin/隐藏输入，页面展示的命令不再把令牌放进命令行参数；首次连接显示主控证书指纹供核对 | 基线 §10.2 mTLS 注册；防令牌泄露与中间人 | 细节由安全/架构定 `[ARCH]` |
 | UX-15 | CLI：未发布组件灰显不可选（命令行退出码 7）；Scheduler/Worker 不在安装列表（命令行退出码 8「已内置」）；退出码区分 9「失败但已自动回滚」与 10「需人工」 | D-16、FR-3、FR-4、R-3 | 数值以 Tools 设计为准 |
 | UX-16 | 不可逆迁移升级：先强制备份并校验 → 再要求输入固定 ASCII 确认语 → 升级；失败回滚路径写明「恢复备份 + 旧二进制」并量化数据损失 | R-3、基线 §4.7 | — |
-| UX-17 | `--json`：stdout 仅一个 JSON 文档（或 `--stream` JSON Lines）；字段 snake_case、枚举不本地化、只增不改；`error.system_state` 与退出码语义一致 | 基线 §4.4「JSON 输出」 | — |
+| UX-17 | `--json`：stdout 仅一个 JSON 文档（进度与提示为 stderr 的 NDJSON）；字段 snake_case、枚举不本地化、只增不改；`errors[].system_state` 与退出码语义一致 | 基线 §4.4「JSON 输出」 | — |
 | UX-18 | **官网数据展示仅三态 + 无数据**；`data_source` 为必填字段；CMS 编辑者不能手输数字；节点地图点数=真实节点数；可用率必须标口径与窗口，无监控不展示；无数据则隐藏模块 | 基线 §5.3、§1.3；PRD NFR-31、D-2 | **M1 官网可能不显示节点数/可用率**（见 §4 取舍） |
 | UX-19 | 官网能力文案绑定「能力状态」：已提供/规划中；WAF 页强制 DDoS 边界声明；HTTP/3 等高级能力 P6 前不出现 | R-13、FR-101、NFR-27 | — |
 | UX-20 | Arco Design Pro 仅在**主题令牌层**定制；业务组件封装在 `frontend/shared`；官网用 Tailwind 读取同一份令牌；禁止 fork Arco、禁止页面内硬编码色值 | 基线 §2.2、§2.3、§20 `frontend/shared` | 令牌单一来源：`frontend/shared/tokens` |

@@ -24,7 +24,7 @@
 2. **plan**：展示将执行的步骤、迁移列表与最大级别、停机预估；`--dry-run` 只做 plan。
 3. 下载并校验包到临时目录；
 4. **备份**（升级前强制）：当前 release 目录引用（不复制二进制，保留旧 release 目录即可）、`/etc/lingedge/<comp>/` 配置、**数据库逻辑备份**（Server 升级；含迁移表 `schema_migrations` 当前版本）。不可逆迁移：备份**必须成功**，否则中止；
-5. 若迁移最大级别为 `irreversible`：**交互确认**（TUI 键入 `confirm-irreversible` / 非交互 `--accept-irreversible` 显式标志（与 tools-design §3/§4 一致，此前误写 `--yes-irreversible`）；非交互且未带标志 → 退出码 9）；明示"回滚路径=恢复备份，备份点之后的数据会丢失"；
+5. 若迁移最大级别为 `irreversible`：**交互确认**（TUI 键入 `confirm-irreversible` / 非交互 `--accept-irreversible` 显式标志（与 tools-design §3/§4 一致）；非交互且未带标志 → 退出码 9）；明示"回滚路径=恢复备份，备份点之后的数据会丢失"；
 6. 停止服务 → 原子切换 `current` → 运行 `lingedge-server migrate up`（先 `migrate plan` 校验）→ 启动 → **健康检查**（`/healthz` + 组件特定检查：Server 迁移版本一致与依赖连通；Node Agent 与 OpenResty 状态与 `config_hash`；超时由清单 `health_timeout` 指定，默认值待基线测试）；
 7. 成功 → 确认并保存状态；保留最近 N 个 release 目录（默认 **2**，可配，不少于 2；与 tools-design §8 一致，此前误写 3）；失败 → **回滚**。
 
@@ -74,4 +74,4 @@
 
 - **MIN-05**：expand 迁移“回退二进制即可”限定为**升级失败的即时回滚**；新版本运行并产生数据后的回退须依赖 N-1 兼容性测试，不做无条件承诺（原措辞偏强：新枚举值/新列数据可能令旧二进制读取异常）。KEK 移除前核对保留备份（与 ADR-011 §3 联动）。
 - **IMP-07 / H6**：§3、§4 增“恢复数据库后须 `lingedge-server lineage bump`”及 AC-J-5 增补；原因：恢复备份使 DB 中 `clusters.current_seq/cache_epoch/marker_version` 低于节点已持久化值，节点会永久拒绝新修订（ADR-002 §12 的 lineage 机制）。
-- **M16**：不可逆确认标志统一为 `--accept-irreversible`（删 `--yes-irreversible`）；release 保留份数默认 2（原 3，与 tools-design §8 对齐）。
+- **M16**：不可逆确认标志统一为 `--accept-irreversible`（旧写法已删除，CI 旧标志名门禁 `gates flags` 保证全仓 0 命中）；release 保留份数默认 2（原 3，与 tools-design §8 对齐）。

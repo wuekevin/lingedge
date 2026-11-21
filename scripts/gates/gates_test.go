@@ -663,3 +663,45 @@ func TestTasktypeSegmentsMatchRuntime(t *testing.T) {
 		}
 	}
 }
+
+// ---- flags（旧 CLI 标志名，Story 1.25 AC7 / MIN-04）----
+
+func TestFlags(t *testing.T) {
+	neg := []struct{ name, rel, content string }{
+		{"回滚放行", "deploy/install/up.sh", "lingedge update node --allow-rollback\n"},
+		{"不可逆确认旧名", "docs/architecture/x.md", "非交互需 --yes-irreversible。\n"},
+		{"重注册旧名", "internal/tools/cli/x.go", "// --reenroll 强制重注册\npackage cli\n"},
+		{"过期放行旧名（行尾）", "docs/api/x.md", "加 --allow-expired\n"},
+		{"过期放行旧名（后接标点）", "docs/api/x.md", "（--allow-expired），不静默\n"},
+		{"一行多处", "README.md", "--allow-expired-manifest 与 --allow-expired 并存\n"},
+	}
+	for _, c := range neg {
+		t.Run("负向/"+c.name, func(t *testing.T) {
+			root := t.TempDir()
+			write(t, root, c.rel, c.content)
+			expectRule(t, mustRun(t, runFlags, root, options{}), "flags-legacy", c.rel)
+		})
+	}
+	pos := []struct{ name, rel, content string }{
+		{"新名", "docs/architecture/tools-design.md", "--accept-irreversible --force-reenroll --allow-expired-manifest\n"},
+		{"force-reenroll 不是旧名", "docs/api/node-protocol.md", "lingedge node enroll --force-reenroll\n"},
+		{"规划与评审记录可引述历史", "docs/bmad/review.md", "旧名 --allow-rollback 已删除；--yes-irreversible 改为 --accept-irreversible\n"},
+		{"无关内容", "internal/tools/cli/y.go", "package cli\n\nconst x = \"--allow-list\"\n"},
+	}
+	for _, c := range pos {
+		t.Run("正向/"+c.name, func(t *testing.T) {
+			root := t.TempDir()
+			write(t, root, c.rel, c.content)
+			if fs := mustRun(t, runFlags, root, options{}); len(fs) != 0 {
+				t.Fatalf("不应失败: %v", fs)
+			}
+		})
+	}
+	t.Run("同一行两处只对旧名报告一次", func(t *testing.T) {
+		root := t.TempDir()
+		write(t, root, "README.md", "--allow-expired-manifest 与 --allow-expired 并存\n")
+		if fs := mustRun(t, runFlags, root, options{}); len(fs) != 1 {
+			t.Fatalf("应恰好 1 处: %v", fs)
+		}
+	})
+}

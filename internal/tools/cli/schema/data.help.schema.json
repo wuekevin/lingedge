@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "--help / help / 无参数 的 data",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["help"],
+  "properties": {"help": {"type": "string", "minLength": 1}}
+}

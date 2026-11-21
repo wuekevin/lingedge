@@ -1,0 +1,17 @@
+{
+  "components": [
+    {
+      "name": "node",
+      "version": "1.0.0",
+      "state": "running",
+      "unit": "lingedge-node.service",
+      "run_user": "lingedge-node",
+      "ports": [80, 443],
+      "release_dir": "/opt/lingedge/node/releases/1.0.0",
+      "config_dir": "/etc/lingedge/node",
+      "data_dir": "/var/lib/lingedge-node",
+      "installed_at": "2026-11-21T12:00:00.000Z",
+      "prev_version": "0.9.0"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "status 的 data（本 Story：registry 记录的安装状态；systemd 状态与健康探测随 Story 1.42 以新增字段补全）",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["components"],
+  "properties": {
+    "components": {
+      "type": "array",
+      "items": {"type": "object", "additionalProperties": false, "required": ["name", "version", "state"], "properties": {"name": {"type": "string"}, "version": {"type": "string"}, "state": {"type": "string"}}}
+    }
+  }
+}

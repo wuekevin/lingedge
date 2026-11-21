@@ -370,7 +370,7 @@ func TestGateCommandsNegativeAndCleanup(t *testing.T) {
 	}
 	dst := copyRepo(t)
 	// 门禁在 gates 目录自身被跳过；副本里的 docs/ 不存在，品牌与口令门禁只看代码与配置。
-	for _, g := range []string{"arch", "testdouble", "passwords", "brand", "shell", "repo", "tasktype", "trustdomain"} {
+	for _, g := range []string{"arch", "testdouble", "passwords", "brand", "shell", "repo", "tasktype", "trustdomain", "flags"} {
 		if code, out := runGate(t, dst, g); code != 0 {
 			t.Fatalf("干净副本的 %s 门禁应通过，退出码 %d:\n%s", g, code, out)
 		}
@@ -428,6 +428,15 @@ func TestGateCommandsNegativeAndCleanup(t *testing.T) {
 		{
 			name: "其他产品名残留", gate: "brand", wantRule: "brand",
 			files: map[string]string{"configs/brand.yaml": "name: " + "Smart" + "CDN\n"},
+		},
+		{
+			// 旧标志名运行期拼接：本文件自身也受 flags 门禁扫描，源码里不得出现完整旧名。
+			name: "旧 CLI 标志名（回滚放行）", gate: "flags", wantRule: "flags-legacy", wantText: "MIN-04",
+			files: map[string]string{"deploy/install/upgrade.sh": "lingedge update node --allow-" + "rollback\n"},
+		},
+		{
+			name: "旧 CLI 标志名（清单过期放行未带 -manifest）", gate: "flags", wantRule: "flags-legacy",
+			files: map[string]string{"docs/operations/x.md": "离线安装可加 --allow-" + "expired 放行。\n"},
 		},
 		{
 			name: "shell -c", gate: "shell", wantRule: "shell-c",

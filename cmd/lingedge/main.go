@@ -3,9 +3,9 @@ package main
 import (
 	"os"
 
-	"github.com/wuekevin/lingedge/pkg/version"
+	"github.com/wuekevin/lingedge/internal/tools/cli"
 )
 
 func main() {
-	os.Exit(version.CLI("lingedge", os.Args[1:], os.Stdout, os.Stderr))
+	os.Exit(cli.Main(os.Args[1:]))
 }

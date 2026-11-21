@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "lingedge --version 的 data",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["tools"],
+  "properties": {
+    "tools": {
+      "type": "object", "additionalProperties": false, "required": ["version", "commit", "go", "os", "arch"],
+      "properties": {"version": {"type": "string"}, "commit": {"type": "string"}, "go": {"type": "string"}, "os": {"type": "string"}, "arch": {"type": "string"}}
+    }
+  }
+}

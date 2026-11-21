@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lingedge.dev/schemas/cli/v1/envelope.schema.json",
+  "title": "lingedge.cli/v1 envelope",
+  "description": "--json 时 stdout 上唯一的输出文档（tools-design §6，CF-5 冻结）。字段只增不删不改义；data 的形状由各命令的 data.<命令>.schema.json 约束。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "ok", "command", "run_id", "exit_code", "exit_name", "started_at", "duration_ms", "dry_run", "data", "warnings", "errors"],
+  "properties": {
+    "schema": {"type": "string", "enum": ["lingedge.cli/v1"]},
+    "ok": {"type": "boolean", "description": "恒等于 exit_code == 0"},
+    "command": {"type": "string", "minLength": 1, "description": "如 \"list\"、\"install node\"、\"lingedge\"（根命令）"},
+    "run_id": {"type": "string", "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$", "description": "ULID"},
+    "exit_code": {"type": "integer", "enum": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 130]},
+    "exit_name": {"type": "string", "enum": ["OK", "GENERAL", "USAGE", "PRECONDITION", "PORT_CONFLICT", "VERIFY_FAILED", "LOCKED", "NOT_RELEASED", "BUILTIN", "CONFIRM_REQUIRED", "ROLLED_BACK", "HEALTH_FAILED", "ROLLBACK_FAILED", "INTERRUPTED", "NOT_INSTALLED", "SIGINT"]},
+    "started_at": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$", "description": "RFC 3339 UTC，毫秒"},
+    "duration_ms": {"type": "integer", "minimum": 0},
+    "dry_run": {"type": "boolean"},
+    "data": {"type": "object", "description": "失败时为 {}"},
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["code", "message"],
+        "properties": {"code": {"type": "string", "pattern": "^[a-z][a-z0-9_]*(\\.[a-z0-9_]+)+$"}, "message": {"type": "string"}}
+      }
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["code", "message"],
+        "properties": {
+          "code": {"type": "string", "pattern": "^[a-z][a-z0-9_]*(\\.[a-z0-9_]+)+$", "description": "稳定小写点分串"},
+          "message": {"type": "string"},
+          "step": {"type": "integer", "minimum": 1},
+          "hint": {"type": "string"},
+          "system_state": {"type": "string", "enum": ["unchanged", "rolled_back", "partial", "needs_manual"]},
+          "details": {"type": "object"}
+        }
+      }
+    }
+  }
+}
