@@ -380,6 +380,11 @@ func (x *extractor) entry(tr *tar.Reader, hdr *tar.Header) error {
 	default:
 		return extractErr(ErrUnsupportedType, hdr.Name, "类型 %q 不被允许（仅普通文件与目录）", string(hdr.Typeflag))
 	}
+	// 稀疏文件（PAX 0.0/0.1/1.0 的 GNU.sparse.* 记录）：标准库会把空洞还原成零字节，条目看上去像普通文件。
+	// 发行包不允许稀疏（与 IndexTar/ReadMembers 一致，1.28b 补齐）。
+	if sparse(hdr) {
+		return extractErr(ErrUnsupportedType, hdr.Name, "稀疏文件不被允许")
+	}
 	name, err := CleanEntryName(hdr.Name, isDir, x.lim)
 	if err != nil {
 		return err

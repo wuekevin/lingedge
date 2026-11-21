@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/wuekevin/lingedge/internal/tools/manifest"
 	"github.com/wuekevin/lingedge/internal/tools/security"
@@ -55,6 +56,12 @@ type Params struct {
 	// Executable 是需要 0755 的 payload 路径（相对包根，如 payload/bin/lingedge-server）。冻结的 META/package.json 没有此字段，
 	// 由安装器（Story 1.33）按组件约定提供；缺省全部 0644。
 	Executable []string
+
+	// DeferCommit 为 true 时，Acquire 在整条校验链成功后**不**调用 Verifier.Commit（不推进 sequence、不落盘 key_rotation），
+	// 而是把它交给调用方：安装步骤成功后调用 Acquired.Commit()，失败则 Acquired.Discard()（不提交并清理 staging）；
+	// 或一步到位用 Acquired.Finish(install)。默认 false：行为与 1.28 相同（链成功即提交）。
+	// 代价（已知、有意）：提交之前 sequence 没有推进，同一份清单可被再次 Acquire；这正是「安装失败可重试/可回滚」所需要的。
+	DeferCommit bool
 }
 
 // Acquired 是成功的结果。
@@ -68,6 +75,67 @@ type Acquired struct {
 	PkgDir   string // staging/<tx>/pkg：META/ 与 payload/
 	Extract  security.ExtractResult
 	Warnings []string
+
+	// 延迟提交状态（DeferCommit）。
+	mu        sync.Mutex
+	v         *manifest.Verifier
+	keysDir   string
+	committed bool
+	gone      bool
+}
+
+// Committed 报告信任状态（sequence/key_rotation）是否已经提交。
+func (a *Acquired) Committed() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.committed
+}
+
+// Commit 提交信任状态：落盘 key_rotation 的新公钥并推进 sequence。幂等（已提交则直接成功）；
+// 已 Discard 的结果不能再提交；底层失败时保持「未提交」，可重试（manifest.Verifier.Commit 本身幂等）。
+func (a *Acquired) Commit() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.committed {
+		return nil
+	}
+	if a.gone {
+		return newErr(KindOptions, "该结果已被 Discard，不能再提交")
+	}
+	if err := a.v.Commit(a.Result, a.keysDir); err != nil {
+		return err
+	}
+	a.committed = true
+	return nil
+}
+
+// Discard 放弃该结果：删除整个 staging/<tx>，不提交（已提交的信任状态不会被回滚——sequence 只进不退是安全属性）。幂等。
+func (a *Acquired) Discard() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.gone = true
+	if err := os.RemoveAll(a.TxDir); err != nil {
+		return wrapErr(KindStaging, err, "无法清理 staging/<tx>")
+	}
+	return nil
+}
+
+// Finish 是「安装成功后才提交」的一步到位写法：运行 install；成功则 Commit；install 失败（或 panic）则 Discard 并原样返回其错误，
+// 信任状态不变。Commit 自身失败时同样 Discard 并返回 Commit 的错误。
+func (a *Acquired) Finish(install func(*Acquired) error) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			_ = a.Discard()
+			panic(r)
+		}
+		if err != nil {
+			_ = a.Discard()
+		}
+	}()
+	if err = install(a); err != nil {
+		return err
+	}
+	return a.Commit()
 }
 
 // Acquire 执行 §9.5 的完整校验链并解压到 staging：
@@ -248,13 +316,16 @@ func Acquire(ctx context.Context, p Params) (_ *Acquired, err error) {
 		return nil, err
 	}
 
-	// 整条链成功：落盘轮换公钥并推进 sequence，随后清理中间文件。
-	if err := p.Verifier.Commit(res, p.KeysDir); err != nil {
-		return nil, err
+	// 整条链成功：（除非 DeferCommit）落盘轮换公钥并推进 sequence，随后清理中间文件。
+	out := &Acquired{Result: res, Version: pv.String(), Platform: platform, Artifact: art, Meta: meta,
+		TxDir: txDir, PkgDir: pkgDir, Extract: ex, Warnings: res.Warnings, v: p.Verifier, keysDir: p.KeysDir}
+	if !p.DeferCommit {
+		if err := out.Commit(); err != nil {
+			return nil, err
+		}
 	}
 	_ = os.Remove(pkgFile)
-	return &Acquired{Result: res, Version: pv.String(), Platform: platform, Artifact: art, Meta: meta,
-		TxDir: txDir, PkgDir: pkgDir, Extract: ex, Warnings: res.Warnings}, nil
+	return out, nil
 }
 
 func (p Params) check() error {

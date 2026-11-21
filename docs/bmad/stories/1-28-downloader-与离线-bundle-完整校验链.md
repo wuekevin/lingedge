@@ -37,7 +37,7 @@ context:
 - **在 security 增加两个只读入口**（G-4 要求归档解析只在 security）：`ReadMembers`（流式取出 META 文件，取齐即停，META 必须先于 payload，扫描量受限）与 `IndexTar`（bundle 受限索引，偏移基于自己的计数；稀疏文件因数据流不连续而拒绝）。`SafeExtract` 本身未改。
 - **包格式规则的语义澄清**（不改 CF-6 schema 文件）：META 必须先于 payload；`SHA256SUMS` 只列 `payload/`；`files_count`=payload 普通文件数（须等于已签名 SHA256SUMS 行数）；`unpacked_size`=payload 内容字节和（解压后须相等）；二者也是解压限额来源。已回写 tools-design §9.3 与修订记录；发行流水线 1.34 须按此产出。
 - **`package.json` 的解析在解压之前、一致性比较在解压之后**：为得到解压限额必须先解析 `package.json`；§9.5 第 7 步的 `Matches` 仍在解压后执行，失败同样 5 并清理。
-- **Commit 在整条链成功之后**：`Acquire` 末尾调用 `Verifier.Commit`（sequence 推进、`key_rotation` 落盘）。如果 1.33 希望把 Commit 推迟到「安装步骤完成之后」，可把 `Acquire` 的最后一步拆出（目前未提供该开关，避免出现「校验通过却从不推进 sequence」的误用）。
+- **Commit 在整条链成功之后**：`Acquire` 末尾调用 `Verifier.Commit`（sequence 推进、`key_rotation` 落盘）。**1.28b 已提供 `Params.DeferCommit` 与 `Acquired.Commit/Discard/Finish`**（缺省仍为链成功即提交），1.33 直接使用，见 `1-28b-遗留项清理.md`。
 - **`Params.Executable`**：冻结的 `META/package.json` 没有「可执行文件」字段，tools-design §18.1 说可执行位由 META 声明——此处如实不发明字段，由调用方（1.33 安装器按组件约定）传入路径集合；缺省全部 0644。
 - **bundle 末级符号链接一律拒绝**（即使指向普通文件）：任务写「经 realpath 校验为普通文件（拒绝符号链接逃逸）」，取更严的解读；路径中间的目录符号链接（`/var`→`/private/var`）仍允许。
 - **版本选择不在本 Story**：`Params.Version` 为精确版本，约束求解/选最新属 resolver（1.30/1.33）。
@@ -70,4 +70,4 @@ context:
 
 - **等待环境验证**：针对**真实发行源**的下载（UD-3：真实发行公钥与发行域名未定；本 Story 的「通过」仅代表校验链逻辑正确）；ENV-LNX 真实 Linux 复验（root 属主 staging、`O_NOFOLLOW`/FIFO 在 Linux 上的行为、大小写敏感文件系统）→ 1.45。
 - **后续 Story**：1.29（registry 事务边界/全局任务锁：`Acquire` 与 `FileSequenceStore` 都不带跨进程锁；`staging/<tx>` 的 tx ID 来自 journal）；1.33（installer 接线 `--offline`/`--allow-expired-manifest`/`--channel`/`release.ca_file`/`release.base_url` 配置项与代理配置、`Params.Executable`、进度输出、版本选择与 `Acquire` 的串联、是否把 `Commit` 推迟）；1.34（流水线按 §9.3 格式规则产出包：META 在前、`files_count`/`unpacked_size` 口径、包内无链接）；1.37 前端无关。
-- **已知限制（如实）**：断点续传只在一次 `Acquire` 内的重试之间生效（失败即清理 staging，不跨进程续传，符合「staging 被清理」要求）；`ProxyURL` 的 socks5 路径只验证了配置接受，未起 socks5 服务器测试；`HTTPS_PROXY` 环境变量路径经子进程验证（Go 只读一次环境变量）。
+- **已知限制（1.28b 已处置）**：原「续传只在一次 `Acquire` 内」→ 1.28b 增加 `Config.ResumeDir` 跨调用续传（缓存在 staging 之外、不被信任、整体 SHA256 通过才落名，AC4 不变）；原「socks5 只验证配置」→ 1.28b 用测试内真实 SOCKS5 服务器验证；稀疏文件 → 1.28b 构造真实 GNU/PAX 稀疏 tar 验证，并修复 `SafeExtract` 对 PAX 0.0/0.1 稀疏的缺口；5 条未检出变异 → 3 条补出区分测试、2 条证明不可达。`HTTPS_PROXY` 环境变量路径经子进程验证（Go 只读一次环境变量）。详见 `1-28b-遗留项清理.md`。

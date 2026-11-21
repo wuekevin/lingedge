@@ -44,6 +44,10 @@ type Config struct {
 	CAFile string
 	// ProxyURL 显式代理（http/https/socks5）；空 = 遵循环境变量 HTTPS_PROXY/NO_PROXY。
 	ProxyURL string
+	// ResumeDir 非空时启用「跨调用断点续传」：绝对路径，只属于当前用户（0700，不在 staging 内）。见 resume.go 的信任模型。
+	ResumeDir string
+	// ResumeTTL 是缓存条目的保留期（缺省 7 天），过期条目在下一次使用缓存时被清理。
+	ResumeTTL time.Duration
 
 	ConnectTimeout time.Duration // 建立 TCP 连接
 	TLSTimeout     time.Duration // TLS 握手
@@ -96,6 +100,11 @@ func New(cfg Config) (*Client, error) {
 	pool, err := rootPool(cfg.CAFile)
 	if err != nil {
 		return nil, err
+	}
+	if cfg.ResumeDir != "" {
+		if err := checkResumeDir(cfg.ResumeDir); err != nil {
+			return nil, err
+		}
 	}
 	proxy := http.ProxyFromEnvironment
 	if cfg.ProxyURL != "" {
@@ -379,13 +388,33 @@ func (c *Client) Download(ctx context.Context, raw, dst string, exp Expected) er
 		return newErr(KindOptions, "Expected 的 size/sha256 非法")
 	}
 	part := dst + ".part"
-	if err := os.Remove(part); err != nil && !errors.Is(err, os.ErrNotExist) {
+	var slot *resumeSlot
+	if c.cfg.ResumeDir != "" {
+		var err error
+		if slot, err = c.openResume(raw, exp); err != nil {
+			return err
+		}
+	}
+	if slot != nil { // 缓存槽位：partial 在 staging 之外，可能来自上一次调用（不被信任，见 resume.go）
+		defer slot.release()
+		part = slot.path
+	} else if err := os.Remove(part); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return wrapErr(KindStaging, err, "无法清理残留的 .part")
 	}
-	err := c.retrying(ctx, func(ctx context.Context) (bool, error) { return c.downloadOnce(ctx, raw, part, exp) })
+	var lastRetryable bool
+	err := c.retrying(ctx, func(ctx context.Context) (bool, error) {
+		retry, err := c.downloadOnce(ctx, raw, part, exp)
+		lastRetryable = retry && err != nil
+		return retry, err
+	})
 	if err != nil {
-		_ = os.Remove(part)
+		if slot == nil || !keepPartial(err, lastRetryable) {
+			_ = os.Remove(part)
+		}
 		return err
+	}
+	if slot != nil {
+		return finalizeResume(part, dst, exp)
 	}
 	if err := os.Rename(part, dst); err != nil {
 		_ = os.Remove(part)
@@ -410,7 +439,7 @@ func (c *Client) downloadOnce(ctx context.Context, raw, part string, exp Expecte
 		}
 	}
 	if offset > 0 { // 从磁盘重新计算已有部分的哈希
-		f, err := os.Open(part)
+		f, err := openNoFollow(part, os.O_RDONLY)
 		if err != nil {
 			return false, wrapErr(KindStaging, err, "无法读取 .part")
 		}
@@ -485,7 +514,7 @@ func (c *Client) fetchInto(ctx context.Context, raw, part string, exp Expected, 
 		_ = os.Remove(part)
 		f, err = security.CreateFile(part, 0o600)
 	} else {
-		f, err = os.OpenFile(part, os.O_WRONLY|os.O_APPEND, 0o600)
+		f, err = openNoFollow(part, os.O_WRONLY|os.O_APPEND)
 	}
 	if err != nil {
 		return false, wrapErr(KindStaging, err, "无法打开 .part")

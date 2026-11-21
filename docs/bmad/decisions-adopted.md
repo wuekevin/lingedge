@@ -62,6 +62,7 @@ source: docs/bmad/epics.md「待用户决策清单（UD）」
 | 清单解析（1.27，`manifest.go`/`keys.go`） | 清单 8 MiB、JSON 嵌套 24 层、keys 文件 256 KiB；`size ∈ [1, 8 GiB]` | tools-design §9.2 已写明 schema 规则 |
 | 下载器传输（1.28，`downloader/client.go`） | 连接 10s、TLS 握手 10s、响应头 30s、响应体空闲 30s、单次尝试 30 分钟、含重试总时长 2 小时；最多 4 次尝试，退避 1s/2s/4s（上限 8s）；重定向 ≤5 次；TLS ≥1.2 | 均可经 `downloader.Config` 收紧；无 `--insecure` |
 | 离线 bundle 与包前部读取（1.28，`bundle.go`/`acquire.go`） | bundle 索引 ≤4096 个条目；`manifest.json` ≤8 MiB、`.sig` ≤4 KiB；解压前读取的 META：`package.json` ≤64 KiB、`SHA256SUMS` ≤16 MiB、`.sig` ≤4 KiB，且 META 必须位于归档前部（先于任何 `payload/` 条目） | tools-design §9.3/§9.4 已写明 |
+| 续传缓存（1.28b，`downloader/resume.go`） | `Config.ResumeDir` 缺省关闭；条目保留期 `ResumeTTL` 缺省 7 天，在下次使用缓存时清理；目录 0700、文件 0600 | 调用方可收紧；缓存内容不被信任（整体 SHA256 校验） |
 
 ## 2. 与架构开放项 Q-1…Q-10 的对应
 

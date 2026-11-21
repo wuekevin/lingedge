@@ -66,6 +66,7 @@ development_status:
   1-27-manifest-与发行信任域①-验签-sequence-吊销-密钥轮换: review   # 开发完成、本机门禁见 docs/bmad/stories/1-27-*.md：internal/tools/manifest（keys.json/keys.d 可信公钥集；清单对原始字节 LINGEDGE-MANIFEST-V1 域前缀 Ed25519 验签；未知/吊销 key、篡改、sequence 按通道回滚、valid_until 过期、--offline --allow-expired-manifest 放行并告警、revoked_versions、key_rotation 旧 active key 背书并经 Commit 落盘 keys.d；schema 未知必需字段（critical）拒绝/未知可选忽略；包 SHA256SUMS 签名 LINGEDGE-PKG-V1 与 META 校验；Masterminds/semver v3.5.0 固定 + 边界测试；§9.6 golden 向量入 testdata/vectors.json）+ cli.VerifyError（退出码 5 真实生产者，信任库损坏 3）+ gates release-keys（发行构建缺失内置公钥/含测试公钥即构建失败）；变异验证见 Story 文档；等待环境验证：ENV-LNX（trust 目录 root 属主/0700 语义）；UD-3 真实发行公钥待发行签名人；CF-6 冻结点 = manifest/keys/sig/包 META schema + 签名域前缀（docs/bmad/contract-changes/CF-6.md）
   1-27b-遗留项清理: review   # 开发完成（本机门禁见 docs/bmad/stories/1-27b-遗留项清理.md）：1.25 标志解析失败时 --json 判定改用 pflag 自身语义重扫（TRUE/t/--/取值消耗/覆盖）；tools-design §9.1/§9.2 示例改为合法并由测试守护；1.27 两条变异：一条补出可区分测试、一条确认等价；key_rotation 多级链式背书与 Unix socket 凭据/热重载口令/ACCOUNT LOCK 评估后保持登记（理由见文档）；UD-27 补充默认值登记；无新迁移/无契约变更（CF-6 schema 哈希不变）
   1-28-downloader-与离线-bundle-完整校验链: review   # 开发完成、本机门禁见 docs/bmad/stories/1-28-*.md：internal/tools/downloader（仅 HTTPS/拒绝重定向到 HTTP/无 --insecure/release.ca_file；大小上限=清单 size（声明与实际流）、流式 SHA256、Range 断点续传整体校验后才落名（续传篡改失败）、分层超时/有限重试/代理；Acquire 走 §9.5 第 1–7 步：Verifier.Verify→取包→ReadMembers 读 META 并验 SHA256SUMS(.sig)（LINGEDGE-PKG-V1）→SafeExtract→PackageMeta.Matches→Commit；任一失败 staging/<tx> 整体删除、信任库不变；--offline 经 Lstat+realpath 校验普通文件、IndexTar 受限索引、与在线同一段验证代码、零网络调用有拦截证明）+ security 新增只读入口 ReadMembers/IndexTar + cli.DownloadError（校验类退出码 5，传输类 1）；变异验证 33 条检出 28（5 条为冗余纵深层，见文档）；fuzz 7 个；等待环境验证：真实发行源下载（UD-3）、ENV-LNX 真实 Linux 复验（1.45）；后续：1.29 任务锁、1.33 接线/Executable/Commit 时机、1.34 按包格式规则产出
+  1-28b-遗留项清理: review   # 开发完成（见 docs/bmad/stories/1-28b-遗留项清理.md）：Config.ResumeDir 跨调用断点续传（缓存在 staging 外、0700、不被信任、整体 SHA256 后才落名、失败删缓存、flock 并发互斥，AC4 不变）；测试内真实 SOCKS5 服务器验证 socks5/socks5h/认证/失败分类；真实 GNU/PAX 稀疏 tar 测试并修复 SafeExtract 对 PAX 0.0/0.1 稀疏的缺口；Params.DeferCommit + Acquired.Commit/Discard/Finish；1.28 的 5 条未检出变异 3 条补出区分测试、2 条证明不可达；无新迁移/无契约变更
   1-29-registry-安装状态-journal-任务锁: backlog
   1-30-resolver-依赖-版本-资源-端口求解-纯函数: backlog
   1-31-系统与宝塔只读探测-baota-端口-依赖: backlog
@@ -496,6 +497,11 @@ sprint_plan:
         depends_on: ["1.26", "1.27"]
         env: "本机（测试内 HTTPS 清单服务器，限 testdouble）"
         waiting_env_verification: true
+      - key: "1-28b-遗留项清理"
+        id: "1.28b"
+        depends_on: ["1.28"]
+        env: "本机；ENV-LNX 复验（缓存属主/flock/跨设备落名/GNU tar 真实稀疏）保持等待环境验证"
+        waiting_env_verification: true
       - key: "1-29-registry-安装状态-journal-任务锁"
         id: "1.29"
         depends_on: ["1.25", "1.26"]
@@ -716,6 +722,14 @@ environment_verification:   # 『等待环境验证』登记（验证人/日期�
     condition: "仅代表 macOS 本机：1.25 --json 判定、文档示例校验、1.27 变异收口、默认值登记；1.24–1.27 中需 ENV-LNX/ENV-BT/MySQL 8.0.16/UD-3 的项仍在各自 Story 块登记，未因本 Story 关闭。"
     done_locally: "make lint security gate-selftest race vuln contract-check build verify-build migrate-test 全绿：见 docs/bmad/stories/1-27b-遗留项清理.md。"
     pending: "无新增；保持登记：Unix socket 凭据（CC 加法 + 1.37 + ENV-BT）、热重载口令与 ACCOUNT LOCK（ADR-026 Deferred，1.43）、key_rotation 同清单多级背书（CF-6 变更，1.34）、Ruby 第二实现（1.34）。"
+    verified_by: ""
+    verified_on: ""
+  1-28b-遗留项清理:
+    status: partial
+    required_env: "本机"
+    condition: "仅代表 macOS 本机：跨调用续传/socks5/稀疏/延迟 Commit 的逻辑与测试；ENV-LNX（缓存属主与 flock 在 Linux、真实跨设备 rename、GNU tar 真实稀疏）与 UD-3 保持等待环境验证。"
+    done_locally: "make lint security gate-selftest race vuln contract-check build verify-build migrate-test 全绿：见 docs/bmad/stories/1-28b-遗留项清理.md。"
+    pending: "1.29 任务锁、1.33 接线（DeferCommit+Finish、ResumeDir 配置）、1.34 产出规则、1.45 ENV-LNX 复验。"
     verified_by: ""
     verified_on: ""
   1-28-downloader-与离线-bundle-完整校验链:

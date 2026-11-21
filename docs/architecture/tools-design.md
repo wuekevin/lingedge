@@ -1061,3 +1061,9 @@ LockPersonality=yes
 - **§9.3 格式规则**（语义澄清，不改 CF-6 的 schema 文件与哈希、不改签名域前缀）：META 三个文件必须先于 payload；`SHA256SUMS` 只列 `payload/`；`files_count`/`unpacked_size` 的口径与解压限额来源；包内权限位忽略。发行流水线（1.34）须按此产出。
 - **§9.4/§9.5/§18.3**：补充离线 bundle 路径与索引规则、`Acquire` 与 `Commit` 的衔接、`cli.DownloadError` 的退出码映射、TLS/续传/大小上限的实现口径（见各节「实现」段）。
 - **校验顺序的一处实现取舍**：§9.5 第 6 步「解压前读取 SHA256SUMS(.sig)」与第 7 步「package.json 与清单一致」之间，下载器为得到解压限额需在解压前**解析**（但尚未据以放行）`package.json`；第 7 步的一致性比较仍在解压之后执行，失败同样退出码 5 并清理 staging。
+
+## 修订记录 2026-11-21（Story 1.28b：downloader 遗留项清理）
+
+- **§18.3 实现口径补充**：`Config.ResumeDir` 跨调用断点续传——partial 在 staging 之外的 0700 缓存目录，按 SHA256(URL‖sha256‖size) 命名；缓存不被信任（目录/文件属主、权限、符号链接、硬链接检查，`O_NOFOLLOW`），续传前后均由整体长度与 SHA256 校验，失败即删除缓存 partial；同 key 用 flock 互斥，拿不到锁退回私有 `.part`；`Acquire` 失败仍删除 `staging/<tx>`（AC4 不变）。socks5/socks5h 由标准库 `http.Transport` 支持（含 URL 用户信息认证），已用真实 SOCKS5 服务器测试。
+- **§9.5 补充**：`Params.DeferCommit` 与 `Acquired.Commit/Discard/Finish`——安装成功后才提交 sequence/key_rotation；缺省行为不变（链成功即提交）。
+- **§18.1 补充**：`security.SafeExtract` 与 `IndexTar`/`ReadMembers` 一致地拒绝稀疏条目（含 PAX 0.0/0.1/1.0 与 GNU 旧式）。
