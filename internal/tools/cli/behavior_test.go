@@ -203,7 +203,9 @@ func TestReadOnlyCommandsEmptyWithoutState(t *testing.T) {
 	}
 }
 
-// state.json 存在时不假装为空：读取器属 Story 1.29，如实报错（退出码 1）。
+// state.json 存在但读不懂时不假装为空，如实报错（退出码 1）。
+// Story 1.29 起读取器真实存在（registry）：1.25 时期这里期望的占位错误 state.reader_unavailable 随之消失，
+// 同一份内容（缺 schema_version 的 `{"components":{}}`）现在被严格解析为 state.corrupt——「绝不当作空」的语义不变。
 func TestStateFilePresentIsNotSilentlyEmpty(t *testing.T) {
 	h := newHarness(t)
 	if err := os.MkdirAll(filepath.Dir(h.env.StatePath), 0o755); err != nil {
@@ -216,7 +218,7 @@ func TestStateFilePresentIsNotSilentlyEmpty(t *testing.T) {
 		if code := h.run(c, "--json"); code != 1 {
 			t.Fatalf("%s: 退出码 %d，期望 1", c, code)
 		}
-		if got := errCode(h.envelope()); got != "state.reader_unavailable" {
+		if got := errCode(h.envelope()); got != "state.corrupt" {
 			t.Errorf("%s: errors.code=%q", c, got)
 		}
 	}

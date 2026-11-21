@@ -268,7 +268,7 @@ Bubble Tea 复选框列表：`Server / Admin Web / Console / Website / Node / DN
 | 配置 | `/etc/lingedge/<component>/` | root:`<run-user>` 0750；文件 0640；`master.key` root 0400 |
 | 数据 | `/var/lib/lingedge/<component>/`（Node 为 `/var/lib/lingedge-node/`，**目录总表以 ADR-020 §2 为权威**：`identity/ certs/ generations/g<N>/ current state.json cache/ runtime/ staging/ logs-spool/`） | `<run-user>` 0750 |
 | 日志 | `/var/log/lingedge/`（Node 访问日志 `/var/log/lingedge-node/access/`） | `<run-user>` 0750 |
-| Tools 状态 | `/var/lib/lingedge/tools/{state.json,journal/,locks/,lock,staging/,trust/,backups-index.json}` | root 0700（`state.json` 0644 以便普通用户 `list/status`，不含密钥） |
+| Tools 状态 | `/var/lib/lingedge/tools/{state.json,journal/,locks/,lock,staging/,trust/,backups-index.json}` | root：目录本身 **0711**（只授予「穿越」权限，不可列目录）、`state.json` **0644**（普通用户 `list/status` 可读，不含密钥）、`journal/ locks/ lock staging/ trust/` 均 **0700/0600**（实现见 `registry.Layout.Ensure`；原文「目录 0700 + state.json 0644」自相矛盾，0700 的目录会挡住普通用户读 state.json） |
 | 节点升级结果目录 | `/var/lib/lingedge-node-upgrade/`（Tools 安装 node 时创建；`<task_uid>.result.json` 由 root 升级单元写入） | root:root 0755；文件 root:root 0644（Agent 只读，§15.3） |
 | 公开媒体目录（P2，官网 CMS 媒体，MIN-08） | `/var/lib/lingedge/media/`（Nginx `location /media/` 的 `alias`；上传暂存仍在私有的 `/var/lib/lingedge/server/` 下） | 目录 0755、文件 0644，属主 `lingedge`；父目录 `/var/lib/lingedge` 为 root 0755，使 Nginx 运行用户可读 |
 | 备份默认目录 | `/var/backups/lingedge/` | root 0700 |
@@ -626,6 +626,15 @@ stateDiagram-v2
 - 退出前（正常或 SIGINT/SIGTERM）捕获信号：完成当前原子步骤后进入回滚或保留为 Interrupted，**不在半步中退出**；`kill -9`/断电依靠 journal 恢复。
 - 日志只记路径/哈希/步骤，不记口令/Token（经 redact）。
 
+**实现（Story 1.29，`internal/tools/registry`）**
+- 记录格式 `{"v":1,"seq":N,"ts":…,"op":open|begin|done|undone|commit|abort,…}`，一行一条、`seq` 从 1 严格连续。除上文四种 op 外增加两种：`open`（第一行，事务头：tx/command/run_id/components/pid/host）与 `undone`（恢复时记录某步已被撤销，使恢复本身可被中断并续做）。`undo` 是对象 `{"actions":[{action,path,created,backup,sha256,prev,extra}]}`，`action` 的取值由各步骤的实现者定义；写入前校验字段不含密钥（脱敏后须不变，否则拒绝写入），`sha256` 须为 64 位小写十六进制。
+- 写入：单次 `write`（O_APPEND）+ `fsync`，创建时另 `fsync` 目录；`Begin` 返回即表示含 undo 的 begin 记录已持久化，调用方此后才可动手。一次写入失败后该 Journal 不再接受追加（磁盘尾部可能撕裂）。
+- 次序约束（写入端与读取端共用同一个状态机）：同一时刻至多一步在途；`done` 须对应在途的 `begin`；已 `done` 的步不可重新 `begin`，在途步可重新 `begin`（`recover --resume` 的幂等重做）；有在途步时不可 `commit`；`commit/abort` 之后不再有记录。
+- 读取的容错：**只有最后一行**允许是坏的（kill -9/断电造成的撕裂尾行），忽略并置 `TornTail`；中间任何一行坏掉（JSON 非法、未知字段、seq 不连续、违反次序）= `journal_corrupt`，不静默跳过。`v` 高于所知 → `journal_unsupported`。`recover` 续写前截掉撕裂行。
+- 回滚计划 `UndoPlan`：每个已 `begin` 且未 `undone` 的步骤（**含在途步**——它可能执行了一半），按首次 `begin` 的逆序；`ResumeFrom` 为第一个非 `done` 的步。
+- 「存在未完成事务」的判定：journal 未 `commit/abort` **且没有存活的持有者**。持有者是否存活由 journal 文件自身的 `flock` 判定（活着的事务持有它到 `commit/abort/Close`，被杀的由内核释放），而不是 pid；因此「另一个组件上正在进行的合法事务」不会被误判成 13。空文件（创建后、写入 `open` 前被杀）与中间损坏的文件同样算未完成，由 `recover` 处理（空事务可 `DiscardEmpty`）。
+- 归档：`commit/abort` 后可 `Archive`（rename 到 `journal/archive/`，不覆盖同名归档）；中间被杀则 `ArchiveFinished` 补做。
+
 ## 13. Server 安装向导（FR-11、F-8）
 
 Tools 负责**物化与准备**，Web 向导负责**业务初始化**，边界如下：
@@ -903,6 +912,13 @@ LockPersonality=yes
 - **陈旧状态检测**：能拿到锁但 `journal/` 有未完成事务 → 退出码 13（`recover`）。锁文件位于网络文件系统（flock 语义不可靠）时 `doctor` 告警（`/var/lib/lingedge` 应为本地磁盘）。
 - 不使用「pid 文件 + kill -0」判活。
 
+**实现（Story 1.29，`registry.Begin`/`LockComponents`/`WithGlobal`）**
+- 写命令入口 `Begin`：先按字典序对组件锁 `LOCK_EX|LOCK_NB`（任一把失败则释放已得的，返回 `*LockedError` → 退出码 6，含持有者 pid/run_id/command/started_at/host），**持锁后**再扫描 journal（存在已死亡未结束事务 → `*UnfinishedError` → 退出码 13，提示 `lingedge recover`，同样释放锁）。先锁后扫：同组件上的活事务一定持有组件锁，会在第一步以 6 被拒，不会被当成「未完成」。
+- 全局锁 `WithGlobal`：同样 `LOCK_EX|LOCK_NB`，因是短临界区而每 10ms 重试、最多等 5s，超时 → 退出码 6。不可重入。读写 `state.json`（`UpdateState`）、创建/扫描 journal、推进 `trust/state`（`LockedSequence`）都在其内。创建 journal 与扫描都在全局锁内，使扫描不会撞见「文件已创建、尚未拿到 flock」的缝隙。
+- 锁文件：打开用 `O_NOFOLLOW`，须为属主可信、单一硬链接、仅属主可写的普通文件；加锁后复核路径仍指向同一 inode；锁文件永不删除。持有者信息拿到锁后先清空再写（命令行经脱敏），争用方读到空内容会短暂重试；该内容仅供显示。
+- **与 1.27/1.28 的关系**：`manifest.FileSequenceStore.Advance` 与 `downloader.Acquire`（含 `Verifier.Commit`）自身无跨进程锁。组件锁不足以保护 `trust/state`（不同组件的任务可并发却共用它），所以 `trust/state` 须经 `registry.LockedSequence{R, Inner: FileSequenceStore{Path: Layout.SequenceFile()}}` 访问（每次 Max/Advance 在全局锁内完成）；`Acquire` 须在持有 `Task`（组件锁）时调用，`Params.StagingRoot = Task.StagingRoot()`、`Params.TxID = Task.TxID()`（与 journal 同名）。
+- 平台：flock 与属主检查在 `platform_unix.go`（linux、darwin）；其他平台是失败关闭的桩。网络文件系统识别 `registry.FSKind`（linux 用 statfs 魔数、darwin 用 f_fstypename）供 doctor（1.42）告警，本 Story 不据此拒绝运行。
+
 ## 17. 备份、升级与回滚
 
 ### 17.1 备份（FR-10、NFR-18）
@@ -1067,3 +1083,11 @@ LockPersonality=yes
 - **§18.3 实现口径补充**：`Config.ResumeDir` 跨调用断点续传——partial 在 staging 之外的 0700 缓存目录，按 SHA256(URL‖sha256‖size) 命名；缓存不被信任（目录/文件属主、权限、符号链接、硬链接检查，`O_NOFOLLOW`），续传前后均由整体长度与 SHA256 校验，失败即删除缓存 partial；同 key 用 flock 互斥，拿不到锁退回私有 `.part`；`Acquire` 失败仍删除 `staging/<tx>`（AC4 不变）。socks5/socks5h 由标准库 `http.Transport` 支持（含 URL 用户信息认证），已用真实 SOCKS5 服务器测试。
 - **§9.5 补充**：`Params.DeferCommit` 与 `Acquired.Commit/Discard/Finish`——安装成功后才提交 sequence/key_rotation；缺省行为不变（链成功即提交）。
 - **§18.1 补充**：`security.SafeExtract` 与 `IndexTar`/`ReadMembers` 一致地拒绝稀疏条目（含 PAX 0.0/0.1/1.0 与 GNU 旧式）。
+
+## 修订记录 2026-11-21（Story 1.29：registry）
+
+- **§8 Tools 状态目录权限**：目录 0711 + `state.json` 0644 + 子目录 0700（消除原「root 0700 却要普通用户读 state.json」的矛盾）。
+- **§12.3 journal**：补充记录格式（`open` 头、`undone`、`undo` 为 `{"actions":[…]}`）、写入与次序约束、撕裂尾行/中间损坏的区分、「未完成」以 journal 自身 flock 判定存活、回滚计划含在途步。
+- **§16 任务锁**：补充先锁后扫的次序、全局锁的有界等待、锁文件的安全检查，以及与 `FileSequenceStore`/`Acquire` 的关系（`LockedSequence`）。
+- **`state.json`**：`schema_version=1`；同版本内严格解析（未知字段 = 损坏）、更高版本失败关闭且绝不改写、写入前校验并做泄漏检查（疑似密钥即拒绝）；`list/status/version` 经 `cli.FileState` 读取，取代 1.25 的 `state.reader_unavailable` 占位。
+- **CLI**：写命令（install/update/rollback/uninstall/backup create|restore/service start|stop|restart）在 root 检查之后取组件锁并扫描 journal（6/13）；`--dry-run` 与读命令不取锁；`recover` 不受 13 拦截。`cli.RegistryError` 映射见 `internal/tools/cli/registryerr.go`。

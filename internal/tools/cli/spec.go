@@ -8,6 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+
+	"github.com/wuekevin/lingedge/internal/tools/registry"
 )
 
 // cmdSpec 是命令树的声明式描述（tools-design §3）。
@@ -24,8 +26,13 @@ type cmdSpec struct {
 	Flags     func(fs *pflag.FlagSet)
 	Validate  func(inv *invocation) *Error
 	Confirm   func(inv *invocation) *Error
-	Run       func(inv *invocation) (*Result, error)
-	Sub       []*cmdSpec
+	// Locks 非 nil 表示这是写命令（install/update/rollback/uninstall/restore/backup create/service start|stop|restart，tools-design §16）：
+	// 返回它要操作的组件，命令在 root 检查之后、确认之前取这些组件锁（字典序、非阻塞）并扫描 journal：
+	// 被占用 → 退出码 6，存在已死亡且未结束的事务 → 退出码 13。--dry-run 不写任何持久状态，不取锁。
+	// recover 不设 Locks（它就是处理未完成事务的命令）；读命令（list/status/doctor…）永远不取锁。
+	Locks func(inv *invocation) ([]string, *Error)
+	Run   func(inv *invocation) (*Result, error)
+	Sub   []*cmdSpec
 }
 
 // invocation 是一次命令调用的参数视图。
@@ -33,6 +40,9 @@ type invocation struct {
 	r    *Run
 	cmd  *cobra.Command
 	args []string
+	// task 是写命令持有的任务锁与事务 ID（registry.Task；Run 为 nil 的未实现命令不持有，Check 后即释放）。
+	// 命令的 Run 通过它取得 staging 根目录、TxID 与 OpenTx，不要再自己 Begin（同进程内会与自己冲突）。
+	task *registry.Task
 }
 
 func (i *invocation) str(name string) string    { v, _ := i.cmd.Flags().GetString(name); return v }
@@ -88,7 +98,7 @@ func (s *cmdSpec) build(r *Run) *cobra.Command {
 		if err := r.ctx.Err(); err != nil {
 			return err
 		}
-		// 校验顺序：参数/用法（2、8）→ root（3）→ 确认（9）→ 执行/尚未实现（1）。
+		// 校验顺序：参数/用法（2、8）→ root（3）→ 任务锁与未完成事务（6、13）→ 确认（9）→ 执行/尚未实现（1）。
 		if s.Validate != nil {
 			if e := s.Validate(inv); e != nil {
 				return e
@@ -96,6 +106,13 @@ func (s *cmdSpec) build(r *Run) *cobra.Command {
 		}
 		if s.NeedsRoot && r.env.Geteuid() != 0 {
 			return r.needRoot()
+		}
+		if s.Locks != nil && !r.opts.DryRun {
+			release, e := r.gate(inv, s)
+			if e != nil {
+				return e
+			}
+			defer release()
 		}
 		if s.Confirm != nil && (s.Run != nil || !r.interactive()) {
 			if e := s.Confirm(inv); e != nil {
@@ -139,4 +156,47 @@ func (r *Run) needRoot() *Error {
 		Hint:    "请运行：sudo lingedge " + argvString(redactArgs(r.args)),
 		Details: map[string]any{"euid": r.env.Geteuid()},
 	}
+}
+
+// registry 构造本次调用的 registry 入口：状态目录由 state.json 路径推出，锁文件与 journal 里的持有者信息用本次的 run_id 与（脱敏的）命令行。
+func (r *Run) registry() *registry.Registry {
+	return registry.New(registry.LayoutForStatePath(r.env.StatePath), registry.Options{
+		Now: r.env.Now, Hostname: r.env.Hostname, RunID: r.runID, Command: "lingedge " + argvString(redactArgs(r.args)),
+	})
+}
+
+// gate 是写命令的启动检查（AC3/AC4）。
+//
+// 命令已实现（Run != nil）：registry.Begin 取组件锁并扫描 journal，成功则任务锁保持到命令结束（release），命令从 inv.task 取用。
+// 命令尚未实现（Run == nil）：只做 Check（取锁、扫描、立即释放），并且仅在状态目录已存在时才做——尚未安装过任何东西的机器上，
+// 未实现的命令不应为了「假装检查」而创建 /var/lib/lingedge/tools；一旦状态目录存在，被占用/有未完成事务的真实结果照常以 6/13 报告。
+func (r *Run) gate(inv *invocation, s *cmdSpec) (release func(), _ *Error) {
+	none := func() {}
+	comps, e := s.Locks(inv)
+	if e != nil {
+		return none, e
+	}
+	reg := r.registry()
+	if s.Run == nil {
+		if !reg.L.Exists() {
+			return none, nil
+		}
+		if err := reg.Check(r.ctx, comps); err != nil {
+			return none, asCLIError(err)
+		}
+		return none, nil
+	}
+	task, err := reg.Begin(r.ctx, registry.TaskRequest{Components: comps})
+	if err != nil {
+		return none, asCLIError(err)
+	}
+	inv.task = task
+	return task.Release, nil
+}
+
+func asCLIError(err error) *Error {
+	if e := RegistryError(err); e != nil {
+		return e
+	}
+	return &Error{Exit: ExitGeneral, Code: "general.unexpected", Message: "未预期的错误", Cause: err, Hint: "详见日志"}
 }

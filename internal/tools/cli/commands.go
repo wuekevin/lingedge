@@ -61,6 +61,32 @@ func commandSpecs() []*cmdSpec {
 
 	str := func(fs *pflag.FlagSet, name, def, usage string) { fs.String(name, def, usage) }
 
+	// 写命令要锁的组件（tools-design §16）。
+	argLocks := func(inv *invocation) ([]string, *Error) { return append([]string(nil), inv.args...), nil }
+	compFlagLocks := func(inv *invocation) ([]string, *Error) {
+		if inv.changed("component") && inv.str("component") != "" {
+			return []string{inv.str("component")}, nil
+		}
+		return []string{"node", "server"}, nil // 未指定 --component：两者都可能被备份/恢复涉及
+	}
+	updateLocks := func(inv *invocation) ([]string, *Error) {
+		if !inv.flag("all") {
+			return argLocks(inv)
+		}
+		comps, err := inv.r.env.State.Components(inv.r.ctx)
+		if err != nil {
+			if ce := RegistryError(err); ce != nil {
+				return nil, ce
+			}
+			return nil, &Error{Exit: ExitGeneral, Code: "general.unexpected", Message: "未预期的错误", Cause: err, Hint: "详见日志"}
+		}
+		names := make([]string, 0, len(comps))
+		for _, c := range comps {
+			names = append(names, c.Name)
+		}
+		return names, nil
+	}
+
 	versionSpec := &cmdSpec{
 		Use: "version", Short: "显示 Tools 与各已装组件的版本",
 		Args:  cobra.NoArgs,
@@ -79,7 +105,7 @@ func commandSpecs() []*cmdSpec {
 
 	install := &cmdSpec{
 		Use: "install [组件]", Short: "安装组件", Story: "Story 1.35（install server）/1.40（静态前端）/1.33（编排）",
-		Args: cobra.MaximumNArgs(1), NeedsRoot: true,
+		Args: cobra.MaximumNArgs(1), NeedsRoot: true, Locks: argLocks,
 		Flags: func(fs *pflag.FlagSet) {
 			str(fs, "version", "", "组件版本（semver）；缺省为通道内满足约束的最高稳定版")
 			str(fs, "channel", "stable", "发行通道 stable|beta")
@@ -127,7 +153,7 @@ func commandSpecs() []*cmdSpec {
 
 	update := &cmdSpec{
 		Use: "update [组件]", Short: "升级组件", Story: "Story 1.43",
-		Args: cobra.MaximumNArgs(1), NeedsRoot: true,
+		Args: cobra.MaximumNArgs(1), NeedsRoot: true, Locks: updateLocks,
 		Flags: func(fs *pflag.FlagSet) {
 			fs.Bool("all", false, "升级全部已装组件")
 			str(fs, "version", "", "目标版本（semver）")
@@ -188,9 +214,9 @@ func commandSpecs() []*cmdSpec {
 					}
 					return nil
 				})},
-			{Use: "start <组件>", Short: "启动服务", Story: "Story 1.42", Args: cobra.ExactArgs(1), NeedsRoot: true, Validate: compArg(false)},
-			{Use: "stop <组件>", Short: "停止服务", Story: "Story 1.42", Args: cobra.ExactArgs(1), NeedsRoot: true, Validate: compArg(false)},
-			{Use: "restart <组件>", Short: "重启服务", Story: "Story 1.42", Args: cobra.ExactArgs(1), NeedsRoot: true, Validate: compArg(false)},
+			{Use: "start <组件>", Short: "启动服务", Story: "Story 1.42", Args: cobra.ExactArgs(1), NeedsRoot: true, Locks: argLocks, Validate: compArg(false)},
+			{Use: "stop <组件>", Short: "停止服务", Story: "Story 1.42", Args: cobra.ExactArgs(1), NeedsRoot: true, Locks: argLocks, Validate: compArg(false)},
+			{Use: "restart <组件>", Short: "重启服务", Story: "Story 1.42", Args: cobra.ExactArgs(1), NeedsRoot: true, Locks: argLocks, Validate: compArg(false)},
 		},
 	}
 
@@ -279,7 +305,7 @@ func commandSpecs() []*cmdSpec {
 	backup := &cmdSpec{
 		Use: "backup", Short: "备份与恢复",
 		Sub: []*cmdSpec{
-			{Use: "create", Short: "创建备份", Story: "Story 1.41", Args: cobra.NoArgs, NeedsRoot: true,
+			{Use: "create", Short: "创建备份", Story: "Story 1.41", Args: cobra.NoArgs, NeedsRoot: true, Locks: compFlagLocks,
 				Flags: func(fs *pflag.FlagSet) {
 					str(fs, "component", "", "server|node")
 					str(fs, "output", "", "输出目录")
@@ -295,7 +321,7 @@ func commandSpecs() []*cmdSpec {
 				}},
 			{Use: "list", Short: "列出备份", Story: "Story 1.41", Args: cobra.NoArgs},
 			{Use: "verify <文件>", Short: "校验备份", Story: "Story 1.41", Args: cobra.ExactArgs(1)},
-			{Use: "restore <文件>", Short: "从备份恢复", Story: "Story 1.41", Args: cobra.ExactArgs(1), NeedsRoot: true,
+			{Use: "restore <文件>", Short: "从备份恢复", Story: "Story 1.41", Args: cobra.ExactArgs(1), NeedsRoot: true, Locks: compFlagLocks,
 				Flags: func(fs *pflag.FlagSet) {
 					str(fs, "component", "", "server|node")
 					fs.Bool("replace", false, "替换现有数据")
@@ -313,7 +339,7 @@ func commandSpecs() []*cmdSpec {
 	}
 
 	rollback := &cmdSpec{
-		Use: "rollback <组件>", Short: "回滚组件", Story: "Story 1.43", Args: cobra.ExactArgs(1), NeedsRoot: true,
+		Use: "rollback <组件>", Short: "回滚组件", Story: "Story 1.43", Args: cobra.ExactArgs(1), NeedsRoot: true, Locks: argLocks,
 		Flags: func(fs *pflag.FlagSet) {
 			str(fs, "to", "", "回到指定版本（semver）")
 			str(fs, "from-backup", "", "从备份恢复（含不可逆迁移时必需）")
@@ -323,7 +349,7 @@ func commandSpecs() []*cmdSpec {
 	}
 
 	uninstall := &cmdSpec{
-		Use: "uninstall <组件>", Short: "卸载组件（默认保留配置与数据）", Story: "Story 1.41", Args: cobra.ExactArgs(1), NeedsRoot: true,
+		Use: "uninstall <组件>", Short: "卸载组件（默认保留配置与数据）", Story: "Story 1.41", Args: cobra.ExactArgs(1), NeedsRoot: true, Locks: argLocks,
 		Flags: func(fs *pflag.FlagSet) {
 			fs.Bool("purge", false, "同时删除配置、数据与备份（需 --confirm-name）")
 			str(fs, "confirm-name", "", "本机主机名（--purge 的非交互确认）")

@@ -99,7 +99,7 @@ func isParseStageError(err error) bool {
 	switch {
 	case errors.As(err, &ce):
 		return ce.Code == "usage.invalid_flag"
-	case errors.As(err, &me), errors.As(err, &de), errors.Is(err, context.Canceled):
+	case errors.As(err, &me), errors.As(err, &de), errors.Is(err, context.Canceled), RegistryError(err) != nil:
 		return false
 	}
 	return true
@@ -149,6 +149,10 @@ func (r *Run) finish(cmd *cobra.Command, err error) int {
 		case errors.As(err, &de):
 			// 下载器（Story 1.28）：传输策略/大小/外层 SHA256/解压校验/离线 bundle 失败，映射见 DownloadError。
 			ce = DownloadError(de)
+			exit = ce.Exit
+		case RegistryError(err) != nil:
+			// 任务锁 / journal / state.json（Story 1.29）：被占用 → 6，存在未完成事务 → 13，状态不可读/损坏等，映射见 RegistryError。
+			ce = RegistryError(err)
 			exit = ce.Exit
 		case errors.Is(err, context.Canceled):
 			ce = newErr(ExitSigint, "interrupt.sigint", "已被用户中断（SIGINT）", "再次运行以继续；若有未完成事务，先运行 lingedge recover")

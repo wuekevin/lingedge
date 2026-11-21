@@ -2,13 +2,12 @@ package cli
 
 import (
 	"context"
-	"errors"
-	"io/fs"
-	"os"
+
+	"github.com/wuekevin/lingedge/internal/tools/registry"
 )
 
 // ComponentInfo 是 `list` 的 data.components[] 项（tools-design §6）。
-// 其数据由 registry 包（Story 1.29）从 state.json 提供；本 Story 只固定输出形状。
+// 其数据来自 registry 包（Story 1.29）读取的 state.json；输出形状由本包固定（JSON Schema 见 schema/data.list.schema.json）。
 type ComponentInfo struct {
 	Name        string `json:"name"`
 	Version     string `json:"version"`
@@ -23,34 +22,36 @@ type ComponentInfo struct {
 	PrevVersion string `json:"prev_version,omitempty"`
 }
 
-// StateSource 提供本机已安装组件。registry（Story 1.29）实现后在 cmd/lingedge 装配注入。
+// StateSource 提供本机已安装组件。缺省实现是读取 state.json 的 FileState（经 registry）；测试可注入自己的实现来验证渲染。
 type StateSource interface {
 	Components(ctx context.Context) ([]ComponentInfo, error)
 }
 
-// FileState 读取 state.json。
+// FileState 经 registry 读取 state.json（Story 1.29 替换了 1.25 的「state.reader_unavailable」占位）。
 //
 // 文件不存在 → 空列表（AC5：version/list/status 对无 state.json 返回空而非报错）。
-// 文件存在 → state.json 的格式与读写由 registry（Story 1.29）定义，本 Story 不猜测其格式：
-// 如实返回「读取器尚未交付」错误（退出码 1），而不是把已有状态当作空来展示（那会是假成功）。
+// 文件存在 → 严格解析与校验：损坏/未知 schema 版本/权限不安全都如实报错（见 RegistryError 的映射），绝不把已有但读不懂的状态当作空来展示。
+// 读取不加锁：registry 的原子写保证读者看到的总是旧版或新版的完整文件，所以普通用户也能安全运行 list/status。
 type FileState struct{ Path string }
 
 // Components 实现 StateSource。
 func (f FileState) Components(context.Context) ([]ComponentInfo, error) {
-	_, err := os.Stat(f.Path)
-	switch {
-	case err == nil:
-		return nil, &Error{
-			Exit: ExitGeneral, Code: "state.reader_unavailable",
-			Message: "发现 " + f.Path + "，但 state.json 的读取器（registry 包）尚未交付，无法给出真实的已装组件列表",
-			Hint:    "state.json 读写随 Story 1.29 交付；在此之前请勿依赖 list/status/version 的组件信息",
-		}
-	case errors.Is(err, fs.ErrNotExist):
-		return []ComponentInfo{}, nil
-	default:
-		return nil, &Error{
-			Exit: ExitPrecondition, Code: "state.unreadable",
-			Message: "无法读取 " + f.Path, Hint: "检查该文件及其父目录的权限（state.json 应为 0644，普通用户可读）", Cause: err,
-		}
+	reg := registry.New(registry.LayoutForStatePath(f.Path), registry.Options{})
+	st, _, err := reg.LoadState()
+	if err != nil {
+		return nil, RegistryError(err)
 	}
+	out := make([]ComponentInfo, 0, len(st.Components))
+	for _, name := range st.Names() {
+		c := st.Components[name]
+		ports := c.Ports
+		if ports == nil {
+			ports = []int{}
+		}
+		out = append(out, ComponentInfo{
+			Name: name, Version: c.Version, State: c.State, Unit: c.Unit, RunUser: c.RunUser, Ports: ports,
+			ReleaseDir: c.ReleaseDir, ConfigDir: c.ConfigDir, DataDir: c.DataDir, InstalledAt: c.InstalledAt, PrevVersion: c.PrevVersion,
+		})
+	}
+	return out, nil
 }

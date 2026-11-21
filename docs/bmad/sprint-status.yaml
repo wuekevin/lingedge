@@ -67,7 +67,7 @@ development_status:
   1-27b-遗留项清理: review   # 开发完成（本机门禁见 docs/bmad/stories/1-27b-遗留项清理.md）：1.25 标志解析失败时 --json 判定改用 pflag 自身语义重扫（TRUE/t/--/取值消耗/覆盖）；tools-design §9.1/§9.2 示例改为合法并由测试守护；1.27 两条变异：一条补出可区分测试、一条确认等价；key_rotation 多级链式背书与 Unix socket 凭据/热重载口令/ACCOUNT LOCK 评估后保持登记（理由见文档）；UD-27 补充默认值登记；无新迁移/无契约变更（CF-6 schema 哈希不变）
   1-28-downloader-与离线-bundle-完整校验链: review   # 开发完成、本机门禁见 docs/bmad/stories/1-28-*.md：internal/tools/downloader（仅 HTTPS/拒绝重定向到 HTTP/无 --insecure/release.ca_file；大小上限=清单 size（声明与实际流）、流式 SHA256、Range 断点续传整体校验后才落名（续传篡改失败）、分层超时/有限重试/代理；Acquire 走 §9.5 第 1–7 步：Verifier.Verify→取包→ReadMembers 读 META 并验 SHA256SUMS(.sig)（LINGEDGE-PKG-V1）→SafeExtract→PackageMeta.Matches→Commit；任一失败 staging/<tx> 整体删除、信任库不变；--offline 经 Lstat+realpath 校验普通文件、IndexTar 受限索引、与在线同一段验证代码、零网络调用有拦截证明）+ security 新增只读入口 ReadMembers/IndexTar + cli.DownloadError（校验类退出码 5，传输类 1）；变异验证 33 条检出 28（5 条为冗余纵深层，见文档）；fuzz 7 个；等待环境验证：真实发行源下载（UD-3）、ENV-LNX 真实 Linux 复验（1.45）；后续：1.29 任务锁、1.33 接线/Executable/Commit 时机、1.34 按包格式规则产出
   1-28b-遗留项清理: review   # 开发完成（见 docs/bmad/stories/1-28b-遗留项清理.md）：Config.ResumeDir 跨调用断点续传（缓存在 staging 外、0700、不被信任、整体 SHA256 后才落名、失败删缓存、flock 并发互斥，AC4 不变）；测试内真实 SOCKS5 服务器验证 socks5/socks5h/认证/失败分类；真实 GNU/PAX 稀疏 tar 测试并修复 SafeExtract 对 PAX 0.0/0.1 稀疏的缺口；Params.DeferCommit + Acquired.Commit/Discard/Finish；1.28 的 5 条未检出变异 3 条补出区分测试、2 条证明不可达；无新迁移/无契约变更
-  1-29-registry-安装状态-journal-任务锁: backlog
+  1-29-registry-安装状态-journal-任务锁: review   # 开发完成、本机门禁见 docs/bmad/stories/1-29-*.md：internal/tools/registry（state.json：schema 版本化/未来版本失败关闭不改写/严格解析/写入前泄漏检查/0644/经 security.WriteFileAtomic 原子写，真实故障注入=RLIMIT_FSIZE 写失败+kill -9 下读者始终读到完整版本；journal：每条 fsync、先记 undo 再动手、open/begin/done/undone/commit/abort 共用状态机、只容忍尾行撕裂（逐字节截断测试）、可归档、EnsureFile/Dir/Symlink 幂等不覆盖；flock 全局锁+组件锁（字典序、LOCK_NB、持有者 pid/run_id/command、真实子进程 kill -9 无陈旧锁）；Begin 先锁后扫 journal，6/13；journal 自身 flock 判存活；12 个 kill 点真实 SIGKILL 后 journal 可解析且 UndoPlan 足以恢复；LockedSequence 落实 FileSequenceStore/Acquire 的跨进程锁约定）+ cli 写命令接 6/13、list/status 经真实 registry 读取（替换 state.reader_unavailable）；变异验证 26/26 检出；fuzz 2 个；等待环境验证：ENV-LNX（真实 root 目录布局、Linux flock/proc/statfs、断电撕裂）；后续：1.33 编排与 recover 本体、1.42 doctor 的网络文件系统告警
   1-30-resolver-依赖-版本-资源-端口求解-纯函数: backlog
   1-31-系统与宝塔只读探测-baota-端口-依赖: backlog
   1-32-service-包-systemd-unit-渲染-运行用户-目录-systemctl-封装: backlog
@@ -739,10 +739,11 @@ environment_verification:   # 『等待环境验证』登记（验证人/日期�
     verified_by: ""
     verified_on: ""
   1-29-registry-安装状态-journal-任务锁:
-    status: not_started
+    status: partial
     required_env: "本机（macOS 支持 flock）；`/proc` 相关与 root 目录布局需 ENV-LNX"
-    condition: "逻辑与故障注入本机完成；真实 `/var/lib/lingedge` root 目录与 `kill -9` 系统级恢复在 ENV-LNX
-      验证。"
+    condition: "仅代表 macOS 本机：state/journal/锁的逻辑、真实子进程 kill -9 与故障注入；真实 `/var/lib/lingedge` root 目录布局、Linux 上的 flock/`/proc`/statfs 行为、断电造成的撕裂尾行在 ENV-LNX 验证。"
+    done_locally: "make lint security gate-selftest race vuln contract-check build verify-build migrate-test 全绿：见 docs/bmad/stories/1-29-registry-安装状态-journal-任务锁.md。"
+    pending: "ENV-LNX 复验（1.45）；1.33 编排与 recover 本体（API 已就绪）；1.42 doctor 对网络文件系统告警与 --fix-perms。"
     verified_by: ""
     verified_on: ""
   1-31-系统与宝塔只读探测-baota-端口-依赖:
