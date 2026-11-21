@@ -67,7 +67,7 @@ func TestServerHardening(t *testing.T) {
 	if one(t, es, "Service", "User") != "lingedge" || one(t, es, "Service", "Group") != "lingedge" {
 		t.Error("Server 以 lingedge 运行")
 	}
-	if got := one(t, es, "Service", "ExecStart"); got != "/opt/lingedge/server/current/lingedge-server --config /etc/lingedge/server/server.yaml --roles=api,grpc,scheduler,worker" {
+	if got := one(t, es, "Service", "ExecStart"); got != "/opt/lingedge/server/current/bin/lingedge-server --config /etc/lingedge/server/server.yaml --roles=api,grpc,scheduler,worker" {
 		t.Errorf("ExecStart=%q", got)
 	}
 }

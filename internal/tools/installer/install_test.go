@@ -126,14 +126,17 @@ func TestInstallServerSecretsNeverLeak(t *testing.T) {
 		}
 	}
 	// F-7：主密钥只给短指纹（不是密钥），并提示与数据库备份分开保管。
-	fp := ""
+	fp, warn := "", ""
 	for _, a := range res.Access {
-		if a.Kind == "master_key_fingerprint" {
+		switch a.Kind {
+		case "master_key_fingerprint":
 			fp = a.Value
+		case "master_key_warning":
+			warn = a.Label + a.Value
 		}
 	}
-	if !strings.Contains(fp, "分开保管") || len(strings.Fields(fp)[0]) < 16 {
-		t.Errorf("应给出主密钥短指纹与分开保管的提示: %q", fp)
+	if len(strings.Fields(fp)) == 0 || len(strings.Fields(fp)[0]) < 16 || !strings.Contains(warn, "分开保管") {
+		t.Errorf("应给出主密钥短指纹（%q）与分开保管的醒目提示（%q）", fp, warn)
 	}
 	yml, _ := os.ReadFile(filepath.Join(w.Root, "etc/lingedge/server/server.yaml"))
 	if !strings.Contains(string(yml), "listen: 127.0.0.1:18080") || !strings.Contains(string(yml), "master_key_file: ''") {

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "config setup-token 的 data（tools-design §13；Story 1.35）",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["component", "action", "hash_file", "replaced", "access"],
+  "properties": {
+    "component": {"const": "server"},
+    "action": {"const": "reset"},
+    "hash_file": {"type": "string"},
+    "replaced": {"type": "boolean"},
+    "access": {"type": "array", "minItems": 1, "items": {"type": "object", "additionalProperties": false, "required": ["component", "kind", "label", "value"],
+      "properties": {"component": {"type": "string"}, "kind": {"const": "setup_token"}, "label": {"type": "string"}, "value": {"type": "string"}, "one_time": {"type": "boolean"}}}}
+  }
+}

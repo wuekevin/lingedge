@@ -8,7 +8,7 @@ Type=notify
 NotifyAccess=main
 User=lingedge
 Group=lingedge
-ExecStart=/opt/lingedge/server/current/lingedge-server --config /etc/lingedge/server/server.yaml --roles=api,grpc,scheduler,worker
+ExecStart=/opt/lingedge/server/current/bin/lingedge-server --config /etc/lingedge/server/server.yaml --roles=api,grpc,scheduler,worker
 # 主密钥经 systemd credentials 注入，进程内通过 $CREDENTIALS_DIRECTORY/master.key 读取，文件本身仅 root 可读
 LoadCredential=master.key:/etc/lingedge/server/master.key
 Restart=on-failure

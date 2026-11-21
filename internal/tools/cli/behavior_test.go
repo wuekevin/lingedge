@@ -270,12 +270,12 @@ func TestHiddenCommandsAndNoFakeSuccess(t *testing.T) {
 		t.Fatalf("退出码 %d", code)
 	}
 	out := h.stdout.String()
-	for _, vis := range []string{"version", "list", "status", "install", "recover"} { // install/recover 自 Story 1.33 起已交付
+	for _, vis := range []string{"version", "list", "status", "install", "recover", "config"} { // install/recover 自 Story 1.33、config setup-token 自 Story 1.35 起已交付
 		if !regexp.MustCompile(`(?m)^\s+` + vis + `\s`).MatchString(out) {
 			t.Errorf("--help 应列出已交付命令 %s:\n%s", vis, out)
 		}
 	}
-	for _, hid := range []string{"update", "service", "logs", "doctor", "config", "node", "backup", "rollback", "uninstall"} {
+	for _, hid := range []string{"update", "service", "logs", "doctor", "node", "backup", "rollback", "uninstall"} {
 		if regexp.MustCompile(`(?m)^\s+` + hid + `\s`).MatchString(out) {
 			t.Errorf("未实现命令 %s 不应出现在 --help", hid)
 		}
@@ -283,7 +283,7 @@ func TestHiddenCommandsAndNoFakeSuccess(t *testing.T) {
 	// 全部未实现的叶子命令（root 身份、满足其校验与确认）都不得以 0 退出。
 	for _, args := range [][]string{
 		{"update", "node"}, {"update", "check"}, {"update", "self"}, {"service", "status"}, {"service", "start", "node"},
-		{"logs", "node"}, {"doctor"}, {"config", "validate"}, {"config", "show", "server"}, {"config", "edit", "server"}, {"config", "setup-token"},
+		{"logs", "node"}, {"doctor"}, {"config", "validate"}, {"config", "show", "server"}, {"config", "edit", "server"},
 		{"node", "enroll"}, {"backup", "create"}, {"backup", "list"}, {"backup", "verify", "f"}, {"backup", "restore", "f", "--yes"},
 		{"rollback", "node", "--yes"}, {"uninstall", "node", "--yes"},
 		{"version", "--check"}, {"list", "--available"},

@@ -120,9 +120,9 @@ func (s SpecSet) Names() []string {
 	return out
 }
 
-// ProductionSpecs 返回生产构建的组件规格。**当前为空**：具体组件由后续 Story 在此登记（1.35 server 等）。
-// 刻意不用包级可变注册表——那会让测试里的假组件有机会经全局状态混进生产路径。
-func ProductionSpecs() SpecSet { return SpecSet{} }
+// ProductionSpecs 返回生产构建的组件规格：目前只有 server（Story 1.35）；其余组件由后续 Story（1.40 静态前端、Epic 3 node 等）在此登记，
+// 未登记的组件 install 以 install.component_spec_missing 明确失败。刻意不用包级可变注册表——那会让测试里的假组件有机会经全局状态混进生产路径。
+func ProductionSpecs() SpecSet { return SpecSet{"server": serverSpec{}} }
 
 // HTTPOK 对 url 发 GET，2xx 视为健康。仅用于组件的 Health 实现（本机环回探测，不跟随到非本机的重定向以外的任何东西）。
 func HTTPOK(ctx context.Context, url string, timeout time.Duration) error {

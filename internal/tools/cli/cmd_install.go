@@ -24,7 +24,7 @@ import (
 type InstallEnv struct {
 	// Root 非空时 /etc /opt /var 路径前缀到该目录（测试用）；生产为空。
 	Root string
-	// Specs 是可用的组件规格；nil = installer.ProductionSpecs()（当前为空：未交付规格的组件 install 明确失败，不会有假组件）。
+	// Specs 是可用的组件规格；nil = installer.ProductionSpecs()（当前只有 server：未交付规格的组件 install 明确失败，不会有假组件）。
 	Specs installer.SpecSet
 	// Collect 做系统探测；nil = 真实 probe.Collect。
 	Collect func(ctx context.Context) (probe.Result, error)
@@ -445,4 +445,33 @@ func runRecover(inv *invocation) (*Result, error) {
 			}
 		}
 	}}, nil
+}
+
+// setupTokenData 是 `config setup-token --reset` 的 data（schema/data.config-setup-token.schema.json）。令牌经 access[].value（secret:true）交付，
+// 与 install 相同：只出现在这一次输出里，不写日志、不落盘（磁盘上只有它的 SHA-256）。
+type setupTokenData struct {
+	Component string             `json:"component"`
+	Action    string             `json:"action"`
+	HashFile  string             `json:"hash_file"`
+	Replaced  bool               `json:"replaced"`
+	Access    []installer.Access `json:"access"`
+}
+
+func runSetupToken(inv *invocation) (*Result, error) {
+	r := inv.r
+	in, err := r.newInstaller(nil, installer.Request{})
+	if err != nil {
+		return nil, err
+	}
+	res, err := in.ResetSetupToken(r.ctx)
+	if err != nil {
+		return nil, err
+	}
+	acc := installer.Access{Component: "server", Kind: "setup_token", Label: "新的安装向导令牌（仅显示一次）", Value: res.Token, Secret: true}
+	return &Result{
+		Data: setupTokenData{Component: "server", Action: "reset", HashFile: res.HashFile, Replaced: res.Replaced, Access: []installer.Access{acc}},
+		Human: func(w io.Writer) {
+			wf(w, "已重新生成安装向导令牌，旧令牌已失效（哈希写入 %s，属主 lingedge 0600；Server 无需重启）。\n\n%s：%s\n（仅显示这一次，请立即保存；它不会被写入日志或磁盘，磁盘上只有 SHA-256。）\n", res.HashFile, acc.Label, acc.Value)
+		},
+	}, nil
 }

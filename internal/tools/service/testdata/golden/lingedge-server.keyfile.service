@@ -9,7 +9,7 @@ Type=notify
 NotifyAccess=main
 User=lingedge
 Group=lingedge
-ExecStart=/opt/lingedge/server/current/lingedge-server --config /etc/lingedge/server/server.yaml --roles=api
+ExecStart=/opt/lingedge/server/current/bin/lingedge-server --config /etc/lingedge/server/server.yaml --roles=api
 # 降级（ADR-027）：本机 systemd 低于 247，不支持 LoadCredential=。主密钥改由 server.yaml 的 secrets.master_key_file 指向的文件读取，
 # 该文件为 root 属主、运行组只读（0440），且不在任何备份产物中
 Restart=on-failure

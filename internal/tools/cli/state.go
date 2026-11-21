@@ -20,6 +20,16 @@ type ComponentInfo struct {
 	DataDir     string `json:"data_dir"`
 	InstalledAt string `json:"installed_at"`
 	PrevVersion string `json:"prev_version,omitempty"`
+	// Setup 仅 server：安装向导的进展（Story 1.35）。由 list 在读到 state.json 之后另行填充（只读检查 <data_dir>/install.lock）。
+	Setup *SetupInfo `json:"setup,omitempty"`
+}
+
+// SetupInfo 描述 Server 的安装向导进展。Phase：wizard_pending（install.lock 不存在，Server 处于 setup mode，向导未完成）| initialized（install.lock 存在）|
+// unknown（无法读取数据目录，如非 root 无权进入 0750 的目录）。它只反映文件系统事实，不探测进程。
+type SetupInfo struct {
+	Phase       string `json:"phase"`
+	InstallLock bool   `json:"install_lock"`
+	Detail      string `json:"detail"`
 }
 
 // StateSource 提供本机已安装组件。缺省实现是读取 state.json 的 FileState（经 registry）；测试可注入自己的实现来验证渲染。

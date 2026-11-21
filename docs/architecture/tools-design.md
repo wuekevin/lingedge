@@ -701,7 +701,7 @@ stateDiagram-v2
 
 ### 12.4 实现（Story 1.33：`internal/tools/installer`）
 
-**依赖与分层**：`cli → installer → {registry, downloader+manifest, resolver, probe, service, security}`；`installer` 不 import 任何 Server 包。组件特有知识经 `ComponentSpec` 注入（`Executables`/`ValidateSettings`/`InitConfig`/`Start`/`Health`，见 `installer/component.go`）；**生产构建的 `installer.ProductionSpecs()` 为空**（具体组件由 1.35 server、1.40 静态前端、Epic 3 node 等 Story 登记），未登记的组件 `install` 以 `install.component_spec_missing`（退出码 1）明确失败，**不存在占位实现**。假组件只在 `_test.go` 与 `tests/toolsworld`（G-11）；`tests/security/toolsbinary` 对编译出的 `lingedge` 做 `go tool nm` 与字符串扫描，证明二进制不含它们（带负向样本）。
+**依赖与分层**：`cli → installer → {registry, downloader+manifest, resolver, probe, service, security}`；`installer` 不 import 任何 Server 包。组件特有知识经 `ComponentSpec` 注入（`Executables`/`ValidateSettings`/`InitConfig`/`Start`/`Health`，见 `installer/component.go`）；**生产构建的 `installer.ProductionSpecs()` 只登记已交付的组件（Story 1.33 时为空；Story 1.35 起为 `server`；1.40 静态前端、Epic 3 node 等 Story 交付后追加）**，未登记的组件 `install` 以 `install.component_spec_missing`（退出码 1）明确失败，**不存在占位实现**。假组件只在 `_test.go` 与 `tests/toolsworld`（G-11）；`tests/security/toolsbinary` 对编译出的 `lingedge` 做 `go tool nm` 与字符串扫描，证明二进制不含它们（带负向样本），并断言 `ProductionSpecs()` 恰为 `server`。
 
 **一次安装的流程**（`Installer.Install`）：
 1. `cli` 的写命令入口 `registry.Begin`（组件锁 + journal 扫描，6/13）；`--dry-run` 不取锁、不开 journal。
@@ -735,7 +735,7 @@ Tools 负责**物化与准备**，Web 向导负责**业务初始化**，边界�
 
 **setup mode 与 setup token**：
 - 无 `install.lock`（`/var/lib/lingedge/server/install.lock`，且无 `system_installations` 完成记录）时，Server 以 setup mode 启动：**仅**提供 `/setup` 向导 UI（`go:embed` 的轻量 SPA，不依赖 Admin Web）与 `/api/v1/public/setup/*` 接口，其余 API 返回 503。
-- Tools 生成 256 位随机 setup token，仅在终端**显示一次**，哈希（SHA-256）写入 `/etc/lingedge/server/setup-token.hash`（lingedge:lingedge 0600）。向导所有写接口要求请求头 `X-Setup-Token`；失败节流（Redis 不可用时本地计数）。**实现（Story 1.24）**：生成与哈希文件创建用共享原语 `pkg/setuptoken`（`Generate`/`Hash`/`WriteHashFile`，Tools 步骤 18 附近调用，Story 1.35 接线；Server 只读取并校验，`complete` 后删除——无权删除 root 属主目录里的文件时清空内容使其失效）；`status` 也要求 token；哈希路径可经 `secrets.setup_token_hash_file` 覆盖（CC-12）。
+- Tools 生成 256 位随机 setup token，仅在终端**显示一次**，哈希（SHA-256）写入 `/etc/lingedge/server/setup-token.hash`（lingedge:lingedge 0600）。向导所有写接口要求请求头 `X-Setup-Token`；失败节流（Redis 不可用时本地计数）。**实现（Story 1.24）**：生成与哈希文件创建用共享原语 `pkg/setuptoken`（`Generate`/`Hash`/`WriteHashFile`，Tools 步骤 18 附近调用，Story 1.35 已接线；Server 只读取并校验，`complete` 后删除——无权删除 root 属主目录里的文件时清空内容使其失效）；`status` 也要求 token；哈希路径可经 `secrets.setup_token_hash_file` 覆盖（CC-12）。
 - 向导默认只监听 `127.0.0.1:8080`；远程访问需 SSH 隧道，或用户显式 `--setup-listen 0.0.0.0:8080`（Tools 打印风险提示，且 token 必须通过 TLS 前置反代传输的建议）。防止「安装完成前被他人抢先初始化」。
 
 **向导步骤（基线 §21.1）**：
@@ -753,6 +753,15 @@ Tools 负责**物化与准备**，Web 向导负责**业务初始化**，边界�
 8. **完成**：事务提交 → 写 `system_installations` 与 `install.lock`（**最后**写，且之后 setup 接口永久返回 410，setup token 哈希删除）→ 提示进入 Admin。若迁移口令由向导自动生成，`complete` 响应**一次性**返回（`one_time_secrets.migrate_password`）并给出预填的 `sudo lingedge-server migrate credential init …` 命令；响应写出后服务端清零（§13.1）。
 
 向导任一步中断可从 DB 中的 `system_installations.state` 续做（各步幂等）；在 `install.lock` 之前 Server 不接受业务流量。可选无头路径：`lingedge-server setup --from-file <0600 的 YAML>`（供自动化；**读入后由 setup 进程自行清零并删除该文件**，§13.1）。
+
+**实现（Story 1.35：Tools 侧 Server 安装）**：
+- `installer.ProductionSpecs()` 登记 `server`（`serverspec.go`）：`Executables=payload/bin/lingedge-server`；`Start` = `systemctl start lingedge-server.service`；`Health` = 对 REST 监听发真实 `GET /healthz`（setup mode 即存活探针，200；`/healthz/ready` 在向导完成前必然 503，故不用）。`InitConfig` 不返回文件——`server.yaml`/`master.key`/`setup-token.hash` 由 installer 内建生成；`ValidateSettings` 只放行内建键 `env`、`trusted-proxies`，**不开放任何数据库/Redis/口令类键**（Tools 不接触口令，AC2/AC6）。
+- **监听随计划端口**：`server.yaml` 的 `http/grpc/enroll/metrics.listen` 取自计划端口（`--set port.server.tcp.<端口>=<新端口>[@<绑定>]` 换端口后，server.yaml、健康检查地址与向导地址一致）；`--setup-listen` 与换后的 REST 端口矛盾 → 退出码 2；`metrics` 绑定非回环在 Tools 一侧即拒绝（与 Server 规则一致）。
+- **访问信息（步骤 22）**：向导地址；默认回环时给 `ssh -L` 隧道提示；`--setup-listen` 非回环时给风险提示（预检警告 + 访问信息，含「token 经明文 HTTP 传输」）；主密钥短指纹（新建或沿用已有文件的指纹）与**醒目的「必须与数据库备份分开保管」**（`kind=master_key_warning`）；token 仅此一次（`one_time:true`）。
+- **`lingedge config setup-token --reset`**（root，写命令，持 server 组件锁，需确认）：生成新 256 位 token，同目录临时文件 → chown 为运行用户 → fsync → rename 原子替换 `setup-token.hash`（0600）；旧 token 立即失效（Server 每次校验重读文件，无需重启）。server 未安装 → 3；`install.lock` 已存在（向导已完成）→ 3，不重新打开向导。不带 `--reset` → 2（token 磁盘上只有哈希，无法找回）。
+- **`lingedge list`** 对 server 追加 `setup`（`phase`: `wizard_pending`/`initialized`/`unknown` + `install_lock`）：只读检查 `<data_dir>/install.lock`；data schema 追加式。
+- **JSON 交付 token**：43 字符的 base64url token 满足 `pkg/redact` 的「裸 base64 密钥」启发式，会在 `--json` 的 envelope 里被遮蔽为 `***`（Story 1.33 遗留缺陷，1.35 联调发现）；`cli` 的 envelope 对**唯一交付通道**（`data.access[]` 中 `kind=setup_token` 且 `one_time=true` 的 `value`）做窄口还原，其余位置同形态字符串仍被遮蔽。`Access` 的 JSON 键由 `secret` 改为 `one_time`（脱敏按键名会把 `secret` 键的值换成 `***`，破坏 schema）。
+- **ExecStart 路径**：单元模板由 `…/current/lingedge-server` 改为 `…/current/bin/lingedge-server`，与发行流水线的包布局（`payload/bin/lingedge-server` → `releases/<v>/bin/…` → `current/bin/…`）一致（联调发现：旧路径真实启动会 ENOENT）。`node` 的同类路径（`current/lingedge-node`）待 Epic 3 交付 node 包时一并按包布局核对。
 
 ### 13.1 数据库凭据交接与生命周期（AA-7，ADR-026，UD-31）
 
@@ -807,7 +816,7 @@ Type=notify
 NotifyAccess=main
 User=lingedge
 Group=lingedge
-ExecStart=/opt/lingedge/server/current/lingedge-server --config /etc/lingedge/server/server.yaml --roles=api,grpc,scheduler,worker
+ExecStart=/opt/lingedge/server/current/bin/lingedge-server --config /etc/lingedge/server/server.yaml --roles=api,grpc,scheduler,worker
 # 主密钥经 systemd credentials 注入，进程内通过 $CREDENTIALS_DIRECTORY/master.key 读取，文件本身仅 root 可读
 LoadCredential=master.key:/etc/lingedge/server/master.key
 Restart=on-failure
@@ -1234,3 +1243,10 @@ LockPersonality=yes
 - **§9.2 迁移预告**取自 `lingedge-server migrate plan --offline`（plan 默认即 JSON；`--json` 标志未被该子命令接受，故未使用）：`schema_from=0000`、`schema_to=<最新序号 4 位>`、`classes`=出现过的分类、`irreversible_count`、`backup_required`（[ASSUMPTION] 含 reversible/irreversible 迁移即 true）。
 - **公钥轮换**：`release-sign endorse` 产出 `key_rotation` 段（背书签名输入即 §9.1 的 `LINGEDGE-KEYROT-V1`），`release finalize -key-rotation` 写入清单；端到端（背书 → Tools 验证并落盘 keys.d → 新 key 签名的清单通过；未知背书者 → rotation_invalid）已由 `tests/release` 覆盖。
 - 流程、保管、吊销与泄露处置见 `docs/operations/release.md`。**无迁移/OpenAPI/proto/CF-6/contract-v1 变更。**
+
+## 修订记录 2026-11-22（Story 1.35：`lingedge install server`）
+
+- **§13 实现口径**：见 §13「实现（Story 1.35）」——server 的生产 `ComponentSpec`、监听随计划端口、访问信息（SSH 隧道/风险提示/主密钥保管提示）、`config setup-token --reset`、`list` 的向导进展、`install.lock` 联调（真实 `lingedge-server` 向导 + 临时 MySQL/Redis）。
+- **§15.1 server 单元**：`ExecStart` 路径改为 `/opt/lingedge/server/current/bin/lingedge-server`（与包布局一致）。单元其余内容、加固项、`LoadCredential` 降级方案**未改**。
+- **缺陷修复（1.33 遗留）**：`--json` 下 setup token 被遮蔽；`Access.secret` 键被遮蔽为字符串。**无迁移/OpenAPI/proto/CF-6/contract-v1 变更**；`install` 与 `list` 的 data schema 为追加（`ssh_tunnel`/`master_key_warning` 访问类型、`list.components[].setup`），新增 `config setup-token` 的 data schema；`install` data 中 `access[].secret` 改名 `one_time`（该字段此前在 JSON 里始终被遮蔽、从未有可用取值，未发布，视为缺陷修复）。
+- **已知限制（登记 ENV-LNX）**：`ProtectSystem=strict` 下 `/etc` 只读，Server 在向导 complete 后无法删除或清空 `/etc/lingedge/server/setup-token.hash`（1.24 的「清空」降级同样需要写权限）——此时哈希文件残留，但向导路由已 410（`install.lock`），token 事实上失效；是否把 `/etc/lingedge/server` 加入 `ReadWritePaths` 或改由 Tools 清理，待真实 systemd 验证后决定。

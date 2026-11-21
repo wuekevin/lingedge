@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"os"
 	"path"
 	"path/filepath"
@@ -473,6 +474,12 @@ func (x *execution) doConfig(context.Context) error {
 		}
 		// 目标已存在。
 		if pf.Random {
+			if pf.Kind == "secret_key" {
+				// 沿用已有主密钥：指纹取已有文件的（不是刚生成而被丢弃的那份），操作者据此核对备份。
+				if b, rerr := os.ReadFile(x.hp(pf.Path)); rerr == nil {
+					x.masterKeyFP = sha256Hex(b)[:16]
+				}
+			}
 			x.warn(Warning{Code: "config.kept_existing", Component: pf.Component, Step: StepInitConfig, Message: pf.Path + " 已存在，沿用（不会重新生成或覆盖）"})
 			continue
 		}
@@ -672,12 +679,24 @@ func (x *execution) doAccess(context.Context) error {
 		if c.Name != "server" {
 			continue
 		}
-		x.access = append(x.access, Access{Component: "server", Kind: "setup_url", Label: "安装向导地址", Value: "http://" + x.pre.req.SetupListen + "/"})
+		listen := x.pre.req.SetupListen
+		x.access = append(x.access, Access{Component: "server", Kind: "setup_url", Label: "安装向导地址", Value: "http://" + listen + "/"})
+		if host, port, err := net.SplitHostPort(listen); err == nil && isLoopbackHost(host) {
+			// 默认只监听本机回环：远程操作者经 SSH 隧道访问向导（token 与向导里填写的口令不经明文网络）。
+			x.access = append(x.access, Access{Component: "server", Kind: "ssh_tunnel", Label: "远程访问（SSH 隧道）",
+				Value: "ssh -L " + port + ":" + host + ":" + port + " <用户>@<本机地址>  然后在本地浏览器打开 http://127.0.0.1:" + port + "/"})
+		} else if err == nil {
+			x.access = append(x.access, Access{Component: "server", Kind: "note", Label: "向导监听风险",
+				Value: "向导监听 " + listen + "（非本机回环）：在向导 complete 之前对网络可达，仅凭 setup token 保护；请尽快完成向导，或改用默认的 127.0.0.1:8080 + SSH 隧道"})
+		}
 		if x.masterKeyFP != "" {
 			// F-7：主密钥只在这里给出短指纹（不是密钥本身），并醒目提示与数据库备份分开保管——丢失即无法解密已加密的数据。
 			x.access = append(x.access, Access{Component: "server", Kind: "master_key_fingerprint", Label: "主密钥指纹（sha256 前 8 字节）",
-				Value: x.masterKeyFP + "（" + service.ServerConfigDir + "/master.key；请与数据库备份分开保管，丢失将无法解密已加密的数据）"})
+				Value: x.masterKeyFP + "（" + service.ServerConfigDir + "/master.key）"})
 		}
+		x.access = append(x.access, Access{Component: "server", Kind: "master_key_warning", Label: "重要：主密钥必须与数据库备份分开保管",
+			Value: service.ServerConfigDir + "/master.key 丢失将导致已加密的数据（数据库/Redis 凭据、证书私钥、API 令牌等）永久无法解密。" +
+				"请把它与数据库备份分开保管：备份到不同的介质或位置（两者放在一起 = 加密形同虚设）。安装不会覆盖已存在的 master.key。"})
 		switch {
 		case x.pre.token != "" && x.tokenUsable:
 			// setup token 只在这里显示一次；它不写盘、不写日志、不进事件（哈希已在步骤 18 写入）。

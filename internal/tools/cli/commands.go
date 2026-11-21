@@ -263,8 +263,15 @@ func commandSpecs() []*cmdSpec {
 				Validate: compArg(false)},
 			{Use: "show <组件>", Short: "脱敏显示配置", Story: "Story 1.42", Args: cobra.ExactArgs(1), Validate: compArg(false)},
 			{Use: "edit <组件>", Short: "编辑配置（校验后原子替换）", Story: "Story 1.42", Args: cobra.ExactArgs(1), NeedsRoot: true, Validate: compArg(false)},
-			{Use: "setup-token", Short: "重新生成 Server 安装向导的一次性令牌", Story: "Story 1.35", Args: cobra.NoArgs, NeedsRoot: true,
+			{Use: "setup-token", Short: "重新生成 Server 安装向导的一次性令牌", Args: cobra.NoArgs, NeedsRoot: true, Run: runSetupToken,
+				Locks: func(*invocation) ([]string, *Error) { return []string{"server"}, nil },
 				Flags: func(fs *pflag.FlagSet) { fs.Bool("reset", false, "重新生成令牌") },
+				Validate: func(inv *invocation) *Error {
+					if !inv.flag("reset") {
+						return usageErr("usage.missing_flag", "config setup-token 需要 --reset", "令牌只在安装时显示一次且磁盘上只有哈希，无法找回；需要新令牌请运行 lingedge config setup-token --reset（旧令牌立即失效）")
+					}
+					return nil
+				},
 				Confirm: func(inv *invocation) *Error {
 					if inv.flag("reset") {
 						return inv.r.confirmYes("重新生成令牌会使旧令牌立即失效")

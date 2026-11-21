@@ -11,7 +11,7 @@ type Kind string
 
 // Kind 取值。
 const (
-	// KindSpecMissing：计划里有组件没有登记 ComponentSpec（生产构建当前为空，直到 1.35 等 Story 交付）。退出码 1。
+	// KindSpecMissing：计划里有组件没有登记 ComponentSpec（生产构建当前只登记 server，其余由各自 Story 交付）。退出码 1。
 	KindSpecMissing Kind = "spec_missing"
 	// KindSettings：--set 的键/值不合法（组件的 schema 拒绝）。退出码 2。
 	KindSettings Kind = "settings"

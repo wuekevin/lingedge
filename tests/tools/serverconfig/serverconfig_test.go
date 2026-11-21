@@ -11,6 +11,7 @@ import (
 
 	"github.com/wuekevin/lingedge/internal/platform/config"
 	"github.com/wuekevin/lingedge/internal/tools/installer"
+	"github.com/wuekevin/lingedge/internal/tools/resolver"
 	"github.com/wuekevin/lingedge/internal/tools/service"
 	"github.com/wuekevin/lingedge/pkg/secretbox"
 	"github.com/wuekevin/lingedge/pkg/setuptoken"
@@ -100,5 +101,44 @@ func TestGeneratedMasterKeyAndTokenAreAccepted(t *testing.T) {
 	tok, hash, err := setuptoken.Generate()
 	if err != nil || !setuptoken.Verify(tok, hash) {
 		t.Fatal("setup token 往返失败")
+	}
+}
+
+// Story 1.35：随计划端口（--set 换端口、--setup-listen）渲染的 server.yaml 能被 Server 真实的配置加载器接受，四个监听与计划一致；
+// metrics 绑定非回环在 Tools 一侧就被拒绝（与 Server 的「回环专用」规则一致，Story 1.22b）。
+func TestServerYAMLFollowsPlanPortsAndLoadsInRealConfig(t *testing.T) {
+	ports := []resolver.PlannedPort{
+		{Component: "server", Proto: "tcp", Port: 18080, Bind: "127.0.0.1", Purpose: "rest", Overridden: true},
+		{Component: "server", Proto: "tcp", Port: 19443, Bind: "10.0.0.5", Purpose: "grpc-mtls", Overridden: true},
+		{Component: "server", Proto: "tcp", Port: 9444, Bind: "0.0.0.0", Purpose: "grpc-enroll", Conditional: true},
+		{Component: "server", Proto: "tcp", Port: 19180, Bind: "127.0.0.1", Purpose: "metrics", Overridden: true},
+	}
+	for _, mode := range []service.CredentialMode{service.CredentialSystemd, service.CredentialKeyFile} {
+		p, err := installer.ServerYAMLFromPlan(nil, "", mode, ports)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := installer.RenderServerYAML(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := config.Parse(b, config.Options{})
+		if err != nil {
+			t.Fatalf("Server 的 config.Parse 拒绝了生成的 server.yaml: %v\n%s", err, b)
+		}
+		if cfg.HTTP.Listen != "127.0.0.1:18080" || cfg.GRPC.Listen != "10.0.0.5:19443" || cfg.GRPC.EnrollListen != "0.0.0.0:9444" || cfg.Metrics.Listen != "127.0.0.1:19180" {
+			t.Errorf("监听与计划不符: %+v", cfg)
+		}
+	}
+	bad := append([]resolver.PlannedPort(nil), ports...)
+	bad[3].Bind = "0.0.0.0"
+	if _, err := installer.ServerYAMLFromPlan(nil, "", service.CredentialSystemd, bad); err == nil {
+		t.Error("metrics 绑定非回环必须在 Tools 一侧被拒绝")
+	}
+	// 同一份内容 Server 也拒绝（规则一致性的反向证明）。
+	p, _ := installer.ServerYAMLFromPlan(nil, "", service.CredentialSystemd, ports)
+	yml, _ := installer.RenderServerYAML(p)
+	if _, err := config.Parse([]byte(strings.Replace(string(yml), "listen: 127.0.0.1:19180", "listen: 0.0.0.0:19180", 1)), config.Options{}); err == nil {
+		t.Error("Server 应拒绝非回环的 metrics.listen")
 	}
 }

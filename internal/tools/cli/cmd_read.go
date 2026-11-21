@@ -1,12 +1,18 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"text/tabwriter"
 
+	"github.com/wuekevin/lingedge/internal/tools/installer"
+	"github.com/wuekevin/lingedge/internal/tools/service"
 	"github.com/wuekevin/lingedge/pkg/version"
 )
 
@@ -72,6 +78,9 @@ func runList(inv *invocation) (*Result, error) {
 		if comps[i].Ports == nil {
 			comps[i].Ports = []int{}
 		}
+		if comps[i].Name == "server" {
+			comps[i].Setup = inv.r.serverSetupInfo(comps[i])
+		}
 	}
 	return &Result{
 		Data: map[string]any{"components": comps},
@@ -87,11 +96,32 @@ func runList(inv *invocation) (*Result, error) {
 				for i, p := range c.Ports {
 					ports[i] = fmt.Sprint(p)
 				}
-				wf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", c.Name, c.Version, c.State, strings.Join(ports, ","), c.ReleaseDir, c.RunUser)
+				state := c.State
+				if c.Setup != nil {
+					state += "（" + c.Setup.Detail + "）"
+				}
+				wf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", c.Name, c.Version, state, strings.Join(ports, ","), c.ReleaseDir, c.RunUser)
 			}
 			_ = tw.Flush()
 		},
 	}, nil
+}
+
+// serverSetupInfo 只读检查 <data_dir>/install.lock（Server 向导完成时写下）得出向导进展。非 root 对 0750 的数据目录没有搜索权限时报告 unknown，而不是猜测。
+func (r *Run) serverSetupInfo(c ComponentInfo) *SetupInfo {
+	dir := c.DataDir
+	if dir == "" {
+		dir = service.ServerDataDir
+	}
+	_, err := os.Lstat(r.hostPath(filepath.ToSlash(filepath.Join(dir, installer.InstallLockName))))
+	switch {
+	case err == nil:
+		return &SetupInfo{Phase: "initialized", InstallLock: true, Detail: "已初始化：install.lock 存在"}
+	case errors.Is(err, fs.ErrNotExist):
+		return &SetupInfo{Phase: "wizard_pending", Detail: "setup mode：安装向导未完成（install.lock 不存在）"}
+	default:
+		return &SetupInfo{Phase: "unknown", Detail: "无法读取 " + dir + "（需要 root 或 lingedge 用户权限）"}
+	}
 }
 
 // status：本 Story 只汇总 registry 记录的安装状态；systemd 状态与健康探测随 Story 1.42 补全（data 字段只增）。

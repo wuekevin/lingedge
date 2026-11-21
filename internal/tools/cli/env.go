@@ -42,8 +42,8 @@ type Env struct {
 	BuiltinKeys func() ([]byte, error)
 	// State 缺省为读取 StatePath 的 FileState（见 state.go）。
 	State StateSource
-	// Install 是安装编排（install/recover）的外部依赖装配；零值 = 生产：真实系统、真实探测、installer.ProductionSpecs()（当前为空，
-	// 所以 install 对尚未交付规格的组件以明确的错误失败）。测试注入临时根目录、伪二进制 Runner 与（只存在于 _test.go 的）假组件。
+	// Install 是安装编排（install/recover）的外部依赖装配；零值 = 生产：真实系统、真实探测、installer.ProductionSpecs()（当前只有 server，
+	// 所以 install 对尚未交付规格的其他组件以明确的错误失败）。测试注入临时根目录、伪二进制 Runner 与（只存在于 _test.go 的）假组件。
 	Install InstallEnv
 }
 

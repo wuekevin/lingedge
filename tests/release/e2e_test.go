@@ -614,9 +614,33 @@ func TestProductionBuildFlags(t *testing.T) {
 			t.Errorf("生产二进制含测试公钥 %s", pub)
 		}
 	}
-	// 注意：cmd/lingedge 目前只有 --version 脚手架、尚未链接 internal/tools/manifest，所以发行二进制里还没有 go:embed 的 keys.json；
-	// 内置公钥对「真实产物」的覆盖（发行公钥确实被内置、测试公钥不在其中）随 Tools 命令接线（Story 1.35）生效，
-	// 守卫逻辑本身（gates release-keys、tests/security/releasekeys 的真实 go build 扫描、上面对产物的测试公钥扫描）已就绪。
+	// Story 1.35：cmd/lingedge 已链接 internal/tools/manifest（经 cli），所以**真实发行产物**里有 go:embed 的 keys.json：流水线注入的真实公钥确实被内置于
+	// tools 二进制（逐字节与注入原文一致），测试公钥不在其中；server 二进制不得携带发行公钥（信任域②与①分离，Server 不加载发行清单公钥，Story 1.23）。
+	toolsBin := filepath.Join(f.afterR1, "stage", "tools-"+relVer+"-linux-amd64", "payload", "bin", "lingedge")
+	tdata := readFile(t, toolsBin)
+	if !bytes.Contains(tdata, f.keys) {
+		t.Error("发行产物 lingedge 应逐字节内置流水线注入的 keys.json（cmd/lingedge → cli → manifest 的 go:embed）")
+	}
+	for _, line := range strings.Split(string(readFile(t, filepath.Join(repoRoot(t), "scripts/gates/data/test-release-pubkeys.txt"))), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if bytes.Contains(tdata, []byte(strings.Fields(line)[0])) {
+			t.Errorf("发行产物 lingedge 含测试公钥 %s", strings.Fields(line)[0])
+		}
+	}
+	var kd struct {
+		Keys []struct {
+			PublicKey string `json:"public_key"`
+		} `json:"keys"`
+	}
+	if err := json.Unmarshal(f.keys, &kd); err != nil || len(kd.Keys) == 0 {
+		t.Fatalf("注入的 keys.json 无法解析: %v", err)
+	}
+	if bytes.Contains(data, []byte(kd.Keys[0].PublicKey)) {
+		t.Error("server 二进制不得内置发行公钥（Server 不是发行信任域的验证方）")
+	}
 	var rec struct {
 		Dirty bool   `json:"dirty"`
 		Tags  string `json:"build_tags"`

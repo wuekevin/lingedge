@@ -185,9 +185,18 @@ func (in *Installer) Plan(ctx context.Context, req Request) (*PreflightResult, e
 		return res, nil
 	}
 
+	if req.Component == "server" {
+		// server 的监听随计划端口（--set port.server… 换端口后，server.yaml、健康检查与访问地址必须一致）；有效的向导监听写回请求（journal 续跑据此）。
+		ls, lerr := ServerListensFromPlan(req.SetupListen, plan.Ports)
+		if lerr != nil {
+			return res, wrap(KindSettings, lerr, "server 监听地址不合法")
+		}
+		req.SetupListen, res.req.SetupListen = ls.HTTP, ls.HTTP
+	}
 	if host, _, err := net.SplitHostPort(req.SetupListen); err == nil && req.SetupListen != "" && !isLoopbackHost(host) {
 		res.Warnings = append(res.Warnings, Warning{Code: "setup.listen_exposed", Component: "server", Step: StepPorts,
-			Message: "安装向导将监听 " + req.SetupListen + "（非本机回环）：向导在完成前对网络可达，仅凭 setup token 保护；建议保持默认 127.0.0.1:8080 并用 SSH 隧道访问"})
+			Message: "安装向导将监听 " + req.SetupListen + "（非本机回环）：向导在 complete 之前对网络可达，仅凭 setup token 保护（明文 HTTP 传输 token 与向导填写的口令）；" +
+				"强烈建议保持默认 127.0.0.1:8080，用 SSH 隧道访问（ssh -L 8080:127.0.0.1:8080 <用户>@<主机>），或在前面加 TLS 反代"})
 	}
 	// systemd：版本决定主密钥交付方式（ADR-027）；不是 systemd/过旧 → 退出码 3。
 	ver, err := in.sys.Version(ctx)
@@ -485,7 +494,7 @@ func (in *Installer) checkSpecs(plan *resolver.Plan) error {
 		return nil
 	}
 	return &Error{Kind: KindSpecMissing, Step: StepDependencies, Msg: "组件 " + strings.Join(missing, "、") + " 的安装规格（ComponentSpec）尚未交付，无法安装",
-		Hint:    "该组件的安装实现由后续 Story 交付（server 为 Story 1.35）；本命令不会用占位实现假装安装",
+		Hint:    "该组件的安装实现由后续 Story 交付（1.40 静态前端、Epic 3 node 等）；本命令不会用占位实现假装安装",
 		Details: map[string]any{"components": missing, "registered": in.d.Specs.Names()}, SystemState: "unchanged"}
 }
 
@@ -697,7 +706,7 @@ func (in *Installer) renderConfigs(ctx context.Context, res *PreflightResult, c 
 		base := path.Base(f.Path)
 		switch {
 		case c.Name == "server" && base == "server.yaml":
-			p, err := ServerYAMLFromSettings(res.req.Settings, res.req.SetupListen, res.cred)
+			p, err := ServerYAMLFromPlan(res.req.Settings, res.req.SetupListen, res.cred, res.Plan.Ports)
 			if err != nil {
 				return nil, wrap(KindSettings, err, "server.yaml 参数不合法")
 			}

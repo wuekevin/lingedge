@@ -175,8 +175,8 @@ func dirSnapshot(t testing.TB, root string) string {
 func TestInstallErrorsMapToExitCodes(t *testing.T) {
 	// 生产形态：没有组件规格 → 明确失败（1），而不是任何形式的假成功。
 	h, w := installHarness(t)
-	h.env.Install.Specs = nil
-	if code := h.run("install", "server", "--offline", w.Bundle, "--json"); code != 1 || errCode(h.envelope()) != "install.component_spec_missing" {
+	h.env.Install.Specs = nil // nil = 生产规格：当前只有 server（Story 1.35），node 等仍未交付
+	if code := h.run("install", "node", "--offline", w.Bundle, "--json"); code != 1 || errCode(h.envelope()) != "install.component_spec_missing" {
 		t.Fatalf("规格缺失: %d %s", code, h.stdout)
 	}
 	// 未发布/内置仍先于规格检查得到 7/8（FR-3）。

@@ -18,6 +18,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/wuekevin/lingedge/internal/tools/manifest"
 )
 
 const goldenPubB64 = "P3pE/lvUPOLOFWJtF/1sxj4LU923fmJQU9Utz1K5ghc="
@@ -212,5 +214,42 @@ func TestBuildWithTestKeyIsRejected(t *testing.T) {
 	data, _ := os.ReadFile(bin)
 	if _, bad := containsTestKey(data, testPubKeys(t)); !bad {
 		t.Fatal("扫描器应在被注入测试公钥的二进制中命中（否则「二进制不含测试公钥」的断言是恒真的）")
+	}
+}
+
+// Story 1.35：真实发行二进制（cmd/lingedge）确实链接了 manifest 的内置公钥与生产验证器装配：嵌入的字节就是被 `cli.Env.NewVerifier` → `manifest.BuiltinKeys`
+// 消费的那份 keys.json（可解析、可建信任集、公钥与注入的一致），而不是一个没人读取的孤立字符串。
+// （1.34 登记的「cmd/lingedge 链接 manifest 后守卫才对真实产物生效」在 1.33 接线 install 时已成立，这里补上对真实产物的证明。）
+func TestRealBinaryLinksBuiltinKeysConsumer(t *testing.T) {
+	if testing.Short() {
+		t.Skip("-short：跳过真实编译")
+	}
+	requireNoInjectedKeys(t)
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b64 := base64.StdEncoding.EncodeToString(pub)
+	keys := keysDoc("rel-2026-a", b64)
+	bin := buildWithKeys(t, keys)
+	nm, err := exec.Command("go", "tool", "nm", bin).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sym := range []string{"manifest.BuiltinKeys", "cli.Env.NewVerifier", "cli.runInstall", "manifest.(*Verifier).Verify"} {
+		if !bytes.Contains(nm, []byte(sym)) {
+			t.Errorf("真实 lingedge 二进制应链接 %s（内置公钥 → 验证器 → install）", sym)
+		}
+	}
+	data, _ := os.ReadFile(bin)
+	if !bytes.Contains(data, []byte(keys)) {
+		t.Fatal("二进制里找不到与注入原文逐字节一致的内嵌 keys.json")
+	}
+	kf, err := manifest.ParseKeysFile([]byte(keys))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manifest.NewTrustSet(kf); err != nil {
+		t.Fatalf("内嵌 keys.json 无法建立信任集: %v", err)
 	}
 }

@@ -1,0 +1,16 @@
+# lingedge-server 配置——由 lingedge install server 生成（已存在的配置绝不会被覆盖，新内容会写成 server.yaml.new）。
+# 不含任何口令或密钥：数据库/Redis 口令由安装向导写入运行期凭据文件（ADR-026）；主密钥见 secrets 节。
+server:
+  env: prod
+  data_dir: /var/lib/lingedge/server
+  trusted_proxies: ['127.0.0.1', '::1']
+http:
+  listen: 127.0.0.1:8080
+grpc:
+  listen: 0.0.0.0:9443
+  enroll_listen: 0.0.0.0:9444
+metrics:
+  listen: 127.0.0.1:9180
+secrets:
+  # 留空：Server 读取 $CREDENTIALS_DIRECTORY/master.key（systemd LoadCredential，ADR-011）。
+  master_key_file: ''

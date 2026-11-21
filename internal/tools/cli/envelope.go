@@ -72,7 +72,7 @@ func (e *Envelope) sanitize() {
 		dec := json.NewDecoder(bytesReader(raw))
 		dec.UseNumber()
 		if dec.Decode(&generic) == nil {
-			e.Data = redact.Value(generic)
+			e.Data = restoreOneTimeTokens(generic, redact.Value(generic))
 		}
 	}
 }
@@ -95,4 +95,44 @@ func (e *Envelope) write(w io.Writer) error {
 	}
 	_, err = w.Write(append(b, '\n'))
 	return err
+}
+
+// restoreOneTimeTokens 把「一次性交付」的 setup token 从脱敏结果里还原。
+//
+// 背景（Story 1.35 发现的 1.33 遗留缺陷）：setup token 是 32 字节随机数的 base64url（43 字符），恰好满足 pkg/redact 的「裸 base64 密钥」启发式
+// （Story 1.11），在 --json 的 envelope 里会被整体遮蔽为 ***——操作者在 --json 下永远拿不到令牌。令牌按设计只在安装/重置那一次输出里出现，
+// 所以这里对**唯一**的交付通道做窄口还原：data 树里同时满足 kind=="setup_token" 与 one_time==true 的对象的 value（由 installer.Access 产生）。
+// 其他任何位置出现的同形态字符串（含 kind 不符或没有 one_time 标记的对象）仍照常被遮蔽；日志、事件、错误信息走各自的脱敏，不经过这里。
+// orig 与 redacted 是同一棵树的脱敏前后（redact.Value 保持形状）。
+func restoreOneTimeTokens(orig, redacted any) any {
+	switch o := orig.(type) {
+	case map[string]any:
+		r, ok := redacted.(map[string]any)
+		if !ok {
+			return redacted
+		}
+		if k, _ := o["kind"].(string); k == "setup_token" {
+			if ot, _ := o["one_time"].(bool); ot {
+				if v, isStr := o["value"].(string); isStr {
+					r["value"] = v
+				}
+			}
+		}
+		for key, ov := range o {
+			if rv, present := r[key]; present {
+				r[key] = restoreOneTimeTokens(ov, rv)
+			}
+		}
+		return r
+	case []any:
+		r, ok := redacted.([]any)
+		if !ok || len(r) != len(o) {
+			return redacted
+		}
+		for i := range o {
+			r[i] = restoreOneTimeTokens(o[i], r[i])
+		}
+		return r
+	}
+	return redacted
 }

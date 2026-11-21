@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/wuekevin/lingedge/internal/tools/resolver"
 	"github.com/wuekevin/lingedge/internal/tools/security"
 	"github.com/wuekevin/lingedge/internal/tools/service"
 )
@@ -27,6 +28,9 @@ type ServerYAMLParams struct {
 	Env            string   // 环境名（Redis 键空间 le:<env>:…）
 	DataDir        string   // /var/lib/lingedge/server
 	HTTPListen     string   // 安装向导/REST 监听，默认 127.0.0.1:8080
+	GRPCListen     string   // 节点 mTLS gRPC，默认 0.0.0.0:9443
+	EnrollListen   string   // 节点注册（有未过期注册令牌时才真正监听），默认 0.0.0.0:9444
+	MetricsListen  string   // Prometheus 指标，必须是回环地址，默认 127.0.0.1:9180
 	TrustedProxies []string // IP 或 CIDR
 	// MasterKeyFile 是 secrets.master_key_file 的取值（service.MasterKeyConfigValue 的结果；空 = LoadCredential）。
 	MasterKeyFile string
@@ -36,7 +40,8 @@ var reEnvName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,15}$`)
 
 // DefaultServerYAMLParams 返回缺省值（env=prod，与 configs/server.example.yaml 一致）。
 func DefaultServerYAMLParams() ServerYAMLParams {
-	return ServerYAMLParams{Env: "prod", DataDir: service.ServerDataDir, HTTPListen: "127.0.0.1:8080", TrustedProxies: []string{"127.0.0.1", "::1"}}
+	return ServerYAMLParams{Env: "prod", DataDir: service.ServerDataDir, HTTPListen: "127.0.0.1:8080", GRPCListen: "0.0.0.0:9443", EnrollListen: "0.0.0.0:9444",
+		MetricsListen: "127.0.0.1:9180", TrustedProxies: []string{"127.0.0.1", "::1"}}
 }
 
 // Validate 校验全部取值（任何不合法即失败，不渲染部分结果）。
@@ -47,17 +52,13 @@ func (p ServerYAMLParams) Validate() error {
 	if err := security.ValidateUnitPath(p.DataDir); err != nil {
 		return fmt.Errorf("data_dir 不合法：%w", err)
 	}
-	host, port, err := net.SplitHostPort(p.HTTPListen)
-	if err != nil {
-		return fmt.Errorf("http.listen 须是 host:port")
-	}
-	if n, perr := strconv.Atoi(port); perr != nil || n < 1 || n > 65535 {
-		return fmt.Errorf("http.listen 的端口不合法")
-	}
-	if host != "" {
-		if _, perr := netip.ParseAddr(host); perr != nil && !reHostName.MatchString(host) {
-			return fmt.Errorf("http.listen 的主机不合法")
+	for _, l := range []struct{ name, v string }{{"http.listen", p.HTTPListen}, {"grpc.listen", p.GRPCListen}, {"grpc.enroll_listen", p.EnrollListen}, {"metrics.listen", p.MetricsListen}} {
+		if err := validListen(l.name, l.v); err != nil {
+			return err
 		}
+	}
+	if !isLoopbackListen(p.MetricsListen) {
+		return fmt.Errorf("metrics.listen 必须是回环地址（Server 拒绝启动其他绑定，Story 1.22b）")
 	}
 	if len(p.TrustedProxies) == 0 || len(p.TrustedProxies) > 32 {
 		return fmt.Errorf("trusted_proxies 须有 1–32 项")
@@ -75,6 +76,33 @@ func (p ServerYAMLParams) Validate() error {
 		}
 	}
 	return nil
+}
+
+// validListen 校验 <主机>:<端口>（主机为空/IP 字面量/主机名；端口 1–65535）。
+func validListen(name, addr string) error {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("%s 须是 host:port", name)
+	}
+	if n, perr := strconv.Atoi(port); perr != nil || n < 1 || n > 65535 {
+		return fmt.Errorf("%s 的端口不合法", name)
+	}
+	if host != "" {
+		if _, perr := netip.ParseAddr(host); perr != nil && !reHostName.MatchString(host) {
+			return fmt.Errorf("%s 的主机不合法", name)
+		}
+	}
+	return nil
+}
+
+// isLoopbackListen 报告 <IP>:<端口> 的主机是否为回环 IP 字面量（空主机/通配/主机名一律否）。
+func isLoopbackListen(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	ip, err := netip.ParseAddr(strings.TrimSuffix(strings.TrimPrefix(host, "["), "]"))
+	return err == nil && ip.IsLoopback()
 }
 
 var reHostName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$`)
@@ -100,6 +128,11 @@ func RenderServerYAML(p ServerYAMLParams) ([]byte, error) {
 	b.WriteString("]\n")
 	b.WriteString("http:\n")
 	fmt.Fprintf(&b, "  listen: %s\n", p.HTTPListen)
+	b.WriteString("grpc:\n")
+	fmt.Fprintf(&b, "  listen: %s\n", p.GRPCListen)
+	fmt.Fprintf(&b, "  enroll_listen: %s\n", p.EnrollListen)
+	b.WriteString("metrics:\n")
+	fmt.Fprintf(&b, "  listen: %s\n", p.MetricsListen)
 	b.WriteString("secrets:\n")
 	if p.MasterKeyFile != "" {
 		b.WriteString("  # 降级模式（systemd < 247，无 LoadCredential=）：主密钥文件由 Server 直接读取（ADR-027）。\n")
@@ -117,10 +150,55 @@ var serverSettingKeys = map[string]bool{"env": true, "trusted-proxies": true}
 // ServerYAMLFromSettings 由 --set 的内建键与向导监听地址构造 server.yaml 的变量。
 // 键：env（环境名）、trusted-proxies（逗号分隔的 IP/CIDR）。未知键返回 (_, false, nil)，由 ComponentSpec.ValidateSettings 决定。
 func ServerYAMLFromSettings(settings map[string]string, setupListen string, cred service.CredentialMode) (ServerYAMLParams, error) {
-	p := DefaultServerYAMLParams()
-	if setupListen != "" {
-		p.HTTPListen = setupListen
+	return ServerYAMLFromPlan(settings, setupListen, cred, nil)
+}
+
+// DefaultSetupListen 是安装向导的缺省监听（仅本机，SSH 隧道访问）。
+const DefaultSetupListen = "127.0.0.1:8080"
+
+// ServerListens 是 Server 的四个监听地址（由计划里的端口决定，--set port.server… 换端口后 server.yaml、健康检查与访问地址随之一致）。
+type ServerListens struct{ HTTP, GRPC, Enroll, Metrics string }
+
+// ServerListensFromPlan 由 --setup-listen 与计划端口（resolver.Plan.Ports 里 component=server 的项，按 Purpose 识别）得到监听地址。
+// 规则：ports 为空 → 缺省值（http 取 setupListen）；REST 端口被 --set port.server.tcp.8080=… 换过 → http 监听取其绑定地址与新端口，
+// 此时同时给出与之不一致的 --setup-listen 是矛盾（错误）；其余端口取计划里的绑定地址与端口。
+func ServerListensFromPlan(setupListen string, ports []resolver.PlannedPort) (ServerListens, error) {
+	if setupListen == "" {
+		setupListen = DefaultSetupListen
 	}
+	l := ServerListens{HTTP: setupListen, GRPC: "0.0.0.0:9443", Enroll: "0.0.0.0:9444", Metrics: "127.0.0.1:9180"}
+	for _, p := range ports {
+		if p.Component != "server" || p.Proto != "tcp" {
+			continue
+		}
+		addr := net.JoinHostPort(p.Bind, strconv.Itoa(p.Port))
+		switch strings.ToLower(p.Purpose) {
+		case "rest":
+			if p.Overridden {
+				if setupListen != DefaultSetupListen && setupListen != addr {
+					return l, fmt.Errorf("--setup-listen %s 与 --set 换端口后的 REST 监听 %s 矛盾，二者只能给一个", setupListen, addr)
+				}
+				l.HTTP = addr
+			}
+		case "grpc-mtls":
+			l.GRPC = addr
+		case "grpc-enroll":
+			l.Enroll = addr
+		case "metrics":
+			l.Metrics = addr
+		}
+	}
+	return l, nil
+}
+
+// ServerYAMLFromPlan 同 ServerYAMLFromSettings，并让四个监听随计划端口（见 ServerListensFromPlan）。
+func ServerYAMLFromPlan(settings map[string]string, setupListen string, cred service.CredentialMode, ports []resolver.PlannedPort) (ServerYAMLParams, error) {
+	p := DefaultServerYAMLParams()
+	ls, err := ServerListensFromPlan(setupListen, ports)
+	if err != nil {
+		return p, err
+	}
+	p.HTTPListen, p.GRPCListen, p.EnrollListen, p.MetricsListen = ls.HTTP, ls.GRPC, ls.Enroll, ls.Metrics
 	if v, ok := settings["env"]; ok {
 		p.Env = v
 	}

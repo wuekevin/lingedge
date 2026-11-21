@@ -120,19 +120,19 @@ func TestShellMetacharactersAreLiteral(t *testing.T) {
 		if err := validateAgainst(t, "envelope.schema.json", env); err != nil {
 			t.Errorf("%q: %v", v, err)
 		}
-		// 作为 --set 的值（合法键）：被接受为字面值（含控制字符的值被 ParseSet 拒绝 → 2），走到清单验证（本构建无内置公钥 → 5），
+		// 作为 --set 的值：server 的规格（Story 1.35）不认识键 k → 在任何副作用之前被 schema 拒绝（2）；含控制字符的值被 ParseSet 拒绝（2）。
 		// 值只当作数据，绝不被执行（哨兵文件断言见下）。
-		want := 5
-		if strings.ContainsAny(v, "\n\r") {
-			want = 2
+		if code := h.run("install", "server", "--set", "k="+v, "--json", "--log-file", logf); code != 2 {
+			t.Errorf("--set 值 %q 退出码 %d，期望 2", v, code)
 		}
-		if code := h.run("install", "server", "--set", "k="+v, "--json", "--log-file", logf); code != want {
-			t.Errorf("--set 值 %q 退出码 %d，期望 %d", v, code, want)
-		}
+		// 合法键 env 的非法值：同样是 schema 拒绝（2），值不会被执行；合法值走到清单验证（本构建无内置公钥 → 5）见循环外。
 		// 作为 --version：不是 semver → 2。
 		if code := h.run("install", "server", "--version", v, "--json", "--log-file", logf); code != 2 {
 			t.Errorf("--version %q 退出码 %d，期望 2", v, code)
 		}
+	}
+	if code := h.run("install", "server", "--set", "env=prod", "--json", "--log-file", logf); code != 5 {
+		t.Errorf("合法的 --set 应通过 schema 并走到清单验证（5），实际 %d", code)
 	}
 	if _, err := os.Stat(sentinel); err == nil {
 		t.Fatal("元字符被当作命令执行了：哨兵文件被创建")

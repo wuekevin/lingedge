@@ -199,7 +199,7 @@ func FuzzRenderServer(f *testing.F) {
 	for _, v := range injectionVectors {
 		f.Add(v, v, v, v, v)
 	}
-	f.Add("lingedge", "/opt/lingedge/server/current/lingedge-server", "/etc/lingedge/server/server.yaml", "api", "docs.example.com")
+	f.Add("lingedge", "/opt/lingedge/server/current/bin/lingedge-server", "/etc/lingedge/server/server.yaml", "api", "docs.example.com")
 	ref := mustRender(f, UnitServer)
 	f.Fuzz(func(t *testing.T, user, exec, cfg, role, docs string) {
 		p := DefaultServerParams()

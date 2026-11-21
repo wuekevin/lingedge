@@ -26,7 +26,7 @@ var ServerRoles = []string{"api", "grpc", "scheduler", "worker"}
 // ServerParams 是 lingedge-server.service 的全部变量（其余内容是模板里的固定文本）。
 type ServerParams struct {
 	User, Group   string
-	ExecPath      string   // 如 /opt/lingedge/server/current/lingedge-server
+	ExecPath      string   // 如 /opt/lingedge/server/current/bin/lingedge-server
 	ConfigPath    string   // 如 /etc/lingedge/server/server.yaml
 	Roles         []string // ServerRoles 的非空子集
 	MasterKeyPath string   // 如 /etc/lingedge/server/master.key
@@ -39,7 +39,7 @@ type ServerParams struct {
 func DefaultServerParams() ServerParams {
 	return ServerParams{
 		User: UserServer, Group: UserServer,
-		ExecPath:      "/opt/lingedge/server/current/lingedge-server",
+		ExecPath:      "/opt/lingedge/server/current/bin/lingedge-server",
 		ConfigPath:    ServerConfigDir + "/server.yaml",
 		Roles:         []string{"api", "grpc", "scheduler", "worker"},
 		MasterKeyPath: ServerConfigDir + "/master.key",

@@ -19,10 +19,11 @@ import (
 // Access 是步骤 22 输出的访问/管理信息。Secret=true 的值（setup token）只在本次输出中出现一次，不落盘、不写日志、不进事件。
 type Access struct {
 	Component string `json:"component"`
-	Kind      string `json:"kind"` // setup_url | setup_token | master_key_fingerprint | note
+	Kind      string `json:"kind"` // setup_url | ssh_tunnel | setup_token | master_key_fingerprint | master_key_warning | note
 	Label     string `json:"label"`
 	Value     string `json:"value"`
-	Secret    bool   `json:"secret,omitempty"`
+	// JSON 键刻意不叫 secret：信封脱敏按键名把名为 secret 的键的值替换成 "***"（布尔也不例外），会破坏 schema。
+	Secret bool `json:"one_time,omitempty"`
 }
 
 // InstalledComponent 是一个已装组件的摘要。

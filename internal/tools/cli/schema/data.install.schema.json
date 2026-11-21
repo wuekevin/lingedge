@@ -36,6 +36,6 @@
     "components": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["name", "version", "state", "release_dir"],
       "properties": {"name": {"type": "string"}, "version": {"type": "string"}, "state": {"type": "string"}, "release_dir": {"type": "string"}}}},
     "access": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["component", "kind", "label", "value"],
-      "properties": {"component": {"type": "string"}, "kind": {"enum": ["setup_url", "setup_token", "master_key_fingerprint", "note"]}, "label": {"type": "string"}, "value": {"type": "string"}, "secret": {"type": "boolean"}}}}
+      "properties": {"component": {"type": "string"}, "kind": {"enum": ["setup_url", "ssh_tunnel", "setup_token", "master_key_fingerprint", "master_key_warning", "note"]}, "label": {"type": "string"}, "value": {"type": "string"}, "one_time": {"type": "boolean"}}}}
   }
 }

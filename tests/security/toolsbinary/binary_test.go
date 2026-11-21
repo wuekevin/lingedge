@@ -1,11 +1,12 @@
 // Package toolsbinary 是 lingedge 二进制层的「生产不含假组件」检查（Story 1.33、G-11）：对真实编译出的 lingedge（不带 lingedge_testdouble 标签）做
-// `go tool nm`，断言符号表里没有 tests/toolsworld（测试世界与假组件规格）或任何 testdouble 符号；同时断言 installer.ProductionSpecs() 为空。
+// `go tool nm`，断言符号表里没有 tests/toolsworld（测试世界与假组件规格）或任何 testdouble 符号；同时断言 installer.ProductionSpecs() 只含已交付的 server（Story 1.35）。
 // 扫描器带负向样本：一个故意 import tests/toolsworld 的临时程序编译后必须被同一个扫描器抓到（证明扫描不是恒真）。
 // 源码层的同类检查是 `gates testdouble`（依赖图与 import 检查）。
 package toolsbinary
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -59,9 +60,16 @@ func symbolHits(t *testing.T, bin string) (hits []string, total int) {
 	return hits, total
 }
 
-func TestProductionSpecsAreEmpty(t *testing.T) {
-	if n := len(installer.ProductionSpecs()); n != 0 {
-		t.Fatalf("生产构建不得登记任何组件规格（具体组件由后续 Story 实现）：%v", installer.ProductionSpecs().Names())
+// 生产规格只登记已交付的组件（Story 1.35：server）；多出的名字意味着有人把未交付/测试用的规格混进了生产路径。
+func TestProductionSpecsAreOnlyDeliveredComponents(t *testing.T) {
+	got := strings.Join(installer.ProductionSpecs().Names(), ",")
+	if got != "server" {
+		t.Fatalf("生产构建只应登记 server 的组件规格（具体组件由其 Story 交付后在此追加），实际：%q", got)
+	}
+	for name, spec := range installer.ProductionSpecs() {
+		if reFake.MatchString(fmt.Sprintf("%T", spec)) {
+			t.Errorf("生产规格 %s 的类型 %T 看起来是测试替身", name, spec)
+		}
 	}
 }
 

@@ -14,7 +14,9 @@
           "name": {"type": "string"}, "version": {"type": "string"}, "state": {"type": "string"}, "unit": {"type": "string"},
           "run_user": {"type": "string"}, "ports": {"type": "array", "items": {"type": "integer", "minimum": 1}},
           "release_dir": {"type": "string"}, "config_dir": {"type": "string"}, "data_dir": {"type": "string"},
-          "installed_at": {"type": "string"}, "prev_version": {"type": "string"}
+          "installed_at": {"type": "string"}, "prev_version": {"type": "string"},
+          "setup": {"type": "object", "additionalProperties": false, "required": ["phase", "install_lock", "detail"],
+            "properties": {"phase": {"enum": ["wizard_pending", "initialized", "unknown"]}, "install_lock": {"type": "boolean"}, "detail": {"type": "string"}}}
         }
       }
     }

@@ -56,6 +56,8 @@ type World struct {
 	Now time.Time
 	// Variant 追加到 openresty 包内容里：改变它再 RewriteBundle，得到另一份同样合法签名但内容不同的 bundle（测试「预检与取包之间清单变了」）。
 	Variant string
+
+	opts Options
 }
 
 func tkeyFor(label string) (string, ed25519.PrivateKey) {
@@ -71,7 +73,28 @@ func NewWorld(root string) (*World, error) { return NewWorldBase(root, "https://
 
 // NewWorldBase 同 NewWorld，但清单里包的 URL 前缀为 base（在线安装测试把它指向本机 HTTPS 测试服务器）。
 func NewWorldBase(root, base string) (*World, error) {
-	w := &World{PackageBase: base, Root: root, Bin: filepath.Join(root, "bin"), Fake: filepath.Join(root, "fake"), Ctl: filepath.Join(root, "ctl"),
+	return NewWorldWith(root, Options{PackageBase: base})
+}
+
+// Options 是世界的可选形态（零值 = NewWorld 的缺省）。
+type Options struct {
+	// PackageBase 是清单里包 URL 的前缀；空 = https://releases.example.org。
+	PackageBase string
+	// ServerBinary 非空：server 包携带该路径的真实二进制（payload/bin/lingedge-server，0755）；它与 ProductionServerSpec 任一生效，server 即使用发行流水线里 server 的真实端口表
+	// （8080 rest / 9443 grpc-mtls / 9444 grpc-enroll 条件端口 / 9180 metrics，与 scripts/release/components.go 一致）。包的 platform 标签仍是 linux-amd64（见 world 的 Probe），
+	// 二进制本身是本机构建的——用于「真实 lingedge-server 启动并通过 /healthz」的集成测试，不是真实发行包。
+	ServerBinary string
+	// ProductionServerSpec 为 true：Specs["server"] 使用 installer.ProductionSpecs()["server"]（生产规格），而不是假规格。
+	ProductionServerSpec bool
+}
+
+// NewWorldWith 按 Options 建立（或复用）世界。
+func NewWorldWith(root string, o Options) (*World, error) {
+	base := o.PackageBase
+	if base == "" {
+		base = "https://releases.example.org"
+	}
+	w := &World{opts: o, PackageBase: base, Root: root, Bin: filepath.Join(root, "bin"), Fake: filepath.Join(root, "fake"), Ctl: filepath.Join(root, "ctl"),
 		Bundle: filepath.Join(root, "bundle.tar"), Layout: registry.Layout{Root: filepath.Join(root, "var/lib/lingedge/tools")}, Own: &recOwn{}}
 	for _, d := range []string{w.Bin, w.Fake + "/users", w.Fake + "/groups", w.Ctl, filepath.Join(root, "run"), filepath.Join(root, "etc/systemd/system"),
 		// 系统骨架：真实系统上这些目录总是存在（Tools 不创建、回滚也不会删除它们）。
@@ -91,6 +114,9 @@ func NewWorldBase(root, base string) (*World, error) {
 	w.Specs = installer.SpecSet{}
 	for _, n := range []string{"server", "node", "openresty"} {
 		w.Specs[n] = &fakeSpec{name: n, w: w}
+	}
+	if o.ProductionServerSpec {
+		w.Specs["server"] = installer.ProductionSpecs()["server"]
 	}
 	w.Probe = probe.Result{
 		System: resolver.System{OS: "linux", Arch: "amd64", MemoryTotalMB: 16000, MemoryAvailableMB: 12000,
@@ -212,8 +238,39 @@ func (w *World) buildPkg(comp, ver string, files []pkgFileSpec) ([]byte, error) 
 	return gz.Bytes(), nil
 }
 
+func (w *World) serverComp() (c struct {
+	name     string
+	internal bool
+	requires map[string]any
+	ports    []map[string]any
+	files    []pkgFileSpec
+}) {
+	c.name = "server"
+	if w.opts.ServerBinary == "" && !w.opts.ProductionServerSpec {
+		c.ports = []map[string]any{{"proto": "tcp", "port": 8080, "bind": "127.0.0.1", "purpose": "REST"}}
+		c.files = []pkgFileSpec{{"bin/lingedge-server", "#!server-binary-v1\n", true}, {"conf/default.yaml", "x: 1\n", false}}
+		return c
+	}
+	bin := []byte("#!server-binary-v1\n") // 生产规格但不给真实二进制：占位字节（测试只验证安装编排，不执行它）
+	if w.opts.ServerBinary != "" {
+		var err error
+		if bin, err = os.ReadFile(w.opts.ServerBinary); err != nil {
+			panic(err)
+		}
+	}
+	c.ports = []map[string]any{
+		{"proto": "tcp", "port": 8080, "bind": "127.0.0.1", "purpose": "rest"},
+		{"proto": "tcp", "port": 9443, "bind": "0.0.0.0", "purpose": "grpc-mtls"},
+		{"proto": "tcp", "port": 9444, "bind": "0.0.0.0", "purpose": "grpc-enroll", "conditional": true},
+		{"proto": "tcp", "port": 9180, "bind": "127.0.0.1", "purpose": "metrics"},
+	}
+	c.requires = map[string]any{"external": map[string]string{"mysql": ">=8.0.16 <9", "redis": ">=8"}} // 与发行流水线一致（scripts/release/components.go）
+	c.files = []pkgFileSpec{{"bin/lingedge-server", string(bin), true}}
+	return c
+}
+
 func (w *World) writeBundle() error {
-	type comp struct {
+	type comp = struct {
 		name     string
 		internal bool
 		requires map[string]any
@@ -221,8 +278,7 @@ func (w *World) writeBundle() error {
 		files    []pkgFileSpec
 	}
 	comps := []comp{
-		{name: "server", ports: []map[string]any{{"proto": "tcp", "port": 8080, "bind": "127.0.0.1", "purpose": "REST"}},
-			files: []pkgFileSpec{{"bin/lingedge-server", "#!server-binary-v1\n", true}, {"conf/default.yaml", "x: 1\n", false}}},
+		w.serverComp(),
 		{name: "openresty", internal: true, files: []pkgFileSpec{{"bin/openresty", "#!openresty-v1" + w.Variant + "\n", true}}},
 		{name: "node", requires: map[string]any{"components": map[string]string{"openresty": ">=0.1.0"}},
 			ports: []map[string]any{{"proto": "tcp", "port": 9100, "bind": "127.0.0.1", "purpose": "agent"}},
