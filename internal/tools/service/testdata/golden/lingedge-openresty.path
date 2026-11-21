@@ -1,0 +1,9 @@
+[Unit]
+Description=Start LingEdge OpenResty once a config generation exists
+
+[Path]
+PathExists=/var/lib/lingedge-node/current/conf/nginx.conf
+Unit=lingedge-openresty.service
+
+[Install]
+WantedBy=multi-user.target

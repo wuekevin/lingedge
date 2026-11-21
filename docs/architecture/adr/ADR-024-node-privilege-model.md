@@ -64,3 +64,9 @@ FR-12 要求 Agent「以非 root 最小权限运行（受限于需要绑定的�
 - **IMP-20**：§3 Agent 单元去掉 `MemoryDenyWriteExecute`（会被子进程 `openresty -t` 继承）并说明理由；L3 验收增“在 Agent 单元内执行 `openresty -t` 与生产启动结果一致”（待 Linux 验收机，标「等待环境验证」）。
 - **L24**：§3 `RestrictAddressFamilies` 增 `AF_NETLINK`（Go `net.Interfaces()` 需要，否则 `reported_ips` 失败）。
 - **BLK-04 / H4**：§4 补充 `-p/-c` 统一与目录总表引用（ADR-020 §2/§3）。
+
+## 实现记录 2026-11-21（Story 1.32）
+
+- 「需要较新的 systemd（版本要求实现时核对）」已核对：Ambient 能力需 ≥ 229，加固单元整体最低 **235**（`MinSystemd`，见 ADR-027 与 tools-design §15.5）；低于 235 不在支持范围，doctor 报 fail。
+- 单元模板按本 ADR 渲染并逐条断言：Agent 不设 `MemoryDenyWriteExecute`、`RestrictAddressFamilies` 含 `AF_NETLINK`、`ReadWritePaths` 为 `/var/lib/lingedge-node /var/log/lingedge-node /run/lingedge-node`；OpenResty 不设 MDWE、`ExecStartPre`/`ExecStart` 同一对 `-p /var/lib/lingedge-node/current/ -c conf/nginx.conf`；升级结果目录 `/var/lib/lingedge-node-upgrade/` root:root 0755，由 `service.UpgradeResultDir` 在安装 node 时创建。
+- 「在 Agent 单元内 `openresty -t` 与生产启动结果一致」仍为**等待环境验证**（需 Linux + OpenResty 验收机，1.45）。

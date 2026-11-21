@@ -1,0 +1,10 @@
+[Unit]
+Description=Trigger privileged LingEdge node upgrade when Agent stages a request
+
+[Path]
+PathExists=/var/lib/lingedge-node/staging/upgrade.request
+Unit=lingedge-node-upgrade.service
+MakeDirectory=no
+
+[Install]
+WantedBy=multi-user.target

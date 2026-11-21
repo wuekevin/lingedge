@@ -1,0 +1,39 @@
+[Unit]
+Description=LingEdge Server (central control plane)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+NotifyAccess=main
+User=lingedge
+Group=lingedge
+ExecStart=/opt/lingedge/server/current/lingedge-server --config /etc/lingedge/server/server.yaml --roles=api,grpc,scheduler,worker
+# 主密钥经 systemd credentials 注入，进程内通过 $CREDENTIALS_DIRECTORY/master.key 读取，文件本身仅 root 可读
+LoadCredential=master.key:/etc/lingedge/server/master.key
+Restart=on-failure
+RestartSec=3s
+TimeoutStopSec=30s
+LimitNOFILE=65536
+# 禁止 core dump，防止主密钥/私钥明文落盘（ADR-011 §9）
+LimitCORE=0
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+ReadWritePaths=/var/lib/lingedge/server /var/log/lingedge
+
+[Install]
+WantedBy=multi-user.target

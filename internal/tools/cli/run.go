@@ -101,7 +101,7 @@ func isParseStageError(err error) bool {
 	switch {
 	case errors.As(err, &ce):
 		return ce.Code == "usage.invalid_flag"
-	case errors.As(err, &me), errors.As(err, &de), errors.As(err, &rse), errors.Is(err, context.Canceled), RegistryError(err) != nil:
+	case errors.As(err, &me), errors.As(err, &de), errors.As(err, &rse), errors.Is(err, context.Canceled), RegistryError(err) != nil, ServiceError(err) != nil:
 		return false
 	}
 	return true
@@ -160,6 +160,10 @@ func (r *Run) finish(cmd *cobra.Command, err error) int {
 		case RegistryError(err) != nil:
 			// 任务锁 / journal / state.json（Story 1.29）：被占用 → 6，存在未完成事务 → 13，状态不可读/损坏等，映射见 RegistryError。
 			ce = RegistryError(err)
+			exit = ce.Exit
+		case ServiceError(err) != nil:
+			// systemd 单元 / 运行用户 / 目录权限 / systemctl（Story 1.32）：systemd 缺失/版本不足/需要 root/冲突 → 3，外部命令失败 → 1，映射见 ServiceError。
+			ce = ServiceError(err)
 			exit = ce.Exit
 		case errors.Is(err, context.Canceled):
 			ce = newErr(ExitSigint, "interrupt.sigint", "已被用户中断（SIGINT）", "再次运行以继续；若有未完成事务，先运行 lingedge recover")

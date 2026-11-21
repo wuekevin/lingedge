@@ -1,0 +1,16 @@
+[Unit]
+Description=LingEdge node upgrade (privileged, signature re-verified)
+
+[Service]
+Type=oneshot
+User=root
+ExecStart={{.ToolsBin}} update node --apply-staged --non-interactive --json
+TimeoutStartSec=900
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+LockPersonality=yes

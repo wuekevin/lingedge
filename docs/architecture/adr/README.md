@@ -30,6 +30,7 @@
 | [024](ADR-024-node-privilege-model.md) | Node 进程权限模型与升级特权路径 | 非 root、CAP_NET_BIND_SERVICE、.path 触发 | M1 | FR-12/60、F-9 |
 | [025](ADR-025-redis-boundary.md) | Redis 使用边界 | 非真相源、降级 | M1 | F-11 |
 | [026](ADR-026-database-credential-handoff.md) | 数据库凭据交接与生命周期（AA-7） | 向导内存持有 migrate 口令、runtime-credentials.json、migrate.yaml root 0400、轮换 | M1 | FR-11、NFR-6、NFR-12 |
+| [027](ADR-027-systemd-credentials-fallback.md) | systemd 版本门槛与主密钥交付的降级方案（Story 1.32） | LoadCredential ≥247、单元 ≥235、root:<组> 0440 密钥文件、doctor 告警 | M1 | FR-6、FR-12、NFR-12 |
 
 ## 依赖版本说明
 

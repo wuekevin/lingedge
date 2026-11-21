@@ -810,6 +810,8 @@ ReadWritePaths=/var/lib/lingedge/server /var/log/lingedge
 WantedBy=multi-user.target
 ```
 
+**主密钥交付的两个变体（ADR-027，Story 1.32）**：上面是 systemd ≥ 247 的默认变体（`LoadCredential=`，`master.key` 为 `root:root 0400`）。systemd 235–246（RHEL 8、Ubuntu 20.04 等）不支持 `LoadCredential=`，`service` 包渲染**降级变体**：不含 `LoadCredential=` 行，其余逐键相同；`master.key` 改为 `root:<运行组> 0440`，`server.yaml` 的 `secrets.master_key_file` 填其绝对路径。`< 235` 不在支持范围。
+
 （`Type=notify` 需要 Server 实现 `sd_notify READY=1`，仅写 `NOTIFY_SOCKET`，无外部依赖；LimitNOFILE 数值「待基线测试后确定」。`lingedge-scheduler`/`lingedge-worker` 独立单元 P3 起同构，仅 `ExecStart` 与 `--roles` 不同。）
 
 ### 15.2 lingedge-node.service 与 lingedge-openresty
@@ -857,6 +859,8 @@ WantedBy=multi-user.target
 [Unit]
 Description=LingEdge OpenResty (data plane)
 After=network-online.target
+# 崩溃循环不触发 systemd 的启动频率限制（FR-62）；StartLimitIntervalSec 属于 [Unit]（置于 [Service] 会被忽略，Story 1.32 更正）
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -870,7 +874,6 @@ ExecStart=/opt/lingedge/openresty/current/bin/openresty -g "daemon off;" -p /var
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
 RestartSec=2s
-StartLimitIntervalSec=0
 RuntimeDirectory=lingedge-node
 RuntimeDirectoryPreserve=yes
 LimitNOFILE=262144
@@ -967,6 +970,19 @@ LockPersonality=yes
 - `lingedge-website.service`（SSR，P2 起）：`User=lingedge-web`，`ExecStart=<node 绝对路径> /opt/lingedge/website/current/server/index.mjs`，`Environment=NITRO_HOST=127.0.0.1 NITRO_PORT=3000 NODE_ENV=production`（变量名实现时按 Nitro 版本核对），加固项同 Agent（Node/V8 JIT 需可写可执行内存，**不**设 `MemoryDenyWriteExecute`）；`<node 绝对路径>` 在安装时由检测得到并校验版本，写入 unit，不用 `/usr/bin/env`。
 - `lingedge-dns.service`（P3）：`User=lingedge-dns`，`AmbientCapabilities=CAP_NET_BIND_SERVICE`，加固同 Agent；`RestrictAddressFamilies` 含 `AF_INET AF_INET6 AF_UNIX`。
 - `lingedge-reporter.service`（P3，Linux）：同 Agent，无需绑定特权端口。
+
+### 15.5 实现（Story 1.32：`internal/tools/service`）
+
+- **模板与渲染**：`templates/*.tmpl`（`go:embed`）→ `RenderServer`/`RenderNode`/`NodeUnits`；变量只有账号、二进制/配置/主密钥的绝对路径、`--roles`、`LimitNOFILE`、可选的文档主机，且**先**经 `security.ValidateUnitValue`/`ValidateUnitPath`（再叠加账号正则、角色白名单、主机名规则）才进模板；数据目录/日志目录/`-p/-c` 等固定路径是模板里的常量。`-p/-c` 在 OpenResty 单元里由同一个子模板生成，`ExecStartPre` 与 `ExecStart` 结构上不可能分叉（BLK-04）。golden 位于 `internal/tools/service/testdata/golden/`，由人工对照本节与 ADR-024 写成，没有 `-update` 开关。
+- **与本节原文的差异**：①`StartLimitIntervalSec=0` 从 `[Service]` 移到 `[Unit]`（systemd ≥ 230 它属于 `[Unit]`，放在 `[Service]` 会被忽略，`Restart=always` 的崩溃循环将触发默认限流并停止拉起，违背 FR-62）；其余内容逐字保持。
+- **运行用户**：`Provisioner.EnsureUser` 经 safeexec 的 `id -u`/`getent group` 查询，仅当不存在才 `useradd --system --no-create-home --shell /usr/sbin/nologin`（同名组已在则 `-g` 复用，否则 `--user-group`）；既有用户 UID 为 0 拒绝、UID ≥ 1000 警告；返回 `Created`/`GroupCreated`，`UserUndo` 写成 `registry.UndoAction{Action:"userdel", Created, Extra{user,group_created}}`。`service` 包用自己的 `safeexec.Runner`（白名单 `systemctl systemd-analyze id getent useradd userdel`），**未改** `safeexec.DefaultAllowed`（它不含 `getent`；做法与 `probe` 一致）。
+- **目录与文件**：`ServerDirs`/`NodeDirs`/`UpgradeResultDir` 是 §8 与 ADR-020 §2 的数据化表示；`Ensurer` 先 0700 创建、显式 chmod、再 chown（经 `security.MkdirAllPerm`），既有目录不改动、不符作为 `MismatchError`（`Repair` 才修正）、符号链接/文件目标拒绝；`FileWriter.Create` 用 `security.CreateFile`（`O_EXCL`）、**先 chown 后写内容**、从不覆盖（`master.key` 走它）。`Ownership` 接口让非 root 测试记录 chown 调用，真实 chown 在 ENV-LNX 验证。`/run/lingedge-node`、`current`、`state.json`、`certs/<uid>/`、`generations/g<N>/` 由 systemd/Agent 创建，Tools 不创建。
+- **systemctl**：`Systemctl` 的每个方法构造固定形状的参数数组，单元名只认 `AllUnits`；`Enable`/`Start` 先查询并返回 `UndoAction`（只有「此前未启用/未运行」才 `Created`）。
+- **单元安装（FR-6）**：`Installer.Install`：不存在 → `registry.EnsureFile` 创建（root:root 0644）；内容一致 → 幂等完成；内容不同或目标是符号链接 → 不覆盖，写 `<unit>.new` 并返回警告；`PendingNewUnits` 供 doctor。
+- **撤销**：`Undoer.Apply` 执行 `userdel`/`remove_dir_if_empty`/`remove_path`/`unlink_unit`/`systemctl_disable`/`systemctl_stop`，只撤销 `Created=true`，路径须在 Tools 管理的目录内（`/var/lib/lingedge/tools` 除外）、单元与用户名须在已知集合、删文件前复核 SHA256。编排与 recover 本体属 1.33。
+- **版本与降级**：`ParseVersion`、`MinSystemd=235`、`CredentialMinSystemd=247`、`SelectCredentialMode`、`CheckSystemdVersion`/`CheckCredentialConsistency`（doctor，1.42）；见 ADR-027。
+- **平台**：`platform_linux.go`（`sd_booted` 判定）/`platform_other.go`（恒 false，`Systemctl` 明确返回 `not_systemd`）；`platform_unix.go`（属主读取）。`linux/amd64`、`linux/arm64` 交叉编译通过。
+- **CLI**：`cli.ServiceError` 把 `service` 的失败映射为 3（systemd 缺失/版本不足/需要 root/冲突/IO/目录不符）或 1（命令失败/撤销被拒/参数缺陷）；不接线未实现的命令。
 
 ## 16. 任务锁（FR-4）
 
@@ -1099,7 +1115,7 @@ LockPersonality=yes
 
 - 官方发行下载地址与 CDN/镜像（清单与包的 `https://<release-host>`）：未定，作为配置项 `release.base_url`；见 OQ（新增）。
 - OpenResty 在 Linux amd64/arm64 的**官方包可用性与自编译**方案：实现时核对；若需自行构建，则 `openresty` 组件由发布流水线产出并签名（含所需 Lua 模块）。
-- `systemd-analyze verify` 在旧发行版的可用性与 `LoadCredential`（需较新 systemd）的最低版本：实现时核对；不满足时回退为「`master.key` 由 Server 以 root 读取后降权」或 `EnvironmentFile`（权限 0400，降级方案须 ADR 记录）。
+- `systemd-analyze verify` 在旧发行版的可用性与 `LoadCredential`（需较新 systemd）的最低版本：**已核对（Story 1.32）**——`LoadCredential=` 需 systemd ≥ **247**，加固单元整体需 ≥ **235**；不满足 247 时降级为 `root:<运行组> 0440` 的密钥文件（ADR-027，**未采用**「root 读取后降权」与 `EnvironmentFile`，理由见该 ADR）。`systemd-analyze verify` 不可用时 `service.VerifyUnits` 返回 `Available=false`，调用方跳过而不失败。真实发行版上的复验（版本输出格式、指令引入版本、verify 行为）登记为 ENV-LNX（1.45）。
 - Windows Reporter：见 T-1。
 
 ## 22. 对 PRD 的反馈（Tools 相关）
@@ -1172,3 +1188,8 @@ LockPersonality=yes
 
 - **§11.4**：新增三段——vhost `include` 受控跟随（`baota.Includer`）、MySQL/Redis unix socket 端点（`probe.Endpoint` 追加 `type`/`socket`，凭据仅发往属主受信的 socket）、Node.js 非固定目录只读识别（`probe.FindNodeInstalls`，不执行未知路径下的二进制）。`resolver.System`、`state.json`（schema 2）、`baota.Report` **均无字段增删**；`probe.Endpoint` 与 `probe.Result`（`node_installs`）为追加式 `omitempty`/新增字段，旧 JSON 兼容。只读 argv 表新增 `mysql --protocol=socket --socket=<path>` 这一种形状；safeexec `DefaultAllowed` 与 `ProbeAllowed` 未变。
 
+## 修订记录 2026-11-21（Story 1.32：service 包）
+
+- **§15**：`lingedge-openresty.service` 的 `StartLimitIntervalSec=0` 由 `[Service]` 更正到 `[Unit]`（原位置会被 systemd 忽略）；§15.1 增主密钥交付的两个变体；新增 §15.5（实现记录）。
+- **§21**：`LoadCredential` 最低版本与降级已核对并落 ADR-027（≥247；单元整体 ≥235；降级 = `root:<运行组> 0440` 密钥文件）。
+- **新增 ADR-027**。真实 systemd 行为、各发行版版本输出与指令引入版本的复验登记为 ENV-LNX（1.45）。

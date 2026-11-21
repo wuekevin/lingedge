@@ -1,0 +1,43 @@
+{{- define "prefix-conf" -}}
+-p {{.NodeCurrentDir}}/ -c conf/nginx.conf
+{{- end -}}
+[Unit]
+Description=LingEdge OpenResty (data plane)
+After=network-online.target
+# 崩溃循环不触发 systemd 的启动频率限制（FR-62）；StartLimitIntervalSec 属于 [Unit]（置于 [Service] 会被忽略）
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User={{.User}}
+Group={{.Group}}
+# 配置来自 Agent 渲染的"当前代"；ExecStartPre 先 -t：配置不合法则拒绝启动（不依赖 Agent 在线，AD-20）
+# -p/-c 统一（BLK-04）：前缀 = current/（符号链接 → generations/g<N>/），-c 为相对前缀的 conf/nginx.conf；
+# ExecStartPre 与 ExecStart 同一份参数。Agent 预检用同一 -c，仅前缀换为 generations/g<N>/，两者内容相同（ADR-020 §3）
+ExecStartPre={{.OpenrestyBin}} -t {{template "prefix-conf" .}}
+ExecStart={{.OpenrestyBin}} -g "daemon off;" {{template "prefix-conf" .}}
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=2s
+RuntimeDirectory=lingedge-node
+RuntimeDirectoryPreserve=yes
+LimitNOFILE={{.OpenrestyNOFILE}}
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+# 注意：不设 MemoryDenyWriteExecute —— LuaJIT 需要可写可执行内存
+ReadWritePaths=/var/lib/lingedge-node /var/log/lingedge-node /run/lingedge-node
+
+[Install]
+WantedBy=multi-user.target

@@ -70,3 +70,7 @@
 ## 修订记录 2026-11-21（AA-7，ADR-026）
 
 - 新增受 `master.key` 保护的非数据库载体 `runtime-credentials.json`（`lingedge` 属主 0600，内含 `lingedge_app`/`lingedge_maint`/Redis 口令的五段密文，AAD = `runtime_credentials|<JSON 路径>|<账号>`）。**它不在数据库，`secrets.rewrap`（RecordStore）不会扫描它**：KEK 轮换须把它作为额外重包装目标（原子重写），`CheckKEKRemovable` 须把其 `kek_id` 计入引用，备份清单 `kek_ids_required` 须包含它。`master.key` 本身的生成者、权限、`LoadCredential` 路径不变。
+
+## 实现记录 2026-11-21（Story 1.32）
+
+- `LoadCredential=` 最低 systemd 版本核对为 **247**；低于它（235–246）时降级为 `root:<运行组> 0440` 的密钥文件，`secrets.master_key_file` 指向它，doctor 告警——见 [ADR-027](ADR-027-systemd-credentials-fallback.md)。`LimitCORE=0` 在两个变体里都保留（§9）。
