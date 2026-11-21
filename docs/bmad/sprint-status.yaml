@@ -239,7 +239,7 @@ conventions:   # LingEdge 约定（以键值保存，重新生成时不会丢失
     作为未知键原样保留。"
 
 readiness_gate:
-  verdict: CONCERNS   # PASS | CONCERNS | FAIL；对『整体计划』= CONCERNS（见 findings）；对『第一批 Sprint 开工』= 可开工（1.1 前置全部满足），1.24 前须先关闭 AA-7
+  verdict: CONCERNS   # PASS | CONCERNS | FAIL；对『整体计划』= CONCERNS（见 findings）；对『第一批 Sprint 开工』= 可开工（1.1 前置全部满足）；AA-7 已于 2026-11-21 关闭（ADR-026，UD-31）
   checked: "11-16-2026 23:18"
   scope: "docs/bmad/{epics,dependency-map,traceability}.md 对照 PRD、architecture/ADR(25)、database(含
     verification/)、api(openapi 307 路径/486 operation、node-protocol)、proto(6)、ux、architecture-revision-log.md"
@@ -251,11 +251,12 @@ readiness_gate:
     - "AA-6（BLK-01…07 前置检查）已关闭：架构修订日志 67 项已修 66、延后 1（MIN-09）；epics 已按修订后的迁移顺序（13 文件/61
       表）、租户发布 API、节点代布局、发布编排、lineage、升级结果文件等就地修订，并新增 3.51/3.52"
     - "Epic 1 全部 45 个 Story 为『单会话』或『验收 Story』，AC 可测试；每个 Story 均有环境标签与『等待环境验证条件』（缺环境不得标完成）"
-    - "契约冻结点 CF-1…CF-9 均有达成 Story 与冻结内容；UD-1…UD-30 全部给出已采纳默认值与推翻影响（docs/bmad/decisions-adopted.md）"
+    - "契约冻结点 CF-1…CF-9 均有达成 Story 与冻结内容；UD-1…UD-31 全部给出已采纳默认值与推翻影响（docs/bmad/decisions-adopted.md）"
     - "复核中发现并纠正 8 处 epics 与修订后上游的冲突（审计同事务、`available-clusters`、调试回环源站、升级结果目录、9100→9180、doctor
       阈值、enroll 错误码、迁移分段），见 decisions-adopted.md §4"
   failed_or_open:   # 完成度检查未通过/未关闭项；未降低任何标准，逐条列出
     - id: "F-1"
+      status: closed   # 2026-11-21 AA-7 已由 ADR-026 解决（UD-31 默认采纳、可推翻；契约加法 CC-11）；1.24/1.35/1.43 的 AC 已改写
       severity: HIGH
       item: "AA-7 数据库凭据交接未定义：向导（lingedge 用户进程）无权写 root 属主的 migrate.yaml，而步骤 4 需 migrate
         凭据执行迁移；lingedge_app/lingedge_maint 口令落点同样未记录"
@@ -338,7 +339,7 @@ sprint_plan:
     hard_gates:
       - "1.3 打 contract-v1 前：复核修订日志验证项全绿 + 完成 AC9（AA-8）+ 1.1 已有首个提交"
       - "1.9 完成后打 migrations-m1（CF-2）；8.0.16 空库迁移标等待环境验证"
-      - "1.24 开工前：AA-7 必须已由架构补充（凭据交接）"
+      - "1.24 开工前：AA-7 已由架构补充（ADR-026，2026-11-21，UD-31 默认采纳可推翻）；1.24 须按其「实现指引」触及文件清单实现"
       - "1.35 真实验证需 ENV-LNX；缺则 review（等待环境验证），不得 done"
     stories:
       - key: "1-1-go-monorepo-脚手架与目录骨架"
@@ -682,7 +683,7 @@ environment_verification:   # 『等待环境验证』登记（验证人/日期�
   1-24-server-setup-mode-与-web-安装向导后端-含-setup-token:
     status: not_started
     required_env: "本机 MySQL + Redis；宝塔 MySQL 场景需 ENV-BT"
-    condition: "本机真实 MySQL/Redis 路径完成即可验证主体；宝塔 MySQL 专用库创建场景待 ENV-BT。"
+    condition: "本机真实 MySQL/Redis 路径完成即可验证主体；宝塔 MySQL 专用库创建场景待 ENV-BT；AA-7 凭据落点（ADR-026）在真实 systemd 下 lingedge 用户写 /var/lib/lingedge/server/secrets、root 写 migrate.yaml 的权限路径待 ENV-LNX（本机仅验证权限/属主判定逻辑）。"
     verified_by: ""
     verified_on: ""
   1-26-security-叶子包-安全解压-安全执行-脱敏-权限:

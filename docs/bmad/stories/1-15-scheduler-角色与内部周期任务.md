@@ -25,7 +25,7 @@ context:
 - `sessions`（000001）：`expires_at / absolute_expires_at / revoked_at` 与索引 `idx_sessions_exp`，`lingedge_app` 有 `DELETE`——会话清理满足。
 - `idempotency_keys` 已有 `idx_idem_exp`，`DeleteExpired` 来自 1.12。
 - 分区表（`audit_logs`、`node_heartbeats`）对 `lingedge_maint` 有表级 `SELECT, ALTER, DROP`——`REORGANIZE PARTITION` 满足（database/README §9 第 14 项已实测）。
-- **没有 `docs/bmad/contract-changes/` 新增项，没有新迁移**（`contract-check`：14 个迁移哈希一致）。新增的 `database.maint.*` 是 server.yaml 的**新增可选键**（向后兼容；示例配置已更新）；AA-7（三类账号口令落点）仍未定稿，这是暂行形态，定稿后若不同按 contract-changes 处理。
+- **没有 `docs/bmad/contract-changes/` 新增项，没有新迁移**（`contract-check`：14 个迁移哈希一致）。新增的 `database.maint.*` 是 server.yaml 的**新增可选键**（向后兼容；示例配置已更新）；AA-7（三类账号口令落点）**已于 2026-11-21 定稿（ADR-026，CC-11）**：`database.maint.*` 键保持不变并作为显式覆盖通道，缺省口令由 `runtime-credentials.json` 提供。
 
 ## Code Map
 
@@ -92,7 +92,7 @@ context:
 | 时钟偏差：触发点用本机时钟、租约用数据库时钟；窗口保持预留 min(1s, 窗口/4) 余量 | low | accept；多机部署的偏差上界待 Linux 验收机基线复核（等待环境验证） |
 | `sessions.cleanup` 的三个 OR 条件无法只靠单一索引，每小时一次近全表扫描 | low | accept：会话表规模小（M1）；规模化后可改为按 `idx_sessions_exp` 分批 |
 | 积压很久的日分区表每次只追 120 个，需要多日才追平（期间新数据落 pmax，不影响写入） | info | accept，已测试 |
-| `database.maint.*` 口令落点（AA-7）尚未定稿 | medium | 暂行形态已在配置层隔离（单一结构体）；AA-7 定稿后如有差异走 contract-changes |
+| `database.maint.*` 口令落点（AA-7，已于 2026-11-21 由 ADR-026 定稿，不再是风险） | medium | 暂行形态已在配置层隔离（单一结构体）；AA-7 定稿后如有差异走 contract-changes |
 
 ### DoD 与遗留
 
@@ -104,4 +104,4 @@ DoD（基线 §25，DoD-12）：除下述「等待环境验证」外满足；前
 - **各业务 Story**：在 `cmd/lingedge-server/cron.go` 的 `registerCron` 用 `reg.Task(...)` 登记自己的周期任务（同时在 `tasks.go` 登记处理函数）。
 - **1.21（审计）**：分区维护骨架接线（审计写入与 `audit_logs` 分区滚动的联调）；`pmax` 非空告警/`doctor` 检查随 1.42。 【Story 1.21 已完成联调：tests/integration/audit 的 TestPartitionMaintainRealAuditTable（真实 lingedge_maint 对真实审计写入的 audit_logs 预建分区并保留 pmax、行搬迁不丢不重、维护后新写入落入新分区）；保留期 DROP PARTITION 属 3.48；`pmax` 非空告警/`doctor` 随 1.42 仍待办】
 - **retention.cleanup（TaskType）**：保留期 `DROP PARTITION` 与批量删除。
-- **1.24**：向导创建 `lingedge_maint` 账号并交付口令（AA-7）。
+- **1.24**：向导创建 `lingedge_maint` 账号并按 ADR-026 §3 把口令加密写入 `runtime-credentials.json`（AA-7 已解决）。

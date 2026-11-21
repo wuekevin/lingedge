@@ -29,6 +29,7 @@
 | [023](ADR-023-test-doubles-and-env-verification.md) | 测试替身隔离与等待环境验证 | build tag、分层测试、无 OpenResty 策略 | M1 | NFR-1/3、R-11 |
 | [024](ADR-024-node-privilege-model.md) | Node 进程权限模型与升级特权路径 | 非 root、CAP_NET_BIND_SERVICE、.path 触发 | M1 | FR-12/60、F-9 |
 | [025](ADR-025-redis-boundary.md) | Redis 使用边界 | 非真相源、降级 | M1 | F-11 |
+| [026](ADR-026-database-credential-handoff.md) | 数据库凭据交接与生命周期（AA-7） | 向导内存持有 migrate 口令、runtime-credentials.json、migrate.yaml root 0400、轮换 | M1 | FR-11、NFR-6、NFR-12 |
 
 ## 依赖版本说明
 
@@ -43,3 +44,7 @@
 ## 2026-11-16 修订说明
 
 依据两份独立评审（`docs/bmad/review-architecture.md`、`review-architecture-internal.md`）对 ADR-001…ADR-025 做了**原地修订**（编号不变），每篇被改的 ADR 末尾有「修订记录 2026-11-16」。逐条评审 ID → 处理结果 → 改动文件见 [`docs/bmad/architecture-revision-log.md`](../../bmad/architecture-revision-log.md)。被修订的 ADR：001、002、003、004、005、006、007、008、009、010、011、012、013、014、015、016、017、018、019、020、022（仅 §6 同步）、023、024、025；ADR-021（P3 预案）经核对无需改动，见修订日志。
+
+## 2026-11-21 补充
+
+新增 ADR-026（AA-7，UD-31，默认采纳、可推翻）：数据库凭据交接。同时在 ADR-016、ADR-011 末尾追加修订记录；tools-design §13.1 为其落点。

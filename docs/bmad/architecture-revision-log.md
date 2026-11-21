@@ -151,3 +151,14 @@
 - 核对无需改动：**ADR-021**（P3 调度预案）——评审未涉及其内容，已核对其与新契约（Heartbeat、Redis、节点代、lineage）无冲突；**ADR-022**（P4 边缘限流预案）仅 §6 同步可信 IP 由 Lua 计算，其余无需改动。
 - 校验：`openapi.yaml` 经 `openapi-spec-validator` 校验为合法 OpenAPI 3.1（307 路径 / 486 操作，6076 个 `$ref` 全部可解析，operationId 唯一，每个 operation 带 `x-permissions/x-tenant-scope/x-audit/x-phase`，路径不含 `:`，tenant/either 响应 node/cluster 标识扫描 0 处）；6 个 `.proto` 经 `protoc`（libprotoc 36.1）编译通过；数据库文档仍覆盖基线 §18 全部 80 张表。
 - 下游：基线 §26 第 11 项 Epic/Story、第 12 项开发依赖关系、第 14 项测试与验收标准由 `docs/bmad/` 下游产出（architecture.md §0 已登记）。
+
+## 8. 追加修订 2026-11-21：AA-7 数据库凭据交接（ADR-026 / UD-31）
+
+| 项 | 内容 |
+|---|---|
+| 缺口 | AA-7：向导（`lingedge` 用户）无权写 root 属主的 `migrate.yaml`，而步骤 4 需 migrate 凭据；`lingedge_app`/`lingedge_maint` 口令与 DB/Redis 连接目标无落点 |
+| 结论 | 新增 **ADR-026**（AD-26）：向导进程内迁移、migrate 口令仅内存且绝不持久化；`lingedge_app`/`lingedge_maint`/Redis 口令 secretbox 密文存 `<data_dir>/secrets/runtime-credentials.json`（`lingedge` 属主 0600）；migrate 运行/升级期口令存 root:root 0400 `migrate.yaml`（root 侧 `credential init/reset`，升级时可交互输入）；root 侧 migrate 的连接目标不取自 `lingedge` 可写文件；轮换用 `RETAIN/DISCARD CURRENT PASSWORD`；`--from-file` 首次解析后清零并删除；中断续做重新提供凭据；宝塔场景差异与脱敏/传输规则 |
+| 与 epics 建议默认的差异 | app/maint 密文文件由「root:lingedge 0440 + LoadCredential」改为「`lingedge` 属主 0600（数据目录）」——向导无权创建 root 属主文件且无提权通道；机密性由信封加密保证。其余采纳 |
+| 改动文档 | 新增：`docs/architecture/adr/ADR-026-database-credential-handoff.md`、`docs/bmad/contract-changes/CC-11-setup-credential-fields.md`。修订：`docs/architecture/adr/{README,ADR-011,ADR-016}.md`、`docs/architecture/{architecture,tools-design}.md`（§13/§13.1/§17.1/§17.3）、`docs/database/README.md`（§5.1）、`docs/api/openapi.yaml`（仅加法：`SetupDbConfig`、`SetupStepResult`）、`docs/operations/{secrets,server-config}.md`、`docs/bmad/{decisions-adopted,epics,sprint-status}.{md,yaml}`、Story 1.6/1.15 记录 |
+| 影响 Story | 1.24（AC3/AC7 改写，新增 AC9–AC12）、1.35（AC6 联调条款）、1.43（新增 AC9）；1.1–1.23 无影响 |
+| 未改动 | 冻结迁移 000001–000018、proto、Go 代码（`AA-7` 注释与过渡实现留待 1.24，清单见 ADR-026「实现指引」） |

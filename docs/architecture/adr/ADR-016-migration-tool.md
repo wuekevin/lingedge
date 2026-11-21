@@ -74,5 +74,9 @@
 - **逐表授权**（database/README §5.1，Story 1.5 的发现）：lint 强制每张新表有 `GRANT … ON <表> TO lingedge_app`（追加只写表仅 `SELECT, INSERT`），分区表另有 `lingedge_maint` 的表级 `SELECT, ALTER, DROP`；授权必须是不带库名的表级语句。
 - **三路评审后的加固**：`recover` 只在「版本表/运行记录/校验和」一致时才清除标记（防止把被篡改文件的哈希洗白、防止 down 已完成后撞上主键冲突）；`plan` 与 `up` 同样校验完整性；账号预检增加 GRANT OPTION 探针（决策 6）；持锁连接加心跳；退出码 10 表示「数据库与二进制的迁移集合不一致」；lint 增加可执行注释、同行多语句、账号/库管理语句、多账号/`WITH GRANT OPTION` 授权、`expand` 的 NOT NULL 无默认列等规则；`VALUES()` 仍用于 `ON DUPLICATE KEY UPDATE`（行别名语法自 8.0.19 起才有，而最低版本是 8.0.16）。
 - **决策 4 的 `system_settings` 记录已在 Story 1.7 补齐**：`system_settings` 随 000002 落库后，runner 以**运行记录表为准对账**键 `schema.latest_class_irreversible_applied`（值 JSON `{"version","name","applied_at"}`，`group_name='general'`，`value_enc` 为空）：每次 `up` 结束（含无待执行迁移与失败返回）与 `recover` 补记 applied 之后，若记录缺失或落后于最近一次已应用的 `irreversible` 迁移则写入。因此「迁移已提交但进程在写记录前被杀」「irreversible 迁移早于 `system_settings` 应用」「记录被误删」都会在下一次 `up`/`recover` 自愈；`expand`/`reversible` 迁移不写；表缺失、列不全或 `setting_key` 无唯一键时静默跳过，探测/写入失败只记警告（辅助信息，不是迁移成败的依据）；`doctor` 的消费随 Tools 泳道。真实库回归见 `tests/migrations/m1a_test.go`。
-- **AA-7 过渡**：迁移账号凭据尚无定稿的交接方式（`decisions-adopted.md` §3）；本 Story 只约定环境变量 `LINGEDGE_MIGRATE_DB_USER`（缺省 `lingedge_migrate`）、`LINGEDGE_MIGRATE_DB_PASSWORD` 或 `LINGEDGE_MIGRATE_DB_PASSWORD_FILE`，口令不经命令行。AA-7 定稿后只需改 `internal/platform/migrate/cli.go` 的凭据来源。
+- **AA-7 过渡（已于 2026-11-21 定稿，见 ADR-026）**：本 Story 约定的环境变量 `LINGEDGE_MIGRATE_DB_USER`（缺省 `lingedge_migrate`）、`LINGEDGE_MIGRATE_DB_PASSWORD` 或 `LINGEDGE_MIGRATE_DB_PASSWORD_FILE`（口令不经命令行）**保留为最高优先级的显式来源**；定稿后只需在 `internal/platform/migrate/cli.go` 追加 `migrate.yaml` 与交互输入来源及 `credential init/reset` 子命令。
 - **最低版本 8.0.16**：版本门槛已实现并有单元测试，但 8.0.16 空库全量 `up` 本机无法验证（仅 8.0.46），仍为「等待环境验证」（修订日志 §4 ①）。
+
+## 修订记录 2026-11-21（AA-7）
+
+- 决策 6/7 的凭据部分由 **ADR-026** 补充：向导在 setup mode 内**进程内**调用同一 migrate runner，`lingedge_migrate` 口令仅存内存、用后清零；root 侧 `lingedge-server migrate` 的口令来源为 环境变量 ＞ 口令文件 ＞ `/etc/lingedge/server/migrate.yaml`（root:root 0400，由 `migrate credential init|reset` 写入）＞ 交互输入；连接目标绝不取自 `lingedge` 可写文件。决策 7「Tools 不直接连库」不变。无迁移/契约语义变化。

@@ -78,7 +78,7 @@ context:
 - **`docs/database/verification` 没有搬走，而是在 `tests/migrations` 放了逐字节副本**：原件被 CF-1 冻结复核引用（`freeze-check` 读取 `m1-fk-skeleton.sql`，CF-1.md 记录其路径），搬走等于改动冻结基线；`TestRegressionAssetsAreIdenticalToFrozenDocs` 守住两份一致。AC6 的「用例与期望错误码不变」成立（`run_ddl_rules.py` 在新位置原样运行 26/26；另有 Go 版逐例断言）。
 - **互斥与 `job_locks`**：AC3 写「首次无 `job_locks` 表时回退 `GET_LOCK`，之后用 `job_locks` 租约」。实现为 `GET_LOCK` 始终持有（互斥本身），`job_locks` 存在后另记录租约（holder、递增 fence、lease_until）。原因：`job_locks` 由 000002 创建——若「有表则只用租约」，用 GET_LOCK 起步的进程与之后改用租约的进程之间出现互斥缝隙。这是对 AC3 措辞的强化（一个超集），写入 ADR-016 实现记录。
 - **未实现（有意延后）**：ADR-016 决策 4 的 `system_settings.schema.latest_class_irreversible_applied`——`system_settings` 随 Story 1.7（000002）才存在；`recover --mark-applied`（单语句 DDL 已生效而版本表未记录时的人工补记）。
-- **AA-7 过渡**：迁移账号凭据只经环境变量 `LINGEDGE_MIGRATE_DB_USER`（缺省 `lingedge_migrate`）、`LINGEDGE_MIGRATE_DB_PASSWORD` 或 `LINGEDGE_MIGRATE_DB_PASSWORD_FILE`（权限检查同 `*.password_file`），口令不经命令行（有测试）；AA-7 定稿后只改 `cli.go` 的凭据来源。
+- **AA-7 过渡（2026-11-21 已定稿，ADR-026：以下环境变量保留为最高优先级显式来源，仅追加 `migrate.yaml`/交互来源）**：迁移账号凭据只经环境变量 `LINGEDGE_MIGRATE_DB_USER`（缺省 `lingedge_migrate`）、`LINGEDGE_MIGRATE_DB_PASSWORD` 或 `LINGEDGE_MIGRATE_DB_PASSWORD_FILE`（权限检查同 `*.password_file`），口令不经命令行（有测试）；AA-7 定稿后只改 `cli.go` 的凭据来源。
 - **`up` 的 `--accept-irreversible`**：ADR-013 把确认交互放在 Tools；服务端同样拒绝「含不可逆迁移而未确认」（退出码 9），纵深防御，且「一个迁移都不执行」。
 - **goose v3.30.1（2026-11-17 查询的最新版）以 Provider 库形式使用**，`WithTableName("schema_migrations")`；goose 的 MVS 要求带动 `x/sys`、`x/text`、`genproto`、`multierr` 小版本上升（必要，`make vuln` 无漏洞）。goose 与 `database/sql` 只允许出现在 `internal/platform/migrate`（depguard 规则新增并有正反自测）。
 

@@ -78,3 +78,22 @@ k2:<base64url 无填充，32 字节随机值>
 2. 32 字节散列的 base64 形态（SHA-256 的 base64、JWT 的 HS256 签名段）与密钥不可区分，会被**一并遮蔽**（过遮，不泄漏；当前代码库没有日志输出此类值）；
 3. 其他长度（16/24/64 字节密钥）、被换行/空格折断或再编码（如二次 base64）的密钥不识别；约 0.1% 的随机 32 字节密钥缺某一类字符而不满足条件；
 4. 因此纪律仍是：主密钥永不进入任何日志调用——`FileKeyProvider` 自身从不格式化输出密钥，裸串识别只是兜底。
+
+## 8. 数据库凭据（AA-7；ADR-026、tools-design §13.1，UD-31 默认采纳、可推翻）
+
+> 本节是运维视角摘要；设计与理由见 ADR-026。**实现随 Story 1.24；在其落地前仓库只有 1.6/1.15 的过渡通道（环境变量/`*_file`），下表为目标形态。**
+
+| 凭据 | 位置 | 属主/权限 | 读取方 | 轮换 |
+|---|---|---|---|---|
+| `lingedge_app` / `lingedge_maint` / Redis 口令、DB 连接目标 | `/var/lib/lingedge/server/secrets/runtime-credentials.json`（口令为 `pkg/secretbox` 密文，AAD=`runtime_credentials\|<路径>\|<账号>`；目录 0700） | `lingedge:lingedge` 0600 | Server 各角色启动时（`lingedge`） | root 执行 `lingedge-server db credential rotate --role app\|maint --admin-user U`（`RETAIN CURRENT PASSWORD` → 重写文件 → 重启 → `DISCARD OLD PASSWORD`）；KEK 轮换时随 `secrets.rewrap` 重包装 |
+| `lingedge_migrate` 口令（运行/升级期） | `/etc/lingedge/server/migrate.yaml` | **root:root 0400** | root 运行的 `lingedge-server migrate`（Tools 升级、手工） | `lingedge-server migrate credential reset --admin-user U`；丢失无「找回」，只能重置 |
+| 临时 DB 管理员、`lingedge_migrate`（向导期） | 仅内存 | — | setup mode 的 Server | 无；用后清零，续做需重新提供 |
+| `setup --from-file` YAML | 调用者属主 0600 | 0600 | `lingedge-server setup` | 首次成功解析后自动清零并删除 |
+
+操作要点：
+1. 向导完成页若显示「迁移账号口令（仅一次）」，立即在服务器上执行页面给出的 `sudo lingedge-server migrate credential init --host … --port … --database …` 并键入口令保存；错过则用 `credential reset`。
+2. 向导结束后自行删除临时管理员账号；不要把管理员口令保存到任何文件（`--from-file` 例外且会被自动删除，请确认 `from_file_residual` 为 false）。
+3. **备份**：`runtime-credentials.json` 随 `/var/lib/lingedge/server/` 备份（密文，须有对应 `master.key`；备份清单 `kek_ids_required` 含其 `kek_id`）；`migrate.yaml` **默认不进备份**（`--include-migrate-credential` 且 `--encrypt` 才含）；恢复后需重新 `credential init`，并视口令是否已轮换执行 `credential rotate/reset` 对齐。
+4. **主密钥轮换**：`runtime-credentials.json` 不在数据库，须作为 `secrets.rewrap` 的额外目标（ADR-011 修订 2026-11-21）；移除旧 KEK 前也要核对它。
+5. 日志里不应出现任何口令；若怀疑泄露，先 `rotate/reset`，再排查。
+6. 宝塔 MySQL：推荐让向导用宝塔 MySQL 管理员口令（内存中一次）建账号；用面板预建账号常缺 `GRANT OPTION`/`SET_USER_ID`，预检会阻断并给出指引（具体默认权限待 ENV-BT 验证）。

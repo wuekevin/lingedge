@@ -615,19 +615,37 @@ Tools 负责**物化与准备**，Web 向导负责**业务初始化**，边界�
 
 **向导步骤（基线 §21.1）**：
 1. **环境检查**：Server 版本、系统时间、数据目录可写、`master.key` 可读（不展示内容）。
-2. **MySQL 配置**：host/port/库名/账号/口令；可选「用临时管理员凭据创建专用库与**三类**专用账号」——管理员凭据**仅在内存使用，不落盘不入日志**；在宝塔 MySQL 上同样只创建 `lingedge_*` 专用库与账号，不触碰其他库。
+2. **MySQL 配置**：host/port/库名/账号/口令；可选「用临时管理员凭据创建专用库与**三类**专用账号」——管理员凭据**仅在内存使用，不落盘不入日志**（两种模式：建账号模式/预建账号模式，§13.1）；在宝塔 MySQL 上同样只创建 `lingedge_*` 专用库与账号，不触碰其他库。
    - **版本预检**：`VERSION()` 必须 **≥ 8.0.16**（CHECK 约束自此版本起才强制执行；设计依赖 CHECK，低于此版本拒绝并说明）；另校验 `utf8mb4`、`sql_mode`。
-   - **三类账号**（database README §5）：`lingedge_app`（运行期 DML；对 `audit_logs`、`wallet_entries` 仅 `INSERT, SELECT`）；`lingedge_maint`（仅对分区表的表级 `SELECT, ALTER, DROP`，由迁移 SQL 授权，供 Worker 维护分区；不能 DROP 其它表）；`lingedge_migrate`（`ALL ON <db>.* WITH GRANT OPTION` + 全局 `SET_USER_ID`，仅 `migrate`/Tools 使用，不在常规请求路径持有；口令存 `/etc/lingedge/server/migrate.yaml`（root:root 0400，仅由 root 运行的 `lingedge-server migrate` 读取，不进入 `server.yaml`，运行用户 `lingedge` 不可读）。
+   - **三类账号**（database README §5）：`lingedge_app`（运行期 DML；对 `audit_logs`、`wallet_entries` 仅 `INSERT, SELECT`）；`lingedge_maint`（仅对分区表的表级 `SELECT, ALTER, DROP`，由迁移 SQL 授权，供 Worker 维护分区；不能 DROP 其它表）；`lingedge_migrate`（`ALL ON <db>.* WITH GRANT OPTION` + 全局 `SET_USER_ID`，仅 `migrate`/Tools 使用，不在常规请求路径持有）。**口令落点（AA-7，ADR-026，见下文 §13.1）**：`lingedge_migrate` 向导期只存内存、用后清零、绝不持久化；运行/升级期口令存 `/etc/lingedge/server/migrate.yaml`（root:root 0400，仅 root 运行的 `lingedge-server migrate` 读取，由 root 侧命令 `migrate credential init` 写入，不进入 `server.yaml`，运行用户 `lingedge` 不可读）；`lingedge_app`/`lingedge_maint`（及 Redis）口令经信封加密存 `lingedge` 属主 0600 的 `runtime-credentials.json`。
    - **触发器权限预检**（宝塔 MySQL 常开 binlog）：读取 `@@log_bin` 与 `@@log_bin_trust_function_creators`；若 `log_bin=1` 且 trust=0，用 `lingedge_migrate` 在目标库建/删一个探针触发器；失败（ERROR 1419，已在 MySQL 8.0.46 实测）→ 阻断并给出两种处置：由管理员 `GRANT SET_USER_ID ON *.* TO lingedge_migrate`（推荐），或在 `my.cnf` 设置 `log_bin_trust_function_creators=1`；向导不自行修改 MySQL 全局变量。
    - **目标库必须为空，否则拒绝**（不静默覆盖，FR-6）。
 3. **Redis 配置**：地址/口令/DB；`INFO server` 校验主版本 ≥8；不使用 `FLUSHDB`。
-4. **数据库初始化**：嵌入式 goose 执行迁移（`lingedge-server migrate up`，按 ADR-016，显示每个迁移的级别）。
+4. **数据库初始化**：嵌入式 goose 执行迁移（**进程内**调用与 `lingedge-server migrate up` 同一 runner，使用内存中的 migrate 凭据，按 ADR-016，显示每个迁移的级别；结束即关闭 migrate 池并清零口令，ADR-026 §2）。
 5. **创建管理员**：用户名/邮箱/口令由安装者**当场设定**（强度校验；无任何默认口令，NFR-6）；可选立即绑定 TOTP。
 6. **系统基础配置**：站点名称、公开 URL、运行模式 `self_hosted`（默认）/`commercial`（D-3）、时区。
 7. **内部身份与密钥初始化**：用 `master.key` 作 KEK 生成并加密保存：私有 CA（ECDSA P-256，**有效期默认 10 年**，可配 5–10 年；`doctor` 剩余 <1 年告警）、配置签名 Ed25519 密钥（`signing_keys`）、**Server gRPC 叶证书**（M13：由该私有 CA 签发，`ExtKeyUsage=serverAuth`，SAN = `server_url` 的主机名/IP + 设置项 `grpc.tls.san_extra`，有效期 90 天，私钥信封加密存 `signing_keys(purpose='grpc_server')`，进程热重载，由 Scheduler 任务 `server.cert_rotate` 在 2/3 周期自动轮换，且早于 CA 轮换，ADR-003）；初始化 `system_settings(deploy.lineage)=1`（ADR-002）；记录各信任根公钥指纹与 enroll Token 所用的 `ca_fp`（CA 根证书 DER 的 SHA-256）。**实现（Story 1.23）**：向导/`setup` 调用 Service 函数 `signingkeys.Service.Initialize(ctx, InitOptions{ServerURL, CAValidityYears})`（只用 `lingedge_app`，幂等、并发安全，与审计同一事务）；`doctor` 的 CA 剩余有效期检查使用纯函数 `pkg/signing.CheckCAExpiry(notAfter, now)`（剩余 < 1 年 = warn，已过期 = fail/expired；Tools 离线读取 CA 证书的 `NotAfter` 即可调用，Server 侧为 `signingkeys.Service.CAStatus`）。（预览令牌为不透明随机令牌，库存哈希，不再需要派生密钥。）
-8. **完成**：事务提交 → 写 `system_installations` 与 `install.lock`（**最后**写，且之后 setup 接口永久返回 410，setup token 哈希删除）→ 提示进入 Admin。
+8. **完成**：事务提交 → 写 `system_installations` 与 `install.lock`（**最后**写，且之后 setup 接口永久返回 410，setup token 哈希删除）→ 提示进入 Admin。若迁移口令由向导自动生成，`complete` 响应**一次性**返回（`one_time_secrets.migrate_password`）并给出预填的 `sudo lingedge-server migrate credential init …` 命令；响应写出后服务端清零（§13.1）。
 
-向导任一步中断可从 DB 中的 `system_installations.state` 续做（各步幂等）；在 `install.lock` 之前 Server 不接受业务流量。可选无头路径：`lingedge-server setup --from-file <0600 的 YAML>`（供自动化，文件用后由 Tools 提示删除）。
+向导任一步中断可从 DB 中的 `system_installations.state` 续做（各步幂等）；在 `install.lock` 之前 Server 不接受业务流量。可选无头路径：`lingedge-server setup --from-file <0600 的 YAML>`（供自动化；**读入后由 setup 进程自行清零并删除该文件**，§13.1）。
+
+### 13.1 数据库凭据交接与生命周期（AA-7，ADR-026，UD-31）
+
+| 凭据 | 载体与路径 | 属主/权限 | 写 | 读 | 生命周期 / 轮换 |
+|---|---|---|---|---|---|
+| 临时 DB 管理员口令 | 仅内存 | — | 安装者（表单/`--from-file`） | setup mode Server | 建库建账号后立即清零；续做需重新提供 |
+| `lingedge_migrate` 口令（向导期） | 仅内存 | — | 安装者提供，或向导生成 | setup mode Server（预检 + 步骤 4） | 步骤结束/`complete` 响应后清零；**绝不持久化** |
+| `lingedge_migrate` 口令（运行/升级期） | `/etc/lingedge/server/migrate.yaml`（`host/port\|socket/database/user/password/tls`） | root:root **0400** | **root 侧** `lingedge-server migrate credential init\|reset` | root 运行的 `lingedge-server migrate`（升级 §17.3 步骤 7/9、联调、手工） | 长期；`credential reset --admin-user` 轮换；备份默认排除 |
+| `lingedge_app`/`lingedge_maint`、DB 连接目标、Redis 地址与口令 | `<data_dir>/secrets/runtime-credentials.json`（口令字段 secretbox 五段密文，AAD=`runtime_credentials\|<路径>\|<账号>`） | `lingedge:lingedge` 0600（目录 0700） | 向导（原子写）；轮换由 root 侧命令写后 `chown` | Server 启动时（`lingedge`）；**root 侧 migrate 不读此文件** | 长期；`lingedge-server db credential rotate --role app\|maint`（`RETAIN CURRENT PASSWORD` → 重写 → 重启 → `DISCARD OLD PASSWORD`）；随 KEK 轮换重包装 |
+
+要点：
+- **为何不是 root:lingedge 0440**：向导以 `lingedge` 运行，无权创建 root 属主文件；机密性由信封加密（KEK = `master.key`，仍由 Tools 步骤 18 生成、`LoadCredential` 注入）保证，而非文件属主。
+- **migrate 凭据来源优先级**（`lingedge-server migrate`）：`LINGEDGE_MIGRATE_DB_PASSWORD` ＞ `LINGEDGE_MIGRATE_DB_PASSWORD_FILE` ＞ `migrate.yaml` ＞ 交互输入（仅 TTY，无回显；非 TTY 退出码 3）。连接目标只取显式参数、`migrate.yaml`、root 属主 `server.yaml`，**不取** `runtime-credentials.json`（防 `lingedge` 被攻陷后套取口令）。Tools 向直接子进程以环境变量传递交互得到的口令，不进 `state.json`/journal/日志/systemd `Environment=`。
+- **中断续做**：口令不落盘 ⇒ 续做时重新提供；app/maint 若已写入 `runtime-credentials.json` 则读回；migrate 口令未知则重新输入或用临时管理员 `ALTER USER` 重置（`migrate.yaml` 已存在时提示随后 `credential init --force`）。
+- **`--from-file`**（0600、调用者属主，否则退出码 3）：可含 `database.{host,port,name,tls}`、`database.admin.{user,password}`、`database.migrate.password`、`database.app/maint.password`、`redis.*`、管理员初始口令、站点配置，口令字段可用 `*_file` 间接引用；**首次成功解析后**进程清零并 0 覆盖 `unlink`，失败则醒目警告且结果带 `from_file_residual=true`；自动生成的 migrate 口令只在结果输出一次，**不落盘**（不提供写 root 文件的选项）。
+- **完成后清理**：内存口令清零、setup token 哈希删除、`--from-file` 文件已删；仅留 `runtime-credentials.json`（密文）与（操作者执行后的）`migrate.yaml`。向导完成页提示删除临时管理员账号。
+- **宝塔（ENV-BT）**：推荐建账号模式（向导内存使用宝塔 MySQL 管理员口令一次）；面板预建账号常缺 `GRANT OPTION`/`SET_USER_ID`，由既有预检阻断并给指引（具体默认权限与 socket 可访问性待 ENV-BT 验证）。
+- **脱敏**：口令不得出现在日志、错误、访问日志/请求体、审计（只记「账号已创建」「口令已自动生成：是/否」）、`system_installations.state`、`state.json`、命令行；非回环监听且非 TLS 时携带口令的接口拒绝 `400 setup.insecure_transport`；完整规则与测试见 ADR-026 §10。
 
 ## 14. 节点注册 `lingedge node enroll`（FR-12、FR-52）
 
@@ -867,7 +885,7 @@ LockPersonality=yes
 
 | 项 | 内容 | 默认 |
 |---|---|---|
-| 配置 | `/etc/lingedge/<c>/`（**不含** `master.key`） | 包含 |
+| 配置 | `/etc/lingedge/<c>/`（**不含** `master.key`，**默认不含** `migrate.yaml`；后者仅 `--include-migrate-credential` 且 `--encrypt` 才含，恢复后重新 `migrate credential init`，ADR-026 §4） | 包含 |
 | 数据库 | `mysqldump --single-transaction --routines --triggers`（参数数组；凭据通过临时 `--defaults-extra-file`，0600，用后立即 `shred`/删除；不使用命令行口令） | server 包含 |
 | 服务数据 | `/var/lib/lingedge/server/`（setup/锁文件、P2 起的媒体暂存等；**配置修订块内容存于 MySQL（`config_blocks.content`），随数据库逻辑备份，不是文件**，IMP-16）；公开媒体 `/var/lib/lingedge/media/`（P2）；访问日志分片 | 日志默认**不含**（`--include-logs`）；媒体默认包含 |
 | Tools 状态 | `state.json`、已装版本清单 | 包含 |
@@ -892,7 +910,7 @@ LockPersonality=yes
 
 ### 17.3 升级流程（基线 §4.7，FR-8）
 
-1. 取任务锁、检查未完成 journal；2. 获取并验证签名清单（§9.5）；3. 兼容性检查（`min_upgrade_from`、`requires`、`conflicts`、系统）；4. 解析目标版本并**展示 Plan**；5. 下载并验证包到 staging；6. **备份当前版本**（release 目录保留 + 配置；server 加 DB 备份，§17.1）；7. **检查数据库迁移**（`migrate plan`，决策表）；不可逆且无确认 → 退出码 9，此时**尚未改动任何东西**；8. 停止服务（server：先拒绝新写请求/优雅停机）；9. 执行迁移（`migrate up`，失败 → 回滚）；10. 原子切换 `current`；11. 启动服务；12. 健康检查（server：`/healthz/ready` 且 schema 版本 = 期望；node：Agent 首次 Heartbeat 成功 + `openresty -t` 通过 + 配置代未受影响；其他：端口/HTTP 探测；窗口待基线测试后确定）；13. 成功 → 写 `state.json`（记录 `prev_version`、迁移级别、备份文件）、清理超出保留数的旧 release、输出结果；失败 → 按 §17.2 的路径**自动回滚**，成功回滚退出码 10；回滚失败退出码 12 并保留 journal 与备份供人工恢复。
+1. 取任务锁、检查未完成 journal；2. 获取并验证签名清单（§9.5）；3. 兼容性检查（`min_upgrade_from`、`requires`、`conflicts`、系统）；4. 解析目标版本并**展示 Plan**；5. 下载并验证包到 staging；6. **备份当前版本**（release 目录保留 + 配置；server 加 DB 备份，§17.1）；7. **检查数据库迁移**（`migrate plan`，决策表；步骤 7、9 需要迁移凭据：按 §13.1 的来源优先级取得——`migrate.yaml` 存在则直接用，否则交互提示并向 `migrate` 子进程以环境变量传递，**不写入 journal/`state.json`**；非交互且无凭据 → 退出码 3 且**尚未改动任何东西**）；不可逆且无确认 → 退出码 9，此时**尚未改动任何东西**；8. 停止服务（server：先拒绝新写请求/优雅停机）；9. 执行迁移（`migrate up`，失败 → 回滚）；10. 原子切换 `current`；11. 启动服务；12. 健康检查（server：`/healthz/ready` 且 schema 版本 = 期望；node：Agent 首次 Heartbeat 成功 + `openresty -t` 通过 + 配置代未受影响；其他：端口/HTTP 探测；窗口待基线测试后确定）；13. 成功 → 写 `state.json`（记录 `prev_version`、迁移级别、备份文件）、清理超出保留数的旧 release、输出结果；失败 → 按 §17.2 的路径**自动回滚**，成功回滚退出码 10；回滚失败退出码 12 并保留 journal 与备份供人工恢复。
 
 回滚后检查：版本号、配置、DB schema 版本与升级前一致（reversible/expand 路径验证 schema 版本；irreversible 路径验证恢复后的 schema 版本等于备份点），并自动运行一次健康检查与 `doctor` 子集（FR-8「回滚后状态一致」）。**凡回滚路径含“恢复数据库备份”（含不可逆迁移的回滚），同样须在启动旧版本 Server 前执行 `lingedge-server lineage bump`（§17.5）**，否则节点已应用的修订序号会高于恢复后的 DB 计数。
 
@@ -984,6 +1002,10 @@ LockPersonality=yes
 - **T-2 MySQL/Redis 的安装责任**：基线 §4.5 仅要求检测；本设计不代装。若 PRD 期望「一条命令装好 MySQL/Redis」，需新增 FR 与包管理器适配。
 - **T-3 官方发行源**：FR-6/FR-8 假设存在签名清单的 HTTPS 发布源，PRD 未定义其归属与可用性要求（开放问题）。
 - **T-4 退出码公开契约**：FR-4 要求「退出码表在 Docs 中公布」，该表现为 Docs（P5）交付物；M1 阶段由 `lingedge --help exit-codes` 与本文 §4 暂代。
+
+## 修订记录 2026-11-21（AA-7）
+
+- 新增 §13.1「数据库凭据交接与生命周期」；§13 步骤 2/4/8 与无头路径改写；`lingedge_migrate` 口令的 root 侧文件由「向导写入」改为「root 侧 `migrate credential init` 写入」；运行期口令落点为 `runtime-credentials.json`（决策见 ADR-026，**默认采纳、可推翻 UD-31**）。§17.1 备份默认排除 `migrate.yaml`；§17.3 步骤 7/9 增迁移凭据来源与「不入 journal」。契约加法见 CC-11。
 
 ## 修订记录 2026-11-16
 

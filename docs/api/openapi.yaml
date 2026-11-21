@@ -26308,12 +26308,35 @@ components:
           type: string
           format: password
           writeOnly: true
-          description: 仅用于连接与写入本机配置（0600），不进日志
+          description: 运行期应用账号（lingedge_app）的口令（建账号模式下为将创建账号的口令）。向导成功后以信封加密写入运行期凭据文件（lingedge:lingedge 0600，ADR-026 §3），不进日志
         tls:
           type: boolean
         create_if_missing:
           type: boolean
-          description: 若提供有建库权限的凭据，可建立专用库与用户；不得覆盖已有库（FR-6）
+          description: 若提供有建库权限的凭据，可建立专用库与用户；不得覆盖已有库（FR-6）。为 true 时须同时提供 admin_username/admin_password（ADR-026）
+        admin_username:
+          type: string
+          description: 临时数据库管理员（仅 create_if_missing=true 时使用）；仅存内存，建库建账号后清零，不落盘不入日志（ADR-026 §1）
+        admin_password:
+          type: string
+          format: password
+          writeOnly: true
+        migrate_username:
+          type: string
+          description: 迁移账号名，缺省 lingedge_migrate（database/README §5.1）
+        migrate_password:
+          type: string
+          format: password
+          writeOnly: true
+          description: 迁移账号口令；仅存内存、绝不持久化（ADR-026 §2）。建账号模式下缺省则由服务端生成并在 complete 响应里一次性返回；预建账号模式下必填
+        maint_username:
+          type: string
+          description: 维护账号名，缺省 lingedge_maint
+        maint_password:
+          type: string
+          format: password
+          writeOnly: true
+          description: 预建账号模式下可选；建账号模式下由服务端生成。写入运行期凭据文件（信封加密，ADR-026 §3）
       required:
       - host
       - port
@@ -26385,6 +26408,14 @@ components:
           type:
           - string
           - 'null'
+        one_time_secrets:
+          type: object
+          readOnly: true
+          description: 仅 setupComplete 在迁移口令由服务端自动生成时返回一次（Cache-Control no-store；不入日志/审计；响应后服务端清零，ADR-026 §5）
+          properties:
+            migrate_password:
+              type: string
+              format: password
       required:
       - step
       - ok

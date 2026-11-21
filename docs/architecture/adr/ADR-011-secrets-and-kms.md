@@ -66,3 +66,7 @@
 - **M16（master.key）**：§2 `master.key` 由 **Tools 步骤 18** 生成、`root:root 0400`、经 `LoadCredential` 注入（此前写“安装向导生成、root:lingedge 0440”与 tools-design §13/§15.1 矛盾）；§9 `LimitCORE=0` 已在 Server 单元模板落实。
 - **MIN-05（KEK 移除 × 备份恢复）**：§3 旧 KEK 移除前须核对保留备份的 `kek_ids_required`，被需要时拒绝，除非 `--drop-backup-compat`；§8 备份清单记录 `kek_ids_required`。
 - **M13 / IMP-05**：§4 补充 Server gRPC 叶证书私钥的保管（`signing_keys.purpose='grpc_server'`）。
+
+## 修订记录 2026-11-21（AA-7，ADR-026）
+
+- 新增受 `master.key` 保护的非数据库载体 `runtime-credentials.json`（`lingedge` 属主 0600，内含 `lingedge_app`/`lingedge_maint`/Redis 口令的五段密文，AAD = `runtime_credentials|<JSON 路径>|<账号>`）。**它不在数据库，`secrets.rewrap`（RecordStore）不会扫描它**：KEK 轮换须把它作为额外重包装目标（原子重写），`CheckKEKRemovable` 须把其 `kek_id` 计入引用，备份清单 `kek_ids_required` 须包含它。`master.key` 本身的生成者、权限、`LoadCredential` 路径不变。

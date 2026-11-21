@@ -45,7 +45,7 @@ created: 2026-11-16
 - **迁移顺序变化**：M1 迁移改为按外键依赖拓扑排序的 13 个文件（`000001 identity_core` … `000013 observability`），空库全量 61 张 M1 表（另有 6 张后续阶段样例，`docs/database/verification/m1-fk-skeleton.sql` 在 MySQL 8.0.46 空库实测 0 错误、共 67 表）；Story 1.7/1.8/1.9 的分段重排为 1.7=000001–000005（21 表）、1.8=000006–000011（28 表，含从 1.9 前移的证书表与新增 `node_tasks`）、1.9=000012–000013（12 表）+ CF-2。MySQL 最低版本 ≥8.0.16。
 - **新增 Story**：**3.51**（发布编排队列 `publish_queue`：集群串行/已确认基线/毒块隔离/离线追平，承接 ADR-002 §13）与 **3.52**（节点级回滚与 `held_seq`，承接 ADR-002 §14），取代原 3.11/3.12/3.21 的「拆分建议」；3.38、3.39、3.43 增加对应依赖。Story 总数 174 → 176；FR/NFR 覆盖仍为 100%（FR-55、FR-56、NFR-20 的实现 Story 增补 3.51/3.52；FR-82 的迁移侧归属由 1.9 移至 1.8）。
 - **被修订的既有 Story（85 个，AC/依赖/需求，均带「修订（2026-11-16）」行）**：Epic 1：1.1、1.2、1.3、1.5、1.6、1.7、1.8、1.9、1.10、1.12、1.13、1.14、1.15、1.16、1.17、1.18、1.20、1.21、1.23、1.24、1.25、1.27、1.32、1.34、1.35、1.36、1.37、1.40、1.41、1.42、1.43、1.45；Epic 2：2.3、2.5、2.7、2.9、2.11、2.13、2.14；Epic 3：3.1、3.2、3.3、3.4、3.5、3.6、3.7、3.8、3.9、3.10、3.11、3.12、3.13、3.14、3.15、3.16、3.17、3.18、3.19、3.20、3.21、3.22、3.23、3.24、3.25、3.26、3.27、3.28、3.30、3.32、3.33、3.34、3.35、3.38、3.39、3.41、3.43、3.48；Epic 4：4.2；Epic 5：5.1；Epic 6：6.1、6.4、6.10、6.18、6.19、6.21。关键变更：租户发布 API 去节点/集群/策略参数（3.12、3.35）与集群绑定平台独占（3.9）；节点代 `g<N>` 复合布局（3.20、3.21）；`lineage bump` 与备份恢复后 seq/epoch 提升（1.13、1.41、1.43、1.45）；`site_uid` 入库强校验（3.18）；root 升级结果文件目录（3.34、1.32、3.33）；官网/Admin/Console 独立主机名由 Tools 强制（1.40、2.5）；Server gRPC 叶证书与 CA 10 年（1.23、3.10）；MySQL ≥8.0.16 与三类账号（1.5、1.6、1.24）；KCR 缓存键封闭（3.5、3.6、3.26、3.27）；CLI 标志统一（1.25）；metrics 端口 9100→9180（1.12、1.35）；审计与业务同事务（1.21）等。
-- **新登记缺口**：AA-7（数据库凭据交接未定义，阻塞 1.24 的凭据持久化部分）、AA-8（`TaskType` 与内部周期作业口径，须在 1.3 冻结前处理）；新增用户决策 UD-29、UD-30。
+- **新登记缺口**：AA-7（数据库凭据交接未定义；**2026-11-21 已由 ADR-026 解决**，登记 UD-31）、AA-8（`TaskType` 与内部周期作业口径，须在 1.3 冻结前处理）；新增用户决策 UD-29、UD-30。
 
 ### Story 字段与约定
 
@@ -684,7 +684,7 @@ created: 2026-11-16
 
 ## 待用户决策清单（UD）
 
-共 **30** 项（2026-11-16 新增 UD-29、UD-30）。均有默认处理，**默认值下开发可继续**；按用户「完全自主」要求，**全部默认值已于 2026-11-16 逐项复核并采纳**，汇总、复核结论与可被推翻的影响范围见 `docs/bmad/decisions-adopted.md`；「阻塞」列说明何时必须由用户确认才能关闭相应验收。
+共 **31** 项（2026-11-16 新增 UD-29、UD-30；2026-11-21 新增 UD-31）。均有默认处理，**默认值下开发可继续**；按用户「完全自主」要求，**全部默认值已于 2026-11-16 逐项复核并采纳**，汇总、复核结论与可被推翻的影响范围见 `docs/bmad/decisions-adopted.md`；「阻塞」列说明何时必须由用户确认才能关闭相应验收。
 
 | 编号 | 决策项 | 来源 | 默认处理 | 影响 Story | 阻塞性 |
 |---|---|---|---|---|---|
@@ -718,6 +718,7 @@ created: 2026-11-16
 | UD-28 | 媒体重编码是否接受 cgo（WebP 编码需 libwebp） | MIN-09、website-cms-design §11.2/§12.1 | 默认：P2 只做 PNG/JPEG/GIF 重编码（Go 标准库），WebP/AVIF 待决策（MIN-09 延后项）；Tools/Go 二进制保持静态无 cgo | 2.11 | P2 前 |
 | UD-29 | 再认证窗口与发布编排超时参数 | Q-9（修订日志 §4）、ADR-002 §13、ADR-018 §12 | 默认：`auth.reauth_window_s` = 300 秒；`rollout.target_timeout_s`、`rollout.catch_up_ttl_s`、灰度失败比例阈值为可配置项、默认值待基线报告后确定（不虚构） | 1.17、3.12、3.51 | 不阻塞 |
 | UD-30 | P5 是否提供「线路/区域套餐」（`placement_profile`，不暴露集群身份） | Q-10（修订日志 §4）、IMP-14 | 默认：不提供；集群放置由平台 `placement.default_cluster_uids` 决定，租户不选集群、不可见集群（`available-clusters` 不采纳） | 3.3、3.9、3.35、6.2 | P5 前 |
+| UD-31 | 数据库凭据交接与生命周期（ADR-026；AA-7 定稿） | AA-7、ADR-026、tools-design §13.1 | 默认：向导就地迁移、migrate 口令仅内存；app/maint/Redis 口令 secretbox 密文存 `lingedge` 属主 0600 的 `runtime-credentials.json`；migrate 口令存 root:root 0400 `migrate.yaml`（root 侧命令写入/交互输入）。**默认采纳、可推翻**（影响面见 decisions-adopted.md UD-31） | 1.24、1.35、1.43 | 1.24 开工前知悉（不阻塞 1.1–1.23） |
 
 ### 待架构补充（AA，非用户决策）
 
@@ -729,7 +730,7 @@ created: 2026-11-16
 | AA-4 | UX 线框缺口：闭环 F/G/H 对应页面（调度/DNS/安全中心/四层/财务中心）的页面级线框 P3 起前补充（`ux.md` §5.2 已声明） | 4.19、5.13、6.11 前置 | UX 代理 |
 | AA-5 | OpenAPI 中 `public/plans` 的阶段标注与 FR-45 的 P2 要求不一致（见 UD-16），契约变更需走变更说明 | 2.12 前置 | 架构代理 |
 | AA-6 | ~~架构修订任务（阻塞 CF-1）~~ **已关闭（2026-11-16）**：`docs/bmad/architecture-revision-log.md` 记录两份评审 67 项已修 66、延后 1（MIN-09，UD-28），BLK-01…07 全部关闭；IMP/MIN 的纠正已折入各 Story AC 并改写为具体口径。Story 1.3 的冻结前置检查改为「复核修订日志所列验证项」（1.3 AC7） | 已解除对 1.3（CF-1）与并行开发的阻塞 | 架构代理（已完成） |
-| AA-7 | **数据库凭据交接未定义**：tools-design §13 规定 `lingedge_migrate` 口令存 `/etc/lingedge/server/migrate.yaml`（root:root 0400，仅 root 运行的 `lingedge-server migrate` 读取，运行用户 `lingedge` 不可读），但安装向导运行在 setup mode 的 Server 进程内（用户 `lingedge`，无权写 root 属主文件）且步骤 4 需用 migrate 凭据执行迁移；`server.yaml` 又「不含口令」，`lingedge_app`/`lingedge_maint` 口令的落点同样未记录。须在 ADR-016/tools-design §13 补充：向导内存持有 migrate 凭据的生命周期、向 root 侧交接的方式、运行期口令的加密落点与读取权限。建议默认（待架构确认，非本文决策）：向导在 setup mode 内就地执行迁移且凭据仅存内存；运行期口令经信封加密存 root:lingedge 0440 的 secrets 文件（`LoadCredential`）；migrate 口令由 root 侧命令写 0400 文件，升级时按需交互输入 | 阻塞 1.24 AC3/AC7 的凭据持久化部分、1.35 联调与 1.43 升级的迁移凭据来源（**不阻塞 1.1–1.23**，1.5–1.9 的测试账号由开发者在临时实例中自建） | 架构代理（`bmad-architecture` 补充 ADR-016/tools-design §13，须在 1.24 开工前完成） |
+| AA-7 | ~~数据库凭据交接未定义~~ **已解决（2026-11-21）**：**ADR-026**（新增）+ tools-design §13.1 定稿：向导在 setup mode 内进程内迁移，`lingedge_migrate` 口令仅内存、用后清零、绝不持久化；运行期 `lingedge_app`/`lingedge_maint`/Redis 口令经 secretbox 信封加密存 `<data_dir>/secrets/runtime-credentials.json`（`lingedge:lingedge` 0600；**与原建议默认的差异**：不是 root:lingedge 0440——向导无权创建 root 文件）；migrate 口令由 root 侧 `lingedge-server migrate credential init/reset` 写入 `/etc/lingedge/server/migrate.yaml`（root:root 0400），升级时无文件则交互输入。默认采纳、可推翻，登记 **UD-31**；契约加法见 `contract-changes/CC-11`。1.24 开发触及文件清单见 ADR-026「实现指引」 | 已解除对 1.24 AC3/AC7、1.35 联调、1.43 升级的阻塞（相应条款已改写；1.24 开工前仅需用户知悉 UD-31） | 架构代理（已完成） |
 | AA-8 | **`TaskType` 事实源与内部周期作业口径**：OpenAPI `TaskType`（25 项）声明为唯一事实源，但 database/README §5.1 与 platform-identity 引用的 Worker 任务 `partition.maintain`、以及 1.15 的内部周期作业（`tasks.reap`、`idempotency.cleanup`、`sessions.cleanup`）不在其中，1.14 的「注册表 ⊆ TaskType」CI 检查范围无法界定 | 影响 1.3 AC9（冻结前对齐）、1.14、1.15、1.21、3.48；低风险，**不阻塞 1.1–1.2**，须在 1.3 打 `contract-v1` 前处理 | 架构代理（在 1.3 内以非破坏的 expand 枚举补入，或改称「内部周期作业」并回写文档） |
 
 ### PRD 同步建议（供 UD-21 决策时参考）
@@ -1386,7 +1387,7 @@ created: 2026-11-16
 - **依赖**：1.13、1.20、1.22、1.23
 - **需求**：实现 FR-11、FR-26、NFR-6；验证/支撑 NFR-9、NFR-12
 - **关联**：架构反馈：F-8、F-7；架构评审项：IMP-19、IMP-05、MIN-04（见 `docs/bmad/review-architecture*.md`）
-- **修订（2026-11-16）**：向导 MySQL 步骤改为三类账号、≥8.0.16 与 binlog/触发器预检；密钥步骤含 Server gRPC 叶证书与 `deploy.lineage`；完成后统一 `410 setup.already_installed`；**登记缺口 AA-7（数据库凭据交接未定义）**。
+- **修订（2026-11-16）**：向导 MySQL 步骤改为三类账号、≥8.0.16 与 binlog/触发器预检；密钥步骤含 Server gRPC 叶证书与 `deploy.lineage`；完成后统一 `410 setup.already_installed`；**登记缺口 AA-7（数据库凭据交接未定义）**。**2026-11-21（AA-7 已解决，ADR-026/UD-31）**：AC3/AC7 的凭据条款改写，新增 AC9–AC12。
 - **参考**：tools-design §13；OpenAPI `/public/setup/*`；UX screens §9
 - **环境依赖**：本机 MySQL + Redis；宝塔 MySQL 场景需 ENV-BT
 - **等待环境验证条件**：本机真实 MySQL/Redis 路径完成即可验证主体；宝塔 MySQL 专用库创建场景待 ENV-BT。
@@ -1397,13 +1398,18 @@ created: 2026-11-16
 
 1. Given 无 `install.lock` 且无完成的 `system_installations`，When Server 启动，Then 进入 setup mode：仅 `/setup` 静态页与 `/public/setup/*` 可用，其余 API 返回 503；默认仅监听 `127.0.0.1:8080`。
 2. Given 所有写接口，When 缺少或错误 `X-Setup-Token`（与 `/etc/lingedge/server/setup-token.hash` 的 SHA-256 比对），Then 401 并节流（Redis 不可用时本地计数）。
-3. Given 向导步骤（tools-design §13）：环境检查 → MySQL（可选用临时管理员凭据创建专用库与**三类**专用账号，凭据**仅内存**不落盘不入日志；目标库**必须为空**否则 `400 setup.database_not_empty`；校验 `VERSION()≥8.0.16`、utf8mb4、`sql_mode`）→ Redis（`INFO server` 主版本 ≥8，不用 `FLUSHDB`）→ 数据库初始化（嵌入 goose，逐个显示迁移分类）→ 创建管理员（口令当场设置并校验强度，无任何默认口令，可选绑定 TOTP）→ 系统基础配置（站点名、公开 URL、运行模式、时区）→ 内部身份与密钥初始化（1.23：私有 CA〔10 年〕、配置签名密钥、Server gRPC 叶证书、`deploy.lineage=1`）→ 完成。
+3. Given 向导步骤（tools-design §13）：环境检查 → MySQL（可选用临时管理员凭据创建专用库与**三类**专用账号（建账号模式；亦支持预建账号模式，由安装者提供 app/migrate 口令），管理员与 migrate 凭据**仅内存**、用后清零、不落盘不入日志不入审计/`system_installations.state`，app/maint/Redis 口令按 ADR-026 §3 加密写入运行期凭据文件；目标库**必须为空**否则 `400 setup.database_not_empty`；校验 `VERSION()≥8.0.16`、utf8mb4、`sql_mode`）→ Redis（`INFO server` 主版本 ≥8，不用 `FLUSHDB`）→ 数据库初始化（嵌入 goose，逐个显示迁移分类）→ 创建管理员（口令当场设置并校验强度，无任何默认口令，可选绑定 TOTP）→ 系统基础配置（站点名、公开 URL、运行模式、时区）→ 内部身份与密钥初始化（1.23：私有 CA〔10 年〕、配置签名密钥、Server gRPC 叶证书、`deploy.lineage=1`）→ 完成。
 4. Given 完成，Then 事务提交后**最后**写 `system_installations` 与 `install.lock`；此后 `/public/setup/*` 永久返回 `410 setup.already_installed`（MIN-04），setup token 哈希被删除（FR-11 验证）。
 5. Given 任一步中断，Then 可经 `system_installations.state` 续做（各步幂等）；并发两个 `complete` 仅一个成功。
-6. Given 无头路径 `lingedge-server setup --from-file <YAML>`，Then 文件权限非 0600 拒绝；用后提示删除。
-7. Given MySQL 步骤（IMP-19/M12，已实测），Then 预检最低版本 ≥8.0.16（CHECK 生效，低于则拒绝并说明）；读取 `@@log_bin` 与 `@@log_bin_trust_function_creators`，若 `log_bin=1` 且 trust=0，用 `lingedge_migrate` 在目标库建/删探针触发器，失败（ERROR 1419）→ 阻断并给出两种处置（授予全局 `SET_USER_ID`〔推荐〕，或在 `my.cnf` 设 `log_bin_trust_function_creators=1` 后重启；向导不自行改 MySQL 全局变量）；创建三类账号：`lingedge_app`（运行期 DML，对 `audit_logs`/`wallet_entries` 仅 `INSERT, SELECT`）、`lingedge_maint`（仅分区表表级 `SELECT, ALTER, DROP`，由迁移 SQL 授权）、`lingedge_migrate`（`ALL ON db.* WITH GRANT OPTION` + 全局 `SET_USER_ID`）；宝塔 MySQL 场景同样预检，且只创建 `lingedge_*` 专用库与账号。**三类账号口令的落点，以及 `lingedge_migrate` 口令如何从（非 root 的）向导进程交接给 root 运行的 `lingedge-server migrate`，尚未在 tools-design §13 定稿（AA-7）——本 Story 开工前须先由架构补充，AC3/AC7 中凭据持久化部分以其结论为准。**
+6. Given 无头路径 `lingedge-server setup --from-file <YAML>`，Then 文件权限非 0600 或非调用者属主拒绝（退出码 3）；**用后由进程自行清零并删除**（详见 AC11，取代原「用后提示删除」）。
+7. Given MySQL 步骤（IMP-19/M12，已实测），Then 预检最低版本 ≥8.0.16（CHECK 生效，低于则拒绝并说明）；读取 `@@log_bin` 与 `@@log_bin_trust_function_creators`，若 `log_bin=1` 且 trust=0，用 `lingedge_migrate` 在目标库建/删探针触发器，失败（ERROR 1419）→ 阻断并给出两种处置（授予全局 `SET_USER_ID`〔推荐〕，或在 `my.cnf` 设 `log_bin_trust_function_creators=1` 后重启；向导不自行改 MySQL 全局变量）；创建三类账号：`lingedge_app`（运行期 DML，对 `audit_logs`/`wallet_entries` 仅 `INSERT, SELECT`）、`lingedge_maint`（仅分区表表级 `SELECT, ALTER, DROP`，由迁移 SQL 授权）、`lingedge_migrate`（`ALL ON db.* WITH GRANT OPTION` + 全局 `SET_USER_ID`）；宝塔 MySQL 场景同样预检，且只创建 `lingedge_*` 专用库与账号。**三类账号口令的落点与交接已由 ADR-026/tools-design §13.1 定稿（AA-7 已解决）**：`lingedge_migrate` 口令向导期仅存内存、预检与步骤 4（进程内同一 runner）后清零、绝不持久化；`lingedge_app`/`lingedge_maint` 口令在步骤 2 成功后立即以 secretbox 信封加密写入 `runtime-credentials.json`（`lingedge:lingedge` 0600，原子写，AAD 见 ADR-026 §3）；不存在向导写 root 属主文件的需求。
 
-**测试要求**：抢占（错 token）、非空库拒绝、Redis<8 拒绝、中断续做、并发 complete、日志无口令/管理员凭据、固定口令扫描。
+9. Given 凭据交接（ADR-026 §2/§3/§5，**AA-7 改写后新增**），Then：① 步骤 4 进程内调用同一 migrate runner，migrate 池仅在 setup mode 构造，`complete` 后任何路径不能构造 RoleMigrate 池；② 步骤 2 成功后立即写 `runtime-credentials.json`（`lingedge:lingedge` 0600、目录 0700、原子写、写前 secretbox 往返自检、转储无明文口令），启动校验拒绝符号链接/过宽权限/未知版本；③ Server 装配时显式通道（环境变量、`*.password_file`、`database.maint.*`）优先，缺省才读该文件；④ 迁移口令若自动生成，仅在 `complete` 响应 `one_time_secrets.migrate_password` 返回一次（`Cache-Control: no-store`，不入日志/审计），响应后清零，并给出预填 `credential init` 命令。
+10. Given 中断续做（ADR-026 §6），Then 口令不落盘、续做重新提供：app/maint 已写入则读回；migrate 口令未知时重新输入或用临时管理员 `ALTER USER` 重置；不得从任何位置静默取回。
+11. Given 无头路径（AC6 补充，ADR-026 §7），Then `--from-file` 可携带临时管理员/migrate/app/maint/Redis 凭据（口令字段支持 `*_file`），**首次成功解析后进程清零并 0 覆盖删除该文件**（不再「用后提示删除」），删除失败醒目警告且结果带 `from_file_residual=true`；自动生成的 migrate 口令只在结果输出一次、不落盘。
+12. Given 传输与脱敏（ADR-026 §10），Then 监听非回环且非 TLS 时携带口令的接口返回 `400 setup.insecure_transport`；日志/错误/访问日志/审计/`state` 注入已知口令后全量扫描无该串；root 侧 `migrate` 不读取 `runtime-credentials.json`（本 Story 提供 `migrate credential init|reset` 与 `db credential rotate`，其真实 MySQL 测试含 `RETAIN/DISCARD CURRENT PASSWORD`）。
+
+**测试要求**：抢占（错 token）、非空库拒绝、Redis<8 拒绝、中断续做（含重新提供凭据）、并发 complete、日志无口令/管理员凭据、固定口令扫描；建账号模式与预建账号模式各一遍（本机临时 mysqld）；`runtime-credentials.json` 转储/权限/符号链接测试；`--from-file` 清理断言；宝塔 MySQL 专用库与账号场景待 ENV-BT。**触及文件清单**见 ADR-026「实现指引」（`internal/platform/{migrate/cli.go,config,db/config.go,server}`、`cmd/lingedge-server/{cron,lineagecmd}.go`、`configs/server.example.yaml`、新增 `internal/platform/dbcred`）。
 
 **DoD**：基线 §25（DoD-12）；本 Story 不适用项：前端功能可用（SPA 在 1.37）。环境缺失时按上文「等待环境验证条件」处理。
 
@@ -1659,7 +1665,7 @@ created: 2026-11-16
 - **依赖**：1.24、1.33、1.34
 - **需求**：实现 FR-11、FR-6、FR-9、FR-26；验证/支撑 NFR-6、FR-12
 - **关联**：闭环 AC：AC-A-2、AC-A-3；架构反馈：F-7、F-8、T-2、T-3
-- **修订（2026-11-16）**：Server metrics 端口 9100→9180；联调条款引用 AA-7。
+- **修订（2026-11-16）**：Server metrics 端口 9100→9180；联调条款引用 AA-7。**2026-11-21（AA-7 已解决）**：AC6 联调条款改写为引用 ADR-026。
 - **参考**：tools-design §13；architecture §7；ADR-011
 - **环境依赖**：ENV-LNX（全新 Debian/Ubuntu LTS 与 RHEL 系各一，D-14）、本机 MySQL/Redis
 - **等待环境验证条件**：Plan/渲染/dry-run/fake 路径本机完成；真实 systemd 安装、LoadCredential、端口占用在 ENV-LNX 验证前标「等待环境验证」（汇总于 1.45）。
@@ -1673,7 +1679,7 @@ created: 2026-11-16
 3. Given 已存在 `master.key`/`server.yaml`/同名单元，Then 不覆盖，写 `.new` 并停止确认（FR-6）。
 4. Given 非 root → 退出码 3；8080/9180（metrics，127.0.0.1）/9443/9444 被占用 → 退出码 4；`LoadCredential` 不受支持 → 按降级方案并告警。
 5. Given 激活后健康检查失败，Then 自动回滚（退出码 10）且不残留用户/单元/目录。
-6. Given 与 1.24 的向导联调（含 AA-7 定稿后的数据库凭据落点），Then 向导完成后写入 `install.lock`，`lingedge list` 显示 server 状态（AC-A-2/A-3 的主体）。
+6. Given 与 1.24 的向导联调（数据库凭据按 ADR-026/tools-design §13.1：向导内存持有 migrate 口令、`runtime-credentials.json` 存 app/maint/Redis 口令），Then 向导完成后写入 `install.lock`，`lingedge list` 显示 server 状态（AC-A-2/A-3 的主体）；并验证：① 安装步骤本身**不**写入 `migrate.yaml`、不要求/不接触任何数据库口令（Tools 仍只探测并警告，AC2）；② 真实 systemd 下 `lingedge` 用户可写 `/var/lib/lingedge/server/secrets/`、`master.key` 经 `LoadCredential` 解得密文；③ `sudo lingedge-server migrate credential init` 写出 root:root 0400 的 `migrate.yaml` 后 `lingedge-server migrate status` 可连通（①–③ 真实验证属 ENV-LNX，等待环境验证）。
 
 **测试要求**：渲染 golden、dry-run、冲突不覆盖、回滚；真实安装 → 1.45。
 
@@ -1861,7 +1867,7 @@ created: 2026-11-16
 - **依赖**：1.28、1.35、1.41
 - **需求**：实现 FR-8、NFR-23；验证/支撑 FR-9
 - **关联**：闭环 AC：AC-J-1、AC-J-2、AC-J-3、AC-J-4、AC-J-5、AC-J-7；门禁/冻结点：G-8；架构评审项：IMP-07、MIN-05、MIN-04（见 `docs/bmad/review-architecture*.md`）
-- **修订（2026-11-16）**：AC8 明确回滚路径中的 `lineage bump` 前置步骤。
+- **修订（2026-11-16）**：AC8 明确回滚路径中的 `lineage bump` 前置步骤。**2026-11-21（AA-7 已解决）**：新增 AC9（迁移凭据来源）。
 - **参考**：tools-design §17.2-17.4；ADR-013；ADR-016
 - **环境依赖**：ENV-LNX + 本机 MySQL
 - **等待环境验证条件**：编排、决策表、回滚逻辑本机以测试清单服务器 + 真实 SQL 迁移验证；真实 server 二进制升级/回滚/健康检查在 ENV-LNX 验证前标「等待环境验证」；闭环 J 不得整体标通过。
@@ -1879,7 +1885,9 @@ created: 2026-11-16
 7. Given `--offline <bundle>`，Then 与在线同一验证链（AC-J-7）；成功确认后才清理超出保留数（默认 2，不少于 2）的旧 release。
 8. Given 含 `expand` 迁移的回滚（MIN-05），Then 承诺限定为「升级失败的即时回滚」并要求 N-1 兼容性测试；含不可逆迁移的恢复路径验证「恢复后节点仍可接收新修订」（IMP-07）；凡回滚路径含「恢复数据库备份」均须在启动旧版本 Server 前执行 `lingedge-server lineage bump`（tools-design §17.3/§17.5）。
 
-**测试要求**：决策表四类 × 失败/成功；构造的健康检查失败版本；带真实 SQL 迁移的测试发行包；真实 Linux 复验 → 1.45。
+9. Given 升级需要执行迁移（步骤 7 `migrate plan`、步骤 9 `migrate up`，AA-7 已解决，ADR-026 §4/tools-design §13.1），Then 迁移凭据按「环境变量 ＞ 口令文件 ＞ `/etc/lingedge/server/migrate.yaml`（root:root 0400）＞ 交互输入（仅 TTY，无回显）」取得，Tools 只经环境变量传给 `migrate` 直接子进程；口令**不写入** journal/`state.json`/日志/systemd 环境；非交互且无凭据 → 退出码 3，且此时**尚未改动任何东西**；`migrate` 的连接目标只取显式参数、`migrate.yaml`、root 属主 `server.yaml`，不读 `runtime-credentials.json`；备份默认排除 `migrate.yaml`（`--include-migrate-credential` 须 `--encrypt`），恢复后须重新 `credential init`。
+
+**测试要求**：决策表四类 × 失败/成功；构造的健康检查失败版本；带真实 SQL 迁移的测试发行包；凭据来源四级优先级与「不入 journal」断言（含日志注入扫描）、非交互无凭据拒绝；真实 Linux 复验 → 1.45。
 
 **DoD**：基线 §25（DoD-12）；本 Story 不适用项：前端功能可用。环境缺失时按上文「等待环境验证条件」处理。
 

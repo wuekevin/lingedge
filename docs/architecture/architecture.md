@@ -21,7 +21,7 @@ inputs:
 | 产物（基线 §26） | 位置 |
 |---|---|
 | 系统架构（本文） | `docs/architecture/architecture.md` |
-| ADR 集（ADR-001 … ADR-025） | `docs/architecture/adr/README.md`（索引）+ `adr/ADR-0xx-*.md` |
+| ADR 集（ADR-001 … ADR-026） | `docs/architecture/adr/README.md`（索引）+ `adr/ADR-0xx-*.md` |
 | 数据库 ERD 与表设计 | `docs/database/README.md`（总览/ERD/约定）+ `docs/database/*.md`（按模块） |
 | OpenAPI 3.1 草案 | `docs/api/openapi.yaml`（入口 `docs/api/README.md`） |
 | Node gRPC 协议 | `proto/lingedge/node/v1/*.proto` + `docs/api/node-protocol.md` |
@@ -78,6 +78,7 @@ inputs:
 | AD-23 | 测试替身只存在于 `_test.go`/`//go:build lingedge_testdouble`，生产构建 CI 检查不可达 | 023 |
 | AD-24 | Node 全部进程非 root；特权操作仅经 systemd 单元与 Tools 的受限入口 | 024 |
 | AD-25 | Redis 不是唯一真相源；丢失 Redis 只降级不丢数据 | 025 |
+| AD-26 | migrate 口令仅内存（向导期）或 root:root 0400 文件（root 侧）；app/maint/Redis 口令信封加密存 `lingedge` 属主 0600 的 `runtime-credentials.json`；向导绝不持久化 migrate 口令 | 026 |
 
 ## 3. 系统上下文
 

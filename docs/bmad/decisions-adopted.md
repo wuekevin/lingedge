@@ -1,5 +1,5 @@
 ---
-title: LingEdge 已采纳的默认决策汇总（UD-1…UD-30）
+title: LingEdge 已采纳的默认决策汇总（UD-1…UD-31）
 created: 2026-11-16
 status: adopted（完全自主模式下采纳；可被用户推翻）
 source: docs/bmad/epics.md「待用户决策清单（UD）」
@@ -47,6 +47,7 @@ source: docs/bmad/epics.md「待用户决策清单（UD）」
 | UD-28 | 媒体重编码是否接受 cgo | **采纳（修订）**：P2 只做 PNG/JPEG/GIF（Go 标准库），WebP/AVIF 待决策（MIN-09 延后）；Go/Tools 二进制保持静态无 cgo | 与修订后 website-cms-design §12 一致 | 2.11；若接受 cgo，需引入 libwebp 与交叉编译/供应链审计，且影响「静态二进制」承诺 | P2 前 |
 | UD-29 | 再认证窗口与发布编排超时参数（**新增**，源自 Q-9） | `auth.reauth_window_s` = 300 秒；`rollout.target_timeout_s`、`rollout.catch_up_ttl_s`、灰度失败比例阈值为可配置项、默认值待基线 | **采纳**。300 秒为 API 文档已写入的假设值，可配置 | 1.17、3.12、3.51：改默认值为配置改动 | 不阻塞 |
 | UD-30 | P5 是否提供「线路/区域套餐」（**新增**，源自 Q-10） | 不提供；集群放置由平台 `placement.default_cluster_uids` 决定，租户不选集群、不可见集群（`available-clusters` 不采纳） | **采纳**。与 NFR-14 与 R-T1 一致 | 3.3、3.9、3.35、6.2：若要提供，需新增不暴露集群身份的 `placement_profile`（ADR-009 §5 可被推翻处）并改租户 API | P5 前 |
+| UD-31 | 数据库凭据交接与生命周期（**新增**，源自 AA-7 定稿，ADR-026） | 向导在 setup mode 内进程内迁移，migrate 口令仅内存、用后清零、绝不持久化；`lingedge_app`/`lingedge_maint`/Redis 口令与 DB 连接目标经 secretbox 信封加密存 `<data_dir>/secrets/runtime-credentials.json`（`lingedge:lingedge` 0600）；`lingedge_migrate` 运行/升级期口令存 `/etc/lingedge/server/migrate.yaml`（root:root 0400，root 侧 `migrate credential init/reset` 写入，升级时无文件则交互输入）；root 侧 migrate 的连接目标不取自 `lingedge` 可写文件 | **采纳（默认采纳、可推翻）**。与 epics 建议默认的**唯一差异**：app/maint 密文文件不是 root:lingedge 0440（向导无权创建 root 属主文件，也无提权通道），改为数据目录内 `lingedge` 属主 0600，机密性由信封加密保证；其余完全采纳。契约加法见 CC-11 | **推翻影响**：①要求 app/maint 口令放 root 属主文件 → 需新增 root 侧交接通道（Tools 命令/systemd `.path`）与两阶段落盘，1.24 AC3/AC7/AC9、1.35 联调增加提权环节，`--from-file` 须由 root 运行；②不允许完成页一次性展示 migrate 口令 → 删 `one_time_secrets` 与自动生成分支（CC-11 缩减，属收紧，须走 ADR-017 §10）；③升级不保存 migrate 口令 → `migrate.yaml` 变可选，1.43 非交互升级需口令文件。不影响 1.1–1.23 与迁移 | 1.24 开工前确认（不阻塞 1.1–1.23） |
 
 ## 2. 与架构开放项 Q-1…Q-10 的对应
 
@@ -62,7 +63,7 @@ source: docs/bmad/epics.md「待用户决策清单（UD）」
 
 | 编号 | 内容 | 影响 | 处理方 / 时点 |
 |---|---|---|---|
-| AA-7 | 数据库凭据交接未定义：向导（`lingedge` 用户进程）如何取得并持久化 `lingedge_migrate` 口令，交给 root 运行的 `lingedge-server migrate`；`lingedge_app`/`lingedge_maint` 口令落点 | 阻塞 **1.24** AC3/AC7 凭据部分、1.35 联调、1.43 升级；**不阻塞 1.1–1.23** | 架构代理补充 ADR-016/tools-design §13，须在 1.24 开工前完成。**Story 1.6 的过渡约定**：`lingedge-server migrate` 读环境变量 `LINGEDGE_MIGRATE_DB_USER`（缺省 `lingedge_migrate`）与 `LINGEDGE_MIGRATE_DB_PASSWORD` 或 `LINGEDGE_MIGRATE_DB_PASSWORD_FILE`，口令不经命令行；AA-7 定稿后只改 `internal/platform/migrate/cli.go` 的凭据来源 |
+| AA-7 | ~~数据库凭据交接未定义~~ **已解决（2026-11-21）**：ADR-026 + tools-design §13.1；登记 UD-31（默认采纳、可推翻）；契约加法 CC-11。**不再阻塞** 1.24 AC3/AC7、1.35 联调、1.43 升级（它们已按新结论改写，见 epics.md） | 已解除 | 架构代理（已完成）。**Story 1.6 的过渡约定保留为最高优先级显式来源**：`LINGEDGE_MIGRATE_DB_USER`（缺省 `lingedge_migrate`）、`LINGEDGE_MIGRATE_DB_PASSWORD`/`_PASSWORD_FILE`，口令不经命令行；定稿后只在 `internal/platform/migrate/cli.go` 追加 `migrate.yaml`/交互来源与 `credential` 子命令，`database.maint.*`（1.15）保留为显式覆盖通道，缺省口令来自 `runtime-credentials.json`（1.24 触及文件清单见 ADR-026「实现指引」） |
 | AA-8 | OpenAPI `TaskType`（唯一事实源）未含 `partition.maintain` 与内部周期作业 | 须在 1.3 打 `contract-v1` 前对齐（1.3 AC9）；不阻塞 1.1–1.2 | 1.3 内处理 |
 | AA-1 | 缺少 L4 代理 ADR | 阻塞 5.9 | P4 前（架构代理/用户） |
 | AA-2 | P3 契约缺口（`dns.v1`/`reporter.v1`、P3 OpenAPI/迁移） | 阻塞 4.2/CF-7 | P3 前 |
