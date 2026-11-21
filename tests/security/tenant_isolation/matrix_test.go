@@ -469,6 +469,9 @@ func (m *matrix) driveCancelTask() {
 
 type auditFx struct{ a1, a2, b1, plat string }
 
+// seededDisplayName 是租户 A 用户在审计矩阵里的展示名（租户视角的 actor_label）。
+const seededDisplayName = "租户A-张三"
+
 // seedAudit 经 root 连接写入四条带 resource_type=matrixres 的审计行（便于用过滤器隔离出本驱动的数据）：租户 A 两条（a2 是平台管理员代租户操作，
 // 带管理员邮箱标签与来源 IP/UA）、租户 B 一条、平台级（tenant_id NULL）一条；changes 里种入节点/集群内部标识。
 func (m *matrix) seedAudit() auditFx {
@@ -478,19 +481,22 @@ func (m *matrix) seedAudit() auditFx {
 			"nodes": []string{f.in.NodeHost}, "summary": map[string]any{"healthy": 3, "total": 4, "offline": 1}})
 		return string(b)
 	}
-	ins := func(tenantID *uint64, actorUserID uint64, label string, acting bool, ip any, ua any, note string) string {
+	// actorTenant 与真实写入一致：租户用户的审计行带其租户，平台操作者为 NULL（面向租户的裁剪据此判断操作者是否平台身份，Story 1.22b）。
+	ins := func(tenantID, actorTenant *uint64, actorUserID uint64, label string, acting bool, ip any, ua any, note string) string {
 		u := apistack.IDs.MustNew()
 		f.w.Root("INSERT INTO §.audit_logs (uid, actor_type, actor_user_id, actor_label, actor_tenant_id, tenant_id, acting_as, action, resource_type, resource_uid, result, changes_json, request_id, ip, user_agent) "+
-			"VALUES (?, 'user', ?, ?, NULL, ?, ?, 'matrix.write', 'matrixres', ?, 'success', CAST(? AS JSON), ?, ?, ?)",
-			u, actorUserID, label, tenantID, acting, apistack.IDs.MustNew(), changes(note), apistack.IDs.MustNew(), ip, ua)
+			"VALUES (?, 'user', ?, ?, ?, ?, ?, 'matrix.write', 'matrixres', ?, 'success', CAST(? AS JSON), ?, ?, ?)",
+			u, actorUserID, label, actorTenant, tenantID, acting, apistack.IDs.MustNew(), changes(note), apistack.IDs.MustNew(), ip, ua)
 		return u
 	}
 	a, b := f.A.ID, f.B.ID
+	// 租户用户的展示名（租户视角下 actor_label 显示它而不是邮箱）。
+	f.w.Root("UPDATE §.users SET display_name = ? WHERE id = ?", seededDisplayName, f.sa.U.ID)
 	return auditFx{
-		a1:   ins(&a, f.sa.U.ID, f.sa.U.Email, false, []byte{192, 0, 2, 10}, "tenant-ua", "a1"),
-		a2:   ins(&a, f.sAdmin.U.ID, f.sAdmin.U.Email, true, []byte{198, 18, 0, 9}, "admin-console-ua", "a2"),
-		b1:   ins(&b, f.sb.U.ID, f.sb.U.Email, false, []byte{192, 0, 2, 20}, "tenant-ub", "b1"),
-		plat: ins(nil, f.sAdmin.U.ID, f.sAdmin.U.Email, false, []byte{198, 18, 0, 9}, "admin-console-ua", "platform"),
+		a1:   ins(&a, &a, f.sa.U.ID, f.sa.U.Email, false, []byte{192, 0, 2, 10}, "tenant-ua", "a1"),
+		a2:   ins(&a, nil, f.sAdmin.U.ID, f.sAdmin.U.Email, true, []byte{198, 18, 0, 9}, "admin-console-ua", "a2"),
+		b1:   ins(&b, &b, f.sb.U.ID, f.sb.U.Email, false, []byte{192, 0, 2, 20}, "tenant-ub", "b1"),
+		plat: ins(nil, nil, f.sAdmin.U.ID, f.sAdmin.U.Email, false, []byte{198, 18, 0, 9}, "admin-console-ua", "platform"),
 	}
 }
 
@@ -528,8 +534,15 @@ func (m *matrix) driveAuditLogs() {
 		if strings.Contains(body, adminEmail) || strings.Contains(body, "admin-console-ua") || strings.Contains(body, "198.18.0.9") {
 			m.t.Errorf("%s：租户可见的审计响应泄露了平台管理员的身份/来源: %s", what, body)
 		}
+		// 租户用户操作者：同租户成员读到的是展示名，而不是邮箱（Story 1.22b）。
+		if strings.Contains(body, f.sa.U.Email) || strings.Contains(body, f.sb.U.Email) {
+			m.t.Errorf("%s：租户可见的审计响应含用户邮箱（应为展示名/脱敏）: %s", what, body)
+		}
 		for _, it := range r.JSON(m.t)["items"].([]any) {
 			row := it.(map[string]any)
+			if row["uid"] == ax.a1 && row["actor_label"] != seededDisplayName {
+				m.t.Errorf("%s：租户用户操作者的 actor_label 应为展示名 %q: %v", what, seededDisplayName, row["actor_label"])
+			}
 			if row["uid"] == ax.a2 && (row["actor_label"] != "platform" || row["actor_uid"] != nil || row["ip"] != nil || row["user_agent"] != nil || row["acting_as"] != true) {
 				m.t.Errorf("%s：acting_as 记录应裁剪平台操作者（actor_label=platform，无 actor_uid/ip/user_agent）: %v", what, row)
 			}

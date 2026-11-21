@@ -5,7 +5,8 @@
 //   - 租户主体（含平台主体带 X-Tenant-ID 的 acting-as）：只见 tenant_id = Scope 租户的记录；
 //   - 平台主体不带 X-Tenant-ID：跨租户可读（可再用 tenant_uid 过滤）。
 //
-// 字段裁剪：面向租户的响应（租户范围 Scope）不含平台内部信息——代租户（acting_as）记录里的平台操作者身份（actor_uid/actor_label/ip/user_agent）被抹去，
+// 字段裁剪：面向租户的响应（租户范围 Scope）不含平台内部信息——平台操作者（含 acting_as）的身份（actor_uid/actor_label/ip/user_agent）被抹去、统一显示 platform；
+// 租户内用户操作者的标签由邮箱改为展示名（缺失时脱敏邮箱，Story 1.22b）；节点操作者显示 system；
 // 变更摘要里 node_*/cluster_* 等内部标识键被剔除（R-T1，复用 leakguard.ForbiddenKey）。
 package auditapi
 
@@ -89,11 +90,44 @@ func ToView(r repository.LogRow, tenantFacing bool) View {
 			}
 		}
 	}
-	if tenantFacing && r.ActingAs {
-		// 平台管理员代租户操作：租户可见「平台运营做了什么」，但不得得知平台管理员是谁、从哪里来。
-		v.ActorType, v.ActorLabel, v.ActorUID, v.IP, v.UserAgent = "user", PlatformActorLabel, nil, nil, nil
+	if tenantFacing {
+		platformActor := (r.ActorType == "user" || r.ActorType == "api_token") && (r.ActorTenantID == nil || *r.ActorTenantID == 0)
+		switch {
+		case r.ActingAs || platformActor:
+			// 平台管理员（含其令牌）对该租户的操作——无论是否 acting-as：租户可见「平台运营做了什么」，但不得得知平台管理员是谁、从哪里来。
+			v.ActorType, v.ActorLabel, v.ActorUID, v.IP, v.UserAgent = "user", PlatformActorLabel, nil, nil, nil
+		case r.ActorType == "node":
+			v.ActorType, v.ActorLabel = "system", SystemActorLabel // 节点名属内部标识（R-T1）
+		case r.ActorType == "user":
+			// 租户内同事的操作：快照里是邮箱（个人信息），同租户的其他成员也能读到——对外改为展示名（缺失时退回脱敏邮箱）。
+			v.ActorLabel = TenantActorLabel(r.ActorDisplayName, r.ActorLabel)
+		}
 	}
 	return v
+}
+
+// SystemActorLabel 是面向租户时系统/节点类操作者的统一标签。
+const SystemActorLabel = "system"
+
+// TenantActorLabel 给出面向租户的用户操作者标签（Story 1.22b 设计决定）：优先用户当前的展示名 display_name（NOT NULL，用户自己填写、本就是产品内的公开称呼）；
+// 展示名缺失（用户行已不存在）或为空白时退回脱敏邮箱 `a***@example.com`（只保留首字符与域名）。不展示完整邮箱：同租户成员之间也不应互相读到对方邮箱。
+func TenantActorLabel(displayName *string, emailSnapshot string) string {
+	if displayName != nil {
+		if n := strings.TrimSpace(*displayName); n != "" {
+			return n
+		}
+	}
+	return MaskEmail(emailSnapshot)
+}
+
+// MaskEmail 把邮箱脱敏为 `a***@example.com`；不含 @ 的值整体替换为 `***`。
+func MaskEmail(email string) string {
+	at := strings.LastIndex(email, "@")
+	if at <= 0 {
+		return "***"
+	}
+	local := []rune(email[:at])
+	return string(local[0]) + "***" + email[at:]
 }
 
 // StripInternal 递归剔除 R-T1 禁止的内部标识键（node_*、cluster_*、egress_node*、nodes/clusters…，leakguard.ForbiddenKey）。

@@ -74,22 +74,26 @@ func (r *Repo) Insert(ctx context.Context, sc scope.Scope, row Row) error {
 
 // LogRow 是读取到的审计记录（含联结出的操作者 uid 与租户 uid）。
 type LogRow struct {
-	ID           uint64    `db:"id"`
-	UID          string    `db:"uid"`
-	CreatedAt    time.Time `db:"created_at"`
-	ActorType    string    `db:"actor_type"`
-	ActorUID     *string   `db:"actor_uid"`
-	ActorLabel   string    `db:"actor_label"`
-	TenantUID    *string   `db:"tenant_uid"`
-	ActingAs     bool      `db:"acting_as"`
-	Action       string    `db:"action"`
-	ResourceType string    `db:"resource_type"`
-	ResourceUID  *string   `db:"resource_uid"`
-	Result       string    `db:"result"`
-	ChangesJSON  []byte    `db:"changes_json"`
-	RequestID    string    `db:"request_id"`
-	IP           []byte    `db:"ip"`
-	UserAgent    *string   `db:"user_agent"`
+	ID         uint64    `db:"id"`
+	UID        string    `db:"uid"`
+	CreatedAt  time.Time `db:"created_at"`
+	ActorType  string    `db:"actor_type"`
+	ActorUID   *string   `db:"actor_uid"`
+	ActorLabel string    `db:"actor_label"`
+	// ActorTenantID 是操作者所属租户（NULL/0 = 平台操作者）；ActorDisplayName 是操作者用户当前的展示名（联结 users；非用户或已不存在时为 NULL）。
+	// 二者只供面向租户的响应裁剪使用（邮箱不对外，Story 1.22b）。
+	ActorTenantID    *uint64 `db:"actor_tenant_id"`
+	ActorDisplayName *string `db:"actor_display_name"`
+	TenantUID        *string `db:"tenant_uid"`
+	ActingAs         bool    `db:"acting_as"`
+	Action           string  `db:"action"`
+	ResourceType     string  `db:"resource_type"`
+	ResourceUID      *string `db:"resource_uid"`
+	Result           string  `db:"result"`
+	ChangesJSON      []byte  `db:"changes_json"`
+	RequestID        string  `db:"request_id"`
+	IP               []byte  `db:"ip"`
+	UserAgent        *string `db:"user_agent"`
 }
 
 // Filter 是列表过滤条件（空串/nil = 不过滤）。
@@ -106,7 +110,7 @@ type Filter struct {
 	Limit        int
 }
 
-const selectCols = `a.id, a.uid, a.created_at, a.actor_type, u.uid AS actor_uid, a.actor_label, t.uid AS tenant_uid, a.acting_as, a.action, a.resource_type,
+const selectCols = `a.id, a.uid, a.created_at, a.actor_type, u.uid AS actor_uid, a.actor_label, a.actor_tenant_id, u.display_name AS actor_display_name, t.uid AS tenant_uid, a.acting_as, a.action, a.resource_type,
 	a.resource_uid, a.result, a.changes_json, a.request_id, a.ip, a.user_agent`
 const fromJoin = ` FROM audit_logs a LEFT JOIN users u ON u.id = a.actor_user_id LEFT JOIN tenants t ON t.id = a.tenant_id`
 

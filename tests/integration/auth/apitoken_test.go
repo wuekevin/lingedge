@@ -2,6 +2,7 @@ package authit
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -689,6 +690,51 @@ func TestAPITokenFollowsCreatorLoginPolicy(t *testing.T) {
 	// 须先改密：must_change_password 的创建者令牌 401。
 	s.e.root(t, "UPDATE §.users SET must_change_password = 1 WHERE id = ?", a.u.ID)
 	s.requireBearer(tk.Token, "GET", "/admin/users", 401, "创建者须先改密")
+}
+
+// Story 1.22b（设计决定，ADR-018 §7④ 的落地语义）：创建者处于「须先改密」或「强制 TOTP 但未启用」时，其令牌一律 401，
+// **没有**像会话那样的「只能走启用流程」的受限放行——令牌本来就不能调用任何自助 operation（含改密、TOTP 启用，只能 Cookie 会话），
+// 受限放行对令牌没有可放行的内容；且 401 的响应体与「令牌不存在」逐字节一致（去掉 request_id），调用方无法借此枚举账号状态；原因只写服务端日志。
+func TestAPITokenRestrictedCreatorIsIndistinguishable401(t *testing.T) {
+	s := newTokStack(t, stackOpts{settings: map[string]string{"login.totp_required_for_admin": "false"}})
+	a := s.adminSession("platform_admin")
+	tk := s.issue(a, tokBody("t", "user:read"))
+	ghost := "le_" + strings.Repeat("a", 8) + "_" + strings.Repeat("A", 43) // 形态合法但不存在
+	key := func(r resp) string {
+		j := r.JSON(t)
+		e, _ := j["error"].(map[string]any)
+		delete(e, "request_id")
+		b, _ := json.Marshal(j)
+		return r.Header.Get("Content-Type") + string(b)
+	}
+	want := s.bearer(ghost, "GET", "/admin/users", nil)
+	if want.Status != 401 {
+		t.Fatalf("不存在的令牌应 401: %d", want.Status)
+	}
+	check := func(state string) {
+		t.Helper()
+		for _, path := range []string{"/admin/users", "/auth/totp/setup", "/auth/password/change"} {
+			m := "GET"
+			if path != "/admin/users" {
+				m = "POST"
+			}
+			r := s.bearer(tk.Token, m, path, nil)
+			if r.Status != 401 || key(r) != key(want) {
+				t.Errorf("%s %s %s：应与「令牌不存在」逐字节一致的 401，得到 %d %s", state, m, path, r.Status, r.Body)
+			}
+		}
+	}
+	s.e.root(t, "UPDATE §.users SET must_change_password = 1 WHERE id = ?", a.u.ID)
+	check("须先改密")
+	s.e.root(t, "UPDATE §.users SET must_change_password = 0 WHERE id = ?", a.u.ID)
+	s.requireBearer(tk.Token, "GET", "/admin/users", 200, "恢复后可用")
+	s.e.root(t, "UPDATE §.system_settings SET value_json = CAST('true' AS JSON) WHERE setting_key = 'login.totp_required_for_admin'")
+	s.clk.Advance(time.Minute)
+	check("强制 TOTP 未启用")
+	// 同一账号的 Cookie 会话在该状态下仍可走启用流程（受限放行只属于会话）。
+	if r := s.as(a, "POST", "/auth/totp/setup", nil); r.Status == 401 {
+		t.Errorf("会话在强制 TOTP 期间应仍可调用 totp/setup: %d %s", r.Status, r.Body)
+	}
 }
 
 // ---- AC2/AC4：来源 IP 白名单（IPv4/IPv6/IPv4 映射；伪造 X-Forwarded-For 不能绕过） ----

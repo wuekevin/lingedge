@@ -373,3 +373,40 @@ func TestAdminLoginLogsPlatformWide(t *testing.T) {
 	}
 	w.Contract("listMyLoginLogs", "GET", "/auth/login-logs?limit=100", mine)
 }
+
+// Story 1.22b：租户用户的审计 actor_label 对外是展示名（不是邮箱）——真实 API 写入、同租户另一位成员读取；平台视角保留邮箱快照。
+func TestTenantSeesUserActorByDisplayNameNotEmail(t *testing.T) {
+	f := newQ(t)
+	w := f.w
+	const display = "审计展示名-甲"
+	w.Root("UPDATE §.users SET display_name = ? WHERE id = ?", display, f.sa.U.ID)
+	pending := w.SeedTaskStatus(&f.A.ID, "pending", map[string]any{"note": "display-name"})
+	r := f.sa.Do("POST", "/tasks/"+pending+"/cancel", nil)
+	if r.Status != 200 {
+		t.Fatalf("租户用户取消任务: %d %s", r.Status, r.Body)
+	}
+	path := "/audit-logs?request_id=" + r.Header.Get("X-Request-ID")
+	// 库里的快照仍是邮箱（取证用）。
+	if n := w.RootInt("SELECT COUNT(*) FROM §.audit_logs WHERE request_id = ? AND actor_label = ? AND actor_tenant_id = ?", r.Header.Get("X-Request-ID"), f.sa.U.Email, f.A.ID); n != 1 {
+		t.Fatalf("审计快照应保存邮箱与操作者租户: %d", n)
+	}
+	// 同租户的另一位成员读取。
+	peerUser := w.SeedUser("tenant", &f.A)
+	w.GrantTenantRole(peerUser, "tenant_owner")
+	peer := w.Login(peerUser)
+	for name, sess := range map[string]apistack.Session{"操作者本人": f.sa, "同租户成员": peer} {
+		v := sess.Do("GET", path, nil)
+		w.Contract("listAuditLogs", "GET", path, v)
+		items := itemsOf(t, v)
+		if len(items) != 1 || items[0]["actor_label"] != display || items[0]["actor_type"] != "user" {
+			t.Fatalf("%s：actor_label 应为展示名 %q: %s", name, display, v.Body)
+		}
+		if strings.Contains(string(v.Body), f.sa.U.Email) {
+			t.Fatalf("%s：响应泄露了操作者邮箱: %s", name, v.Body)
+		}
+	}
+	// 平台视角：保留邮箱快照。
+	if pv := f.adm.Do("GET", path, nil); len(ids(pv, t)) != 1 || itemsOf(t, pv)[0]["actor_label"] != f.sa.U.Email {
+		t.Fatalf("平台视角应保留邮箱快照: %s", pv.Body)
+	}
+}
