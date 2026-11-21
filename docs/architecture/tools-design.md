@@ -518,6 +518,35 @@ semver 范围语法子集：`>=a.b.c <x.y.z`、`^`、`~`、`=`、空格即 AND�
 
 检测方法：优先 `ss -H -lntup` 解析（参数数组调用）；回退 `/proc/net/{tcp,tcp6,udp,udp6}` + `/proc/<pid>/fd` 映射。对每个端口区分「同地址冲突」与「通配冲突」（占用者绑定 0.0.0.0 vs 我方 127.0.0.1 也冲突）。冲突时退出码 4，输出占用进程名/pid/属主与选项（换端口 `--set`、释放、取消），**不自动停用**。
 
+### 10.5 实现（Story 1.30，`internal/tools/resolver`）
+
+`resolver.Resolve(Input) *Plan` 是纯函数（无 IO/时钟/随机，`TestPackageIsPure` 扫描源码 import 守住），失败不返回 error 而写入 `Plan.Blockers`（`--dry-run` 同样展示），`Plan.Err()` 得到 `*resolver.Error`，`cli.ResolveError` 映射退出码：用法 2、NOT_RELEASED 7、BUILTIN 8（`scheduler|worker`，即使清单里没有这个名字也是 BUILTIN）、固定版本命中 `revoked_versions` 5（与 `manifest.CheckTarget`/`VerifyError` 一致）、无解/成环/违反 `min_upgrade_from`/系统/资源 3、端口冲突 4、被动升级未确认 9；多个阻断并存时取优先级最高者的退出码，全部阻断与完整 Plan 放进 `errors[].details`。
+
+**求解细则（相对 §10.3 的落地决定）**
+
+- 在场集合 = 用户选择 ∪ 已装组件 ∪ 内部组件闭包（`requires.components` 指向 `internal: true` 的组件自动加入）。已装组件**始终参与约束**：已装 website 要求 `server <0.2` 时，升级 server 到 0.2 会把 website 标为「被动升级」（需确认）；website 无更新版本时 server 回退保持。
+- `requires.components` 指向**非内部、本机没有也不一并安装**的组件：按远端部署处理，只给警告 `dependency.remote_assumed`（§10.1：前端对 Server 是配置层依赖）。指向清单里根本没有的组件则无解（不会装了 node 却没有 openresty）。
+- `requires.peer`：目标组件在场（本次安装或已装）时**强制**并参与回溯；不在场只警告 `peer.compare_at_enroll`（enroll 时由对端返回版本比对）。
+- 候选顺序：全新/用户选择的组件取通道内最高稳定版（预发布仅在固定版本时可选，吊销版本不可选，已装版本不降级）；已装且非用户选择的组件先试「保持」，不满足才被动升级到满足约束的最高版本。回溯是完备的（`TestPropertyRandomGraphs` 与独立暴力枚举对照 4000 个随机图，另有 fuzz）；规模上限 20 万步，超出报 `resolve.search_limit`。
+- `min_upgrade_from`：不固定版本时选可直达的最高版本并警告 `upgrade.stepwise`（含完整逐级路径）；固定到不可直达的版本 → 退出码 3，`details.upgrade_path` 给出路径。降级 → 退出码 3（请用 `rollback`）。
+- 外部依赖（`requires.external`/`requires.runtime`）作为**候选过滤**：探测到但版本不满足 → 该候选被拒（可回退到更老版本，全部被拒则无解 3）；探测不到：`server` 的 mysql/redis 允许继续（警告 `external.remote_assumed`），其他（含 website ssr 的 `runtime.node`）一律拒绝。探测到的版本串只取数字前缀补全为 x.y.z（`8.0.36-0ubuntu0.22.04.1`→`8.0.36`、`v20.11.0`→`20.11.0`），否则发行版后缀会被 SemVer 当预发布而使 `>=8.0.16` 不通过。`requires.runtime` 的键 `node` 映射到探测键 `nodejs`。
+- 资源：内存 = 本次 install/upgrade 组件的 `min_memory_mb`（variant 与 version 取较大者）之和，对比 `System.MemoryAvailableMB`；未探测到（0）而需要内存 → 阻断。磁盘按**目标路径的最长前缀挂载点**分别累加：组件的 `min_disk_mb` 记在 `<opt>/<组件>` 所在挂载点，包大小（向上取整 MiB）记在 staging 所在挂载点；只读或未覆盖的挂载点阻断。
+- 端口：取清单 `ports`（`bind` 缺省按 `0.0.0.0` 通配，最保守；条件端口 9444 也预留；website 的端口只在 `ssr` 变体生效，见 `profile.go`）。冲突语义：`0.0.0.0` 对任意 IPv4（含 `127.0.0.1`）冲突；`::` 在 Linux 双栈下对任意地址冲突；`0.0.0.0` 对 IPv6 具体地址（`::1`）不冲突；具体地址仅完全相同才冲突；IPv4 映射地址按 IPv4；协议与端口须相同（`tcp6/udp6` 归一）。检测 (a) 组件之间（含已装且不动的组件）、(b) 与本机监听（保持不动的组件不查；已装组件自己的监听——`Unit` 等于其 state 记录的 unit，或进程名为 `lingedge-<组件>`——不算冲突）。`PortOverrides`（`--set` 换端口）在矩阵之前应用。
+- 输出：`Plan.Components` 按 `order` 排列（依赖在前，同层字典序，Kahn；成环给出环路径，退出码 3）。`steps` 是高层步骤（download/extract/prepare/configure/units/activate/start/health/record），与 §12.1 的 22 步映射由 1.33 完成；`units`/`files` 来自 `profile.go` 的部署画像（运行用户、systemd 单元、配置/密钥/Nginx 片段及其权限与策略 `create_if_absent|managed`，release/current/数据目录）。
+
+**`System` 输入契约（Story 1.31 的产出结构，`resolver.System`，JSON 键即下表第一列）**
+
+| 字段 | 含义 | 1.31 的来源 |
+|---|---|---|
+| `os`、`arch` | `linux`；`amd64`/`arm64` | `runtime.GOOS/GOARCH` |
+| `memory_total_mb`、`memory_available_mb` | MiB；资源判定用 available | `/proc/meminfo` 的 `MemTotal`/`MemAvailable` |
+| `disks[]`：`mount`、`fs_type`、`total_mb`、`free_mb`、`read_only` | 各挂载点可用空间（`f_bavail×f_frsize`） | `/proc/self/mountinfo` + `statfs` |
+| `listeners[]`：`proto`(tcp\|udp，tcp6/udp6 也接受)、`addr`（IP 字面量，含通配 `0.0.0.0`/`::`）、`port`、`pid`、`process`、`user`、`unit` | 本机监听及占用者 | `ss -H -lntup`，回退 `/proc/net/*` + `/proc/<pid>/fd`；`unit` 取自 cgroup |
+| `deps{mysql,redis,nodejs}`：`detected`、`version`（原始串）、`source`、`flavor` | 外部依赖/运行时探测 | §11 |
+| `baota`：`detected`、`confidence`、`version`、`panel_port`、`nginx_path` | 宝塔探测（只用于提示与处置建议；存在不阻止安装） | §11 |
+
+`installed` 取 `registry.State`；`InstalledVariants`（可选）由 1.33 在知道已装变体时提供（state.json schema v1 不含变体，缺失时多变体且无 default 的被动升级候选被拒绝并提示显式选择）。
+
 ## 11. 宝塔与已有环境检测（只读，FR-7）
 
 以下路径为宝塔常见默认布局，**实现时在真实宝塔机器上核对并以探测结果为准**（标志不唯一时综合判定，输出置信度与证据）：
@@ -1091,3 +1120,8 @@ LockPersonality=yes
 - **§16 任务锁**：补充先锁后扫的次序、全局锁的有界等待、锁文件的安全检查，以及与 `FileSequenceStore`/`Acquire` 的关系（`LockedSequence`）。
 - **`state.json`**：`schema_version=1`；同版本内严格解析（未知字段 = 损坏）、更高版本失败关闭且绝不改写、写入前校验并做泄漏检查（疑似密钥即拒绝）；`list/status/version` 经 `cli.FileState` 读取，取代 1.25 的 `state.reader_unavailable` 占位。
 - **CLI**：写命令（install/update/rollback/uninstall/backup create|restore/service start|stop|restart）在 root 检查之后取组件锁并扫描 journal（6/13）；`--dry-run` 与读命令不取锁；`recover` 不受 13 拦截。`cli.RegistryError` 映射见 `internal/tools/cli/registryerr.go`。
+
+## 修订记录 2026-11-21（Story 1.30：resolver）
+
+- 新增 §10.5：求解细则落地决定与 `System` 输入契约（1.31 直接对接）。§10.3 的算法不变；澄清了 `requires.components` 对非内部组件的「远端假定」、`requires.peer` 本机在场即强制、外部依赖作为候选过滤（可回退旧版本）、磁盘记账规则（release 目录与 staging 各自挂载点）、端口通配语义。
+- 退出码映射（`cli.ResolveError`）：用法 2、未发布 7、内置 8、吊销 5、无解/成环/升级路径/系统/资源 3、端口 4、被动升级未确认 9；退出码表与 §4 不变。

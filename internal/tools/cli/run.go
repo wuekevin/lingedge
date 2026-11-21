@@ -14,6 +14,7 @@ import (
 
 	"github.com/wuekevin/lingedge/internal/tools/downloader"
 	"github.com/wuekevin/lingedge/internal/tools/manifest"
+	"github.com/wuekevin/lingedge/internal/tools/resolver"
 )
 
 // globalOpts 是全局标志（tools-design §3）。
@@ -96,10 +97,11 @@ func isParseStageError(err error) bool {
 	var ce *Error
 	var me *manifest.Error
 	var de *downloader.Error
+	var rse *resolver.Error
 	switch {
 	case errors.As(err, &ce):
 		return ce.Code == "usage.invalid_flag"
-	case errors.As(err, &me), errors.As(err, &de), errors.Is(err, context.Canceled), RegistryError(err) != nil:
+	case errors.As(err, &me), errors.As(err, &de), errors.As(err, &rse), errors.Is(err, context.Canceled), RegistryError(err) != nil:
 		return false
 	}
 	return true
@@ -131,6 +133,7 @@ func (r *Run) finish(cmd *cobra.Command, err error) int {
 	var ce *Error
 	var me *manifest.Error
 	var de *downloader.Error
+	var rse *resolver.Error
 	if err == nil && r.ctx.Err() != nil && r.result == nil && !r.helpDone {
 		err = context.Canceled
 	}
@@ -149,6 +152,10 @@ func (r *Run) finish(cmd *cobra.Command, err error) int {
 		case errors.As(err, &de):
 			// 下载器（Story 1.28）：传输策略/大小/外层 SHA256/解压校验/离线 bundle 失败，映射见 DownloadError。
 			ce = DownloadError(de)
+			exit = ce.Exit
+		case errors.As(err, &rse):
+			// 依赖/版本/资源/端口求解（Story 1.30）：无解/资源/系统 → 3，端口 → 4，未发布 7，内置 8，吊销 5，需确认 9，映射见 ResolveError。
+			ce = ResolveError(rse)
 			exit = ce.Exit
 		case RegistryError(err) != nil:
 			// 任务锁 / journal / state.json（Story 1.29）：被占用 → 6，存在未完成事务 → 13，状态不可读/损坏等，映射见 RegistryError。
