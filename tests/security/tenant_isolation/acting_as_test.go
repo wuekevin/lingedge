@@ -1,25 +1,37 @@
 package tenantisolation
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/wuekevin/lingedge/internal/platform/apierr"
+	"github.com/wuekevin/lingedge/internal/platform/audit"
 	"github.com/wuekevin/lingedge/internal/platform/httpx"
 	"github.com/wuekevin/lingedge/tests/apistack"
 )
 
-// acting-as 审计上下文（Story 1.20 AC1）：Admin 代租户操作时，钩子链上下文携带操作者与目标租户（httpx.ActingAsFrom，供审计模块 Story 1.21 直接消费），
-// 并有结构化日志；audit_logs 属 Story 1.21，这里不写也不假装已写。
+// acting-as 审计（Story 1.20 AC1 → Story 1.21 AC1）：Admin 代租户操作时，钩子链上下文携带操作者与目标租户（httpx.ActingAsFrom），
+// 真实审计记录器据此在业务事务内写 audit_logs：操作者（actor_user_id）与目标租户（tenant_id）同时记录，acting_as=1（Admin 代租户「双记」）。
 //
 // 用测试专用的探针路由（经真实 Router.Register，走真实钩子链）观察上下文：它们只在本测试的装配里存在。
 func TestActingAsCarriesAuditContext(t *testing.T) {
-	probe := func(r *httpx.Router) {
-		reg := func(id, method string, audit bool) {
-			m := httpx.RouteMeta{OperationID: id, Method: method, Path: "/probe/acting", Auth: httpx.AuthRequired, Permissions: []string{"task:read"}, TenantScope: httpx.ScopeEither, Audit: audit, Phase: "M1"}
+	probe := func(w *apistack.World, r *httpx.Router) {
+		reg := func(id, method string, audited bool) {
+			m := httpx.RouteMeta{OperationID: id, Method: method, Path: "/probe/acting", Auth: httpx.AuthRequired, Permissions: []string{"task:read"}, TenantScope: httpx.ScopeEither, Audit: audited, Phase: "M1"}
 			if err := r.Register(m, func(c *gin.Context) {
+				if audited {
+					// 与生产 Service 同一写法：在业务事务内写审计（探针没有业务写入，事务里只有审计行）。
+					if err := w.App.WithTx(c.Request.Context(), func(ctx context.Context) error {
+						return w.Audit.Record(ctx, audit.ActionTaskCancel, audit.Event{ResourceType: audit.ResourceTask, ResourceUID: "probe-resource", Changes: map[string]any{"note": "探针"}})
+					}); err != nil {
+						httpx.Fail(c, apierr.Internal(err))
+						return
+					}
+				}
 				sc, _ := tenantScopeFrom(c)
 				a, acting := httpx.ActingAsFrom(c.Request.Context())
 				httpx.OK(c, map[string]any{"platform": sc.IsPlatform(), "tenant_id": sc.TenantID(), "scope_acting": sc.ActingAs(), "actor": sc.ActorID(),
@@ -31,7 +43,7 @@ func TestActingAsCarriesAuditContext(t *testing.T) {
 		reg("probeActingRead", "GET", false)
 		reg("probeActingWrite", "POST", true)
 	}
-	f := newFixture(t, apistack.Options{Routes: probe, ExtraAudited: []string{"probeActingWrite"}})
+	f := newFixture(t, apistack.Options{Routes: probe, ExtraAuditOps: []audit.Op{{OperationID: "probeActingWrite", Actions: []audit.Action{audit.ActionTaskCancel}}}})
 	w := f.w
 
 	// 平台管理员 acting-as 租户 A：上下文同时有操作者与目标租户。
@@ -73,39 +85,34 @@ func TestActingAsCarriesAuditContext(t *testing.T) {
 		t.Error("被拒绝的 acting-as 不应产生「代租户操作」日志")
 	}
 
-	// 写操作（x-audit: true）经过渡审计钩子：结构化日志同时记录操作者与目标租户；audit_logs 不写。
+	// 写操作（x-audit: true）：真实审计记录器在事务内写 audit_logs，同时记录操作者与目标租户（acting_as=1）。
 	wr := f.sAdmin.Do("POST", "/probe/acting", nil, apistack.ActingAs(f.A.UID))
 	if wr.Status != 200 {
 		t.Fatalf("acting-as 写探针: %d %s", wr.Status, wr.Body)
 	}
-	logs := w.Logs.String()
-	var auditLine string
-	for _, l := range strings.Split(logs, "\n") {
-		if strings.Contains(l, "管理写操作") && strings.Contains(l, "probeActingWrite") {
-			auditLine = l
-		}
+	reqID := wr.Header.Get("X-Request-ID")
+	q := "SELECT COUNT(*) FROM §.audit_logs WHERE request_id = ? AND action = 'task.cancel' AND actor_type = 'user' AND actor_user_id = ? AND tenant_id = ? AND acting_as = 1 AND actor_tenant_id IS NULL AND result = 'success'"
+	if n := w.RootInt(q, reqID, f.sAdmin.U.ID, f.A.ID); n != 1 {
+		t.Fatalf("acting-as 写操作应恰好写一条审计（操作者 + 目标租户 + acting_as=1）: %d", n)
 	}
-	if auditLine == "" {
-		t.Fatal("应有 probeActingWrite 的过渡审计结构化日志")
+	// 同一写操作由租户主体自己发起：actor 是租户用户，tenant 是其租户，acting_as=0。
+	sw := f.sa.Do("POST", "/probe/acting", nil)
+	if sw.Status != 200 {
+		t.Fatalf("租户写探针: %d %s", sw.Status, sw.Body)
 	}
-	for _, want := range []string{`"acting_as":true`, `"acting_as_tenant_uid":"` + f.A.UID + `"`, fmt.Sprintf(`"actor_id":%d`, f.sAdmin.U.ID), `"audit_logs_written":false`} {
-		if !strings.Contains(auditLine, want) {
-			t.Errorf("审计日志应含 %s:\n%s", want, auditLine)
-		}
+	if n := w.RootInt("SELECT COUNT(*) FROM §.audit_logs WHERE request_id = ? AND actor_user_id = ? AND tenant_id = ? AND actor_tenant_id = ? AND acting_as = 0", sw.Header.Get("X-Request-ID"), f.sa.U.ID, f.A.ID, f.A.ID); n != 1 {
+		t.Fatalf("租户自己的写操作应写一条 acting_as=0 的审计: %d", n)
 	}
-	if strings.Count(logs, `"acting_as_tenant_uid":"`+f.A.UID+`"`) < 2 {
-		t.Error("Scope 钩子与审计钩子都应记录目标租户")
+	// 被拒绝（无 impersonate 权限 / 目标租户不可用）的 acting-as 写请求：业务与审计都不执行，不写任何审计行。
+	total := w.RootInt("SELECT COUNT(*) FROM §.audit_logs WHERE action = 'task.cancel'")
+	_ = f.sAud.Do("POST", "/probe/acting", nil, apistack.ActingAs(f.A.UID))
+	_ = f.sAdmin.Do("POST", "/probe/acting", nil, apistack.ActingAs(f.Closed.UID))
+	if after := w.RootInt("SELECT COUNT(*) FROM §.audit_logs WHERE action = 'task.cancel'"); after != total {
+		t.Fatalf("被拒绝的写请求不得产生审计行: %d → %d", total, after)
 	}
-	// 同一写操作由租户主体自己发起：日志里 acting_as=false。
-	if rr := f.sa.Do("POST", "/probe/acting", nil); rr.Status != 200 {
-		t.Fatalf("租户写探针: %d %s", rr.Status, rr.Body)
-	}
-	if !strings.Contains(logs+w.Logs.String(), `"acting_as":false`) {
-		t.Error("非代租户的写操作日志应带 acting_as=false")
-	}
-	// 审计模块（Story 1.21）未实现：audit_logs 为空——不假装已写。
-	if n := w.RootInt("SELECT COUNT(*) FROM §.audit_logs"); n != 0 {
-		t.Fatalf("audit_logs 属 Story 1.21，不得假装已写: %d 行", n)
+	// Scope 钩子仍有「代租户操作」结构化日志（目标租户 + 操作者）。
+	if !strings.Contains(w.Logs.String(), fmt.Sprintf(`"actor_id":%d`, f.sAdmin.U.ID)) || strings.Count(w.Logs.String(), `"acting_as_tenant_uid":"`+f.A.UID+`"`) < 2 {
+		t.Error("Scope 钩子应记录操作者与目标租户")
 	}
 	if hits := findSecrets(w.Logs.String(), w.Secrets()); len(hits) > 0 {
 		t.Fatalf("日志含明文敏感值: %v", hits)

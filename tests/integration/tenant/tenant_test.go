@@ -367,28 +367,42 @@ func TestTenantQuotasStoredNotEnforced(t *testing.T) {
 	}
 }
 
-// 写操作审计：audit 模块（Story 1.21）未实现，不写 audit_logs、也不假装已写；过渡的结构化日志同时记录操作者，audit_logs_written=false。
-func TestTenantWritesAuditIsPendingStory121(t *testing.T) {
+// 写操作审计（Story 1.21 AC1）：updateTenant / putTenantQuotas / addTenantMember 在同一业务事务内写 audit_logs——操作者（平台管理员）、
+// 目标租户（tenant_id = 被操作租户）、对象类型/uid、动作、结果、脱敏变更摘要、request_id；平台路由不是 acting-as（acting_as=0）。
+// 全部 27 个审计 operation 的逐个驱动见 tests/integration/audit。
+func TestTenantWritesAreAudited(t *testing.T) {
 	w := apistack.New(t)
 	a := admin(w)
 	tn := w.SeedTenant("aud")
-	if r := a.Do("PATCH", "/tenants/"+tn.UID, map[string]any{"name": "审计观察"}); r.Status != 200 {
+	rid := apistack.IDs.MustNew()
+	r := a.Do("PATCH", "/tenants/"+tn.UID, map[string]any{"name": "审计观察", "settings": map[string]any{"theme": "dark"}}, apistack.WithHeader("X-Request-ID", rid))
+	if r.Status != 200 {
 		t.Fatalf("%d %s", r.Status, r.Body)
 	}
-	if r := a.Do("PUT", "/tenants/"+tn.UID+"/quotas", map[string]any{"limits": map[string]any{"sites": 1}}); r.Status != 200 {
+	q := "SELECT COUNT(*) FROM §.audit_logs WHERE request_id = ? AND action = ? AND actor_type = 'user' AND actor_user_id = ? AND tenant_id = ? AND acting_as = 0 AND resource_type = 'tenant' AND resource_uid = ? AND result = 'success'"
+	if n := w.RootInt(q, rid, "tenant.update", a.U.ID, tn.ID, tn.UID); n != 1 {
+		t.Fatalf("updateTenant 应恰好写一条审计（操作者 + 目标租户 + 对象）: %d", n)
+	}
+	if got := w.RootStr("SELECT CAST(changes_json AS CHAR) FROM §.audit_logs WHERE request_id = ?", rid); !strings.Contains(got, `"name": "审计观察"`) || !strings.Contains(got, `"settings_keys": ["theme"]`) || strings.Contains(got, "dark") {
+		t.Errorf("变更摘要应含改动字段，settings 只记键名不记取值: %s", got)
+	}
+	rid2 := apistack.IDs.MustNew()
+	if r := a.Do("PUT", "/tenants/"+tn.UID+"/quotas", map[string]any{"limits": map[string]any{"sites": 1}}, apistack.WithHeader("X-Request-ID", rid2)); r.Status != 200 {
 		t.Fatalf("%d %s", r.Status, r.Body)
 	}
-	if n := w.RootInt("SELECT COUNT(*) FROM §.audit_logs"); n != 0 {
-		t.Fatalf("audit_logs 属 Story 1.21，本 Story 不得假装已写: %d 行", n)
+	if n := w.RootInt(q, rid2, "tenant.quotas.put", a.U.ID, tn.ID, tn.UID); n != 1 {
+		t.Fatalf("putTenantQuotas 应恰好写一条审计: %d", n)
 	}
-	logs := w.Logs.String()
-	for _, op := range []string{"updateTenant", "putTenantQuotas"} {
-		if !strings.Contains(logs, `"operation_id":"`+op+`"`) {
-			t.Errorf("应有 %s 的结构化日志留痕", op)
-		}
+	// 校验失败（400）的写请求没有发生变更，不写审计。
+	before := w.RootInt("SELECT COUNT(*) FROM §.audit_logs WHERE action LIKE 'tenant.%'")
+	if r := a.Do("PATCH", "/tenants/"+tn.UID, map[string]any{"name": ""}); r.Status != 400 {
+		t.Fatalf("%d", r.Status)
 	}
-	if !strings.Contains(logs, `"audit_logs_written":false`) || !strings.Contains(logs, fmt.Sprintf(`"actor_id":%d`, a.U.ID)) {
-		t.Error("结构化日志应带操作者与 audit_logs_written=false")
+	if after := w.RootInt("SELECT COUNT(*) FROM §.audit_logs WHERE action LIKE 'tenant.%'"); after != before {
+		t.Errorf("400 不得写审计: %d → %d", before, after)
+	}
+	if strings.Contains(w.Logs.String(), `"audit_logs_written"`) {
+		t.Error("过渡的 audit_logs_written 日志标注应已移除")
 	}
 }
 

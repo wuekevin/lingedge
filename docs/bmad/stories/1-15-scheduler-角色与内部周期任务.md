@@ -102,6 +102,6 @@ DoD（基线 §25，DoD-12）：除下述「等待环境验证」外满足；前
 
 **遗留/后续**：
 - **各业务 Story**：在 `cmd/lingedge-server/cron.go` 的 `registerCron` 用 `reg.Task(...)` 登记自己的周期任务（同时在 `tasks.go` 登记处理函数）。
-- **1.21（审计）**：分区维护骨架接线（审计写入与 `audit_logs` 分区滚动的联调）；`pmax` 非空告警/`doctor` 检查随 1.42。
+- **1.21（审计）**：分区维护骨架接线（审计写入与 `audit_logs` 分区滚动的联调）；`pmax` 非空告警/`doctor` 检查随 1.42。 【Story 1.21 已完成联调：tests/integration/audit 的 TestPartitionMaintainRealAuditTable（真实 lingedge_maint 对真实审计写入的 audit_logs 预建分区并保留 pmax、行搬迁不丢不重、维护后新写入落入新分区）；保留期 DROP PARTITION 属 3.48；`pmax` 非空告警/`doctor` 随 1.42 仍待办】
 - **retention.cleanup（TaskType）**：保留期 `DROP PARTITION` 与批量删除。
 - **1.24**：向导创建 `lingedge_maint` 账号并交付口令（AA-7）。

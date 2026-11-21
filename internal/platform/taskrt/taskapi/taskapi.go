@@ -1,6 +1,7 @@
 package taskapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/wuekevin/lingedge/internal/platform/apierr"
+	"github.com/wuekevin/lingedge/internal/platform/audit"
 	"github.com/wuekevin/lingedge/internal/platform/httpx"
 	"github.com/wuekevin/lingedge/internal/platform/leakguard"
 	"github.com/wuekevin/lingedge/internal/platform/taskrt"
@@ -30,9 +32,13 @@ var (
 		Permissions: []string{"task:cancel"}, TenantScope: httpx.ScopeEither, Audit: true, Phase: "M1"}
 )
 
-// Register 注册四个任务中心路由。store 在 ManifestOnly（路由清单导出）模式下可为 nil（处理函数不会被调用）。
-func Register(r *httpx.Router, store taskrt.Store) error {
-	h := &handlers{store: store}
+// TxFunc 划定事务边界（db.Pool.WithTx）：取消任务与其审计记录同一事务（Story 1.21）。
+type TxFunc func(ctx context.Context, fn func(ctx context.Context) error) error
+
+// Register 注册四个任务中心路由。store、rec、withTx 在 ManifestOnly（路由清单导出）模式下可为 nil（处理函数不会被调用）；
+// 实际服务时 rec 与 withTx 必填，否则取消任务（x-audit: true）一律 500（fail-closed：没有审计就不执行）。
+func Register(r *httpx.Router, store taskrt.Store, rec audit.Recorder, withTx TxFunc) error {
+	h := &handlers{store: store, audit: rec, withTx: withTx}
 	return errors.Join(
 		r.Register(metaList, h.list),
 		r.Register(metaGet, h.get),
@@ -41,7 +47,11 @@ func Register(r *httpx.Router, store taskrt.Store) error {
 	)
 }
 
-type handlers struct{ store taskrt.Store }
+type handlers struct {
+	store  taskrt.Store
+	audit  audit.Recorder
+	withTx TxFunc
+}
 
 // TaskView 是 OpenAPI Task schema 的 JSON 形态。
 type TaskView struct {
@@ -315,7 +325,24 @@ func (h *handlers) cancel(c *gin.Context) {
 	if !ok {
 		return
 	}
-	t, err := h.store.RequestCancel(c.Request.Context(), sc, id)
+	if h.audit == nil || h.withTx == nil {
+		httpx.Fail(c, apierr.Internal(errNoAudit))
+		return
+	}
+	// 取消与审计同一事务：审计写入失败则取消不生效（fail-closed，500 可重试）。已结束的任务（409）不写审计（没有发生变更）。
+	var t taskrt.Task
+	err := h.withTx(c.Request.Context(), func(ctx context.Context) error {
+		var cerr error
+		if t, cerr = h.store.RequestCancel(ctx, sc, id); cerr != nil {
+			return cerr
+		}
+		var tid uint64 // 被操作对象（任务）所属租户：平台主体跨租户取消时也归到该租户名下，租户自己的审计可见
+		if t.TenantID != nil {
+			tid = *t.TenantID
+		}
+		return h.audit.Record(ctx, audit.ActionTaskCancel, audit.Event{ResourceType: audit.ResourceTask, ResourceUID: t.UID, TenantID: tid,
+			Changes: map[string]any{"type": string(t.Type), "status": string(t.Status)}})
+	})
 	switch {
 	case errors.Is(err, taskrt.ErrNotCancelable):
 		httpx.Fail(c, apierr.Wrap(err, apierr.TaskNotCancelable, "task is already finished and cannot be canceled"))
@@ -326,5 +353,7 @@ func (h *handlers) cancel(c *gin.Context) {
 	}
 	httpx.JSON(c, http.StatusOK, View(t, sc))
 }
+
+var errNoAudit = errors.New("taskapi: 未装配审计记录器或事务边界，拒绝执行需要审计的操作")
 
 func taskrtRedact(s string) string { return redact.String(s) }

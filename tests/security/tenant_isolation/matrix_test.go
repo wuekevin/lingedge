@@ -3,7 +3,6 @@ package tenantisolation
 import (
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"os/exec"
 	"path/filepath"
 	"sort"
@@ -69,7 +68,7 @@ func (m *matrix) req(op, ident, sit, method, path string, body any) apistack.Res
 	}
 	r := m.f.as(ident)(method, path, body, m.f.opts(ident, sit)...)
 	if r.Status/100 == 2 && tenantFacing(ident, sit) { // 租户可见的成功响应一律做 R-T1 断言（驱动无需逐处调用）
-		m.leak(fmt.Sprintf("%s %s × %s", op, ident, sit), r)
+		m.leakOp(op, fmt.Sprintf("%s %s × %s", op, ident, sit), r)
 	}
 	return r
 }
@@ -80,10 +79,15 @@ func tenantFacing(ident, sit string) bool {
 	return isTenantIdent(ident) || ((ident == IdPlatformAdmin || ident == IdPlatformToken) && sit != SitNone)
 }
 
-// leak 对租户可见响应做 R-T1 断言（键名、已知内部取值、IP、内部错误全文）。
-func (m *matrix) leak(what string, r apistack.Resp) {
+// leakOp 对租户可见响应做 R-T1 断言（键名、已知内部取值、IP、内部错误全文）。
+
+// ipAllowedOps 是响应里合法携带 IP 字面量的 operation：审计记录的 ip 是操作者（租户自己的用户）的来源地址，是 AuditLog schema 的字段，
+// 不是节点/集群地址；节点/出口 IP 仍由 Internal 取值表（SeedInternals 的 NodeIPv4/EgressIP）逐一检查。
+var ipAllowedOps = map[string]bool{"listAuditLogs": true, "getAuditLog": true}
+
+func (m *matrix) leakOp(op, what string, r apistack.Resp) {
 	m.t.Helper()
-	if vs := leakguard.Scan(r.Body, leakguard.Options{Internal: m.f.in.Strings(), ForbidIPValues: true}); len(vs) > 0 {
+	if vs := leakguard.Scan(r.Body, leakguard.Options{Internal: m.f.in.Strings(), ForbidIPValues: !ipAllowedOps[op]}); len(vs) > 0 {
 		m.t.Errorf("%s 的响应含节点/集群内部标识（R-T1）: %v\n%s", what, vs, r.Body)
 	}
 }
@@ -118,7 +122,8 @@ func TestTenantIsolationMatrix(t *testing.T) {
 
 	t.Run("driven tenants/current", func(t *testing.T) { m.t = t; m.driveTenantsCurrent() })
 	t.Run("driven tasks", func(t *testing.T) { m.t = t; m.driveTasks() })
-	t.Run("fail-closed cancelTask", func(t *testing.T) { m.t = t; m.driveCancelTask() })
+	t.Run("driven cancelTask", func(t *testing.T) { m.t = t; m.driveCancelTask() })
+	t.Run("driven audit-logs", func(t *testing.T) { m.t = t; m.driveAuditLogs() })
 
 	t.Run("driven coverage is complete", func(t *testing.T) {
 		for _, r := range routes {
@@ -372,22 +377,219 @@ func (m *matrix) driveTasks() {
 	m.tasks = &tx
 }
 
-// ---- FailClosed：cancelTask ----
+// ---- Driven：cancelTask（Story 1.21：取消与审计同一事务；此前是 FailClosed）----
+
+// actorOf 返回矩阵身份对应的操作者用户 id 与是否经令牌。
+func (f *fixture) actorOf(ident string) (userID uint64, viaToken bool) {
+	switch ident {
+	case IdTenantA:
+		return f.sa.U.ID, false
+	case IdTenantB:
+		return f.sb.U.ID, false
+	case IdTokenA:
+		return f.sa.U.ID, true
+	case IdTokenB:
+		return f.sb.U.ID, true
+	case IdPlatformAdmin:
+		return f.sAdmin.U.ID, false
+	case IdPlatformToken:
+		return f.sAdmin.U.ID, true
+	}
+	panic("未知身份 " + ident)
+}
 
 func (m *matrix) driveCancelTask() {
 	f := m.f
 	if m.tasks == nil {
 		m.t.Fatal("driveTasks 应先于 driveCancelTask 执行")
 	}
-	target := "/tasks/" + m.tasks.a1 + "/cancel"
-	for _, c := range []struct{ ident, sit string }{{IdTenantA, SitNone}, {IdTenantB, SitNone}, {IdTokenA, SitNone}, {IdTokenB, SitNone}, {IdPlatformAdmin, SitOwn}, {IdPlatformToken, SitOwn}} {
-		r := m.req("cancelTask", c.ident, c.sit, "POST", target, nil)
-		if r.Status != http.StatusInternalServerError {
-			m.t.Errorf("%s × %s：cancelTask 在 audit 模块（1.21）交付前应被审计钩子 fail-closed（500），得到 %d %s——若 1.21 已交付，请把它转为 Driven", c.ident, c.sit, r.Status, r.Body)
+	a, b := f.A.ID, f.B.ID
+	type view struct {
+		ident, sit string
+		own, other apistack.Tenant
+	}
+	views := []view{
+		{IdTenantA, SitNone, f.A, f.B}, {IdTokenA, SitNone, f.A, f.B}, {IdPlatformAdmin, SitOwn, f.A, f.B}, {IdPlatformToken, SitOwn, f.A, f.B},
+		{IdTenantB, SitNone, f.B, f.A}, {IdTokenB, SitNone, f.B, f.A}, {IdPlatformAdmin, SitOther, f.B, f.A},
+	}
+	pending := func(t apistack.Tenant) string {
+		id := t.ID
+		return f.w.SeedTaskStatus(&id, "pending", map[string]any{"resource_type": "deployment", "resource_uid": apistack.IDs.MustNew(), "cluster_uid": f.in.ClusterUID, "node_name": f.in.NodeName})
+	}
+	_, _ = a, b
+	plat := f.w.SeedTaskStatus(nil, "pending", map[string]any{"note": "platform"})
+	status := func(uid string) string { return f.w.RootStr("SELECT status FROM §.tasks WHERE uid = ?", uid) }
+	for _, v := range views {
+		what := v.ident + " × " + v.sit
+		own, other := pending(v.own), pending(v.other)
+		// 他租户的任务、平台任务、不存在的任务：404 逐字节一致，任务状态与审计均不变。
+		before := f.w.RootInt("SELECT COUNT(*) FROM §.audit_logs WHERE action = 'task.cancel'")
+		for _, tgt := range []string{other, plat, apistack.IDs.MustNew()} {
+			r := m.req("cancelTask", v.ident, v.sit, "POST", "/tasks/"+tgt+"/cancel", nil)
+			m.record404(what+" cancelTask 他租户/平台/不存在", r)
+		}
+		if status(other) != "pending" || status(plat) != "pending" {
+			m.t.Errorf("%s：越权取消不得改变他租户/平台任务", what)
+		}
+		if after := f.w.RootInt("SELECT COUNT(*) FROM §.audit_logs WHERE action = 'task.cancel'"); after != before {
+			m.t.Errorf("%s：被拒绝（404）的取消不得写审计: %d → %d", what, before, after)
+		}
+		// 自己的任务：200 canceled（含 R-T1 与契约），并恰好写一条审计：操作者、所属租户、acting_as、令牌。
+		r := m.req("cancelTask", v.ident, v.sit, "POST", "/tasks/"+own+"/cancel", nil)
+		if r.Status != 200 || r.JSON(m.t)["status"] != "canceled" {
+			m.t.Errorf("%s cancelTask 自己的任务应 200 canceled: %d %s", what, r.Status, r.Body)
+			continue
+		}
+		m.contract("cancelTask", "POST", "/tasks/"+own+"/cancel", r)
+		actor, viaToken := f.actorOf(v.ident)
+		acting := 0
+		if v.ident == IdPlatformAdmin || v.ident == IdPlatformToken {
+			acting = 1
+		}
+		tokenCond := "actor_token_id IS NULL"
+		if viaToken {
+			tokenCond = "actor_token_id IS NOT NULL AND actor_type = 'api_token'"
+		}
+		q := "SELECT COUNT(*) FROM §.audit_logs WHERE action = 'task.cancel' AND resource_type = 'task' AND resource_uid = ? AND request_id = ? AND actor_user_id = ? AND tenant_id = ? AND acting_as = ? AND result = 'success' AND " + tokenCond
+		if n := f.w.RootInt(q, own, r.Header.Get("X-Request-ID"), actor, v.own.ID, acting); n != 1 {
+			m.t.Errorf("%s：取消应恰好写一条审计（操作者=%d 租户=%d acting_as=%d token=%v）: %d", what, actor, v.own.ID, acting, viaToken, n)
+		}
+		// 已结束的任务再取消：409，没有变更就没有审计。
+		before = f.w.RootInt("SELECT COUNT(*) FROM §.audit_logs WHERE action = 'task.cancel'")
+		if r2 := m.req("cancelTask", v.ident, v.sit, "POST", "/tasks/"+own+"/cancel", nil); r2.Status != 409 {
+			m.t.Errorf("%s 终态任务再取消应 409: %d %s", what, r2.Status, r2.Body)
+		}
+		if after := f.w.RootInt("SELECT COUNT(*) FROM §.audit_logs WHERE action = 'task.cancel'"); after != before {
+			m.t.Errorf("%s：409 不得写审计", what)
 		}
 	}
-	if n := f.w.RootInt("SELECT COUNT(*) FROM §.tasks WHERE uid = ? AND cancel_requested = 0 AND status = 'success'", m.tasks.a1); n != 1 {
-		m.t.Error("被拒绝的 cancelTask 不得改变任务状态")
+}
+
+// ---- Driven：审计日志（Story 1.21）----
+
+type auditFx struct{ a1, a2, b1, plat string }
+
+// seedAudit 经 root 连接写入四条带 resource_type=matrixres 的审计行（便于用过滤器隔离出本驱动的数据）：租户 A 两条（a2 是平台管理员代租户操作，
+// 带管理员邮箱标签与来源 IP/UA）、租户 B 一条、平台级（tenant_id NULL）一条；changes 里种入节点/集群内部标识。
+func (m *matrix) seedAudit() auditFx {
+	f := m.f
+	changes := func(note string) string {
+		b, _ := json.Marshal(map[string]any{"note": note, "cluster_uid": f.in.ClusterUID, "node_name": f.in.NodeName, "egress_node_ip": f.in.EgressIP,
+			"nodes": []string{f.in.NodeHost}, "summary": map[string]any{"healthy": 3, "total": 4, "offline": 1}})
+		return string(b)
+	}
+	ins := func(tenantID *uint64, actorUserID uint64, label string, acting bool, ip any, ua any, note string) string {
+		u := apistack.IDs.MustNew()
+		f.w.Root("INSERT INTO §.audit_logs (uid, actor_type, actor_user_id, actor_label, actor_tenant_id, tenant_id, acting_as, action, resource_type, resource_uid, result, changes_json, request_id, ip, user_agent) "+
+			"VALUES (?, 'user', ?, ?, NULL, ?, ?, 'matrix.write', 'matrixres', ?, 'success', CAST(? AS JSON), ?, ?, ?)",
+			u, actorUserID, label, tenantID, acting, apistack.IDs.MustNew(), changes(note), apistack.IDs.MustNew(), ip, ua)
+		return u
+	}
+	a, b := f.A.ID, f.B.ID
+	return auditFx{
+		a1:   ins(&a, f.sa.U.ID, f.sa.U.Email, false, []byte{192, 0, 2, 10}, "tenant-ua", "a1"),
+		a2:   ins(&a, f.sAdmin.U.ID, f.sAdmin.U.Email, true, []byte{198, 18, 0, 9}, "admin-console-ua", "a2"),
+		b1:   ins(&b, f.sb.U.ID, f.sb.U.Email, false, []byte{192, 0, 2, 20}, "tenant-ub", "b1"),
+		plat: ins(nil, f.sAdmin.U.ID, f.sAdmin.U.Email, false, []byte{198, 18, 0, 9}, "admin-console-ua", "platform"),
+	}
+}
+
+func (m *matrix) driveAuditLogs() {
+	f, ax := m.f, m.seedAudit()
+	const list = "/audit-logs?resource_type=matrixres&limit=100"
+	type view struct {
+		ident, sit string
+		want       []string
+		own, other string
+	}
+	views := []view{
+		{IdTenantA, SitNone, sorted(ax.a1, ax.a2), ax.a1, ax.b1},
+		{IdTokenA, SitNone, sorted(ax.a1, ax.a2), ax.a1, ax.b1},
+		{IdPlatformAdmin, SitOwn, sorted(ax.a1, ax.a2), ax.a1, ax.b1},
+		{IdPlatformToken, SitOwn, sorted(ax.a1, ax.a2), ax.a1, ax.b1},
+		{IdTenantB, SitNone, sorted(ax.b1), ax.b1, ax.a1},
+		{IdTokenB, SitNone, sorted(ax.b1), ax.b1, ax.a1},
+		{IdPlatformAdmin, SitOther, sorted(ax.b1), ax.b1, ax.a1},
+	}
+	adminEmail := f.sAdmin.U.Email
+	for _, v := range views {
+		what := v.ident + " × " + v.sit
+		r := m.req("listAuditLogs", v.ident, v.sit, "GET", list, nil)
+		if r.Status != 200 {
+			m.t.Errorf("%s listAuditLogs: %d %s", what, r.Status, r.Body)
+			continue
+		}
+		if got := uids(m.t, r); fmt.Sprint(got) != fmt.Sprint(v.want) {
+			m.t.Errorf("%s listAuditLogs 应只含本租户的审计 %v，得到 %v", what, v.want, got)
+		}
+		m.contract("listAuditLogs", "GET", list, r)
+		// 字段裁剪：租户可见的响应不含平台管理员身份/来源（acting_as 记录里只剩「platform」），也不含平台内部字段。
+		body := string(r.Body)
+		if strings.Contains(body, adminEmail) || strings.Contains(body, "admin-console-ua") || strings.Contains(body, "198.18.0.9") {
+			m.t.Errorf("%s：租户可见的审计响应泄露了平台管理员的身份/来源: %s", what, body)
+		}
+		for _, it := range r.JSON(m.t)["items"].([]any) {
+			row := it.(map[string]any)
+			if row["uid"] == ax.a2 && (row["actor_label"] != "platform" || row["actor_uid"] != nil || row["ip"] != nil || row["user_agent"] != nil || row["acting_as"] != true) {
+				m.t.Errorf("%s：acting_as 记录应裁剪平台操作者（actor_label=platform，无 actor_uid/ip/user_agent）: %v", what, row)
+			}
+			ch, _ := row["changes"].(map[string]any)
+			for k := range ch {
+				if leakguard.ForbiddenKey(k) {
+					m.t.Errorf("%s：changes 含 R-T1 内部键 %s", what, k)
+				}
+			}
+			if sm, _ := ch["summary"].(map[string]any); sm == nil || sm["healthy"] != float64(3) {
+				m.t.Errorf("%s：聚合计数 summary 应保留（允许）: %v", what, ch)
+			}
+		}
+		// getAuditLog：自己的记录 200；他租户的、平台级的、不存在的 → 404 逐字节一致。
+		g := m.req("getAuditLog", v.ident, v.sit, "GET", "/audit-logs/"+v.own, nil)
+		if g.Status != 200 || g.JSON(m.t)["uid"] != v.own {
+			m.t.Errorf("%s getAuditLog 自己的记录: %d %s", what, g.Status, g.Body)
+		} else {
+			m.contract("getAuditLog", "GET", "/audit-logs/"+v.own, g)
+		}
+		for _, other := range []string{v.other, ax.plat, apistack.IDs.MustNew()} {
+			x := m.req("getAuditLog", v.ident, v.sit, "GET", "/audit-logs/"+other, nil)
+			m.record404(what+" getAuditLog 他租户/平台/不存在", x)
+			m.contract("getAuditLog", "GET", "/audit-logs/"+other, x)
+		}
+	}
+	// 租户主体用 tenant_uid 过滤他租户：不会越权（与 Scope 限定取交集 = 空）。
+	for _, ident := range []string{IdTenantA, IdTokenA} {
+		r := m.req("listAuditLogs", ident, SitNone, "GET", list+"&tenant_uid="+f.B.UID, nil)
+		if r.Status != 200 || len(uids(m.t, r)) != 0 {
+			m.t.Errorf("%s 以 tenant_uid 过滤他租户应得到空集（不越权）: %d %s", ident, r.Status, r.Body)
+		}
+	}
+	// 平台跨租户只读（不带 X-Tenant-ID）：平台视角，四条全可见，保留管理员身份与 changes 里的内部标识——它不是租户可见响应；
+	// 同一批数据，租户视角零违规、平台视角有违规，证明断言器对真实数据有区分力。
+	pr := m.req("listAuditLogs", IdPlatformAdmin, SitNone, "GET", list, nil)
+	if pr.Status != 200 || len(uids(m.t, pr)) != 4 {
+		m.t.Fatalf("平台跨租户只读应看到全部 4 条: %d %s", pr.Status, pr.Body)
+	}
+	if !strings.Contains(string(pr.Body), adminEmail) {
+		m.t.Error("平台视角应保留操作者标签")
+	}
+	if vs := leakguard.Scan(pr.Body, leakguard.Options{Internal: f.in.Strings()}); len(vs) == 0 {
+		m.t.Error("平台视角 changes 含内部标识，R-T1 断言器应能发现")
+	}
+	if pg := m.req("getAuditLog", IdPlatformAdmin, SitNone, "GET", "/audit-logs/"+ax.plat, nil); pg.Status != 200 {
+		m.t.Errorf("平台跨租户只读应可读平台级审计: %d", pg.Status)
+	}
+	// 平台带 tenant_uid 过滤：只含该租户（平台视角）。
+	if r := m.req("listAuditLogs", IdPlatformAdmin, SitNone, "GET", list+"&tenant_uid="+f.B.UID, nil); r.Status != 200 || fmt.Sprint(uids(m.t, r)) != fmt.Sprint(sorted(ax.b1)) {
+		m.t.Errorf("平台按 tenant_uid 过滤: %d %s", r.Status, r.Body)
+	}
+	// 租户视角原始响应体里不得出现任何已种入的内部取值（整体子串扫描，独立于键名规则）。
+	for _, ident := range []string{IdTenantA, IdTokenB} {
+		body := strings.ToLower(string(m.req("listAuditLogs", ident, SitNone, "GET", list, nil).Body))
+		for _, s := range f.in.Strings() {
+			if strings.Contains(body, strings.ToLower(s)) {
+				m.t.Errorf("%s 的审计列表含内部取值 %q", ident, s)
+			}
+		}
 	}
 }
 

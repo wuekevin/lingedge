@@ -17,6 +17,7 @@ import (
 
 	"github.com/wuekevin/lingedge/internal/auth/internal/domain"
 	"github.com/wuekevin/lingedge/internal/platform/apierr"
+	"github.com/wuekevin/lingedge/internal/platform/audit"
 	"github.com/wuekevin/lingedge/pkg/secretbox"
 )
 
@@ -334,9 +335,16 @@ func (s *Service) SetupTOTP(ctx context.Context, p *domain.Principal) (*TOTPSetu
 	if err != nil {
 		return nil, apierr.Internal(err)
 	}
-	set, err := s.repo.SetPendingTOTP(ctx, p.User.ID, enc)
-	if err != nil {
-		return nil, apierr.Internal(err)
+	var set bool
+	if err := s.withTx(ctx, func(ctx context.Context) error {
+		var serr error
+		if set, serr = s.repo.SetPendingTOTP(ctx, p.User.ID, enc); serr != nil || !set {
+			return serr
+		}
+		// 审计与密钥落库同一事务；变更摘要不含密钥/otpauth URI。
+		return s.audit.Record(ctx, audit.ActionTOTPSetup, audit.Event{ResourceType: audit.ResourceUser, ResourceUID: p.User.UID, Changes: map[string]any{"pending": true}})
+	}); err != nil {
+		return nil, s.wrapInternal(err)
 	}
 	if !set {
 		return nil, apierr.New(apierr.ResourceConflict, "totp is already enabled", apierr.Detail{Field: "totp", Reason: "disable it first"})
@@ -408,7 +416,11 @@ func (s *Service) EnableTOTP(ctx context.Context, p *domain.Principal, code stri
 		if err := s.repo.ReplaceRecoveryCodes(ctx, p.User.ID, hashes); err != nil {
 			return err
 		}
-		return s.repo.SetSessionMFA(ctx, p.Session.ID, now)
+		if err := s.repo.SetSessionMFA(ctx, p.Session.ID, now); err != nil {
+			return err
+		}
+		// 审计与启用同一事务；只记数量，不含密钥/验证码/恢复码。
+		return s.audit.Record(ctx, audit.ActionTOTPEnable, audit.Event{ResourceType: audit.ResourceUser, ResourceUID: p.User.UID, Changes: map[string]any{"recovery_codes_issued": len(codes)}})
 	})
 	if err != nil {
 		return nil, s.wrapInternal(err)
@@ -416,7 +428,6 @@ func (s *Service) EnableTOTP(ctx context.Context, p *domain.Principal, code stri
 	if failReason != "" {
 		return nil, s.failAttempt(ctx, ts, p.Realm, p.User.Email, &u, tenantIDOf(p), ri, domain.EventTOTPFailed, "enable_"+failReason, errTOTPInvalid())
 	}
-	// 审计：audit_logs 的统一接入属 Story 1.21，此处只留结构化日志（不含密钥/验证码/恢复码）。
 	s.log.Info("TOTP 已启用", zap.String("user_uid", p.User.UID), zap.String("request_id", ri.RequestID), zap.Int("recovery_codes", len(codes)))
 	return codes, nil
 }
@@ -471,7 +482,10 @@ func (s *Service) DisableTOTP(ctx context.Context, p *domain.Principal, password
 		if err := s.repo.DisableTOTP(ctx, u.ID); err != nil {
 			return err
 		}
-		return s.repo.DeleteRecoveryCodes(ctx, u.ID)
+		if err := s.repo.DeleteRecoveryCodes(ctx, u.ID); err != nil {
+			return err
+		}
+		return s.audit.Record(ctx, audit.ActionTOTPDisable, audit.Event{ResourceType: audit.ResourceUser, ResourceUID: p.User.UID})
 	})
 	if err != nil {
 		return s.wrapInternal(err)
@@ -479,7 +493,6 @@ func (s *Service) DisableTOTP(ctx context.Context, p *domain.Principal, password
 	if rerr := s.limiter.Reset(ctx, ts.acct); rerr != nil {
 		s.log.Warn("清零登录失败计数失败", zap.Error(rerr))
 	}
-	// 审计：audit_logs 的统一接入属 Story 1.21（x-audit: true）；此处只留结构化日志，不假装已写审计。
 	s.log.Info("TOTP 已停用", zap.String("user_uid", p.User.UID), zap.String("request_id", ri.RequestID))
 	return nil
 }
@@ -541,8 +554,13 @@ func (s *Service) Reauth(ctx context.Context, p *domain.Principal, password, tot
 		}
 		mfa = &now
 	}
-	if err := s.repo.SetSessionReauth(ctx, p.Session.ID, now, mfa); err != nil {
-		return nil, apierr.Internal(err)
+	if err := s.withTx(ctx, func(ctx context.Context) error {
+		if err := s.repo.SetSessionReauth(ctx, p.Session.ID, now, mfa); err != nil {
+			return err
+		}
+		return s.audit.Record(ctx, audit.ActionAuthReauth, audit.Event{ResourceType: audit.ResourceSession, ResourceUID: p.Session.UID, Changes: map[string]any{"second_factor": mfa != nil}})
+	}); err != nil {
+		return nil, s.wrapInternal(err)
 	}
 	if rerr := s.limiter.Reset(ctx, ts.acct); rerr != nil {
 		s.log.Warn("清零登录失败计数失败", zap.Error(rerr))

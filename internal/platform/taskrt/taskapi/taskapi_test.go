@@ -36,7 +36,7 @@ func newRouter(t *testing.T, o httpx.Options) *httpx.Router {
 func TestRoutesMatchOpenAPI(t *testing.T) {
 	spec := contracttest.LoadRepo(t)
 	r := newRouter(t, httpx.Options{ManifestOnly: true})
-	if err := taskapi.Register(r, nil); err != nil {
+	if err := taskapi.Register(r, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	routes := r.Routes()
@@ -51,7 +51,7 @@ func TestRoutesMatchOpenAPI(t *testing.T) {
 // 生产装配里钩子是安全拒绝默认实现：任务中心路由对任何请求都是 401（认证钩子先拒绝），不会放行。
 func TestDefaultDenyHooks(t *testing.T) {
 	r := newRouter(t, httpx.Options{})
-	if err := taskapi.Register(r, nil); err != nil {
+	if err := taskapi.Register(r, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	h, err := r.Handler()

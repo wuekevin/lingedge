@@ -32,7 +32,7 @@
 | 方式 | 含义 | 要求 |
 |---|---|---|
 | `Driven` | 矩阵里有该资源的驱动（`matrix_test.go` 的 `drive*`） | 驱动必须对 **{租户 A、租户 B、API Token、平台 acting-as}** 四类身份都发过请求（驱动自己登记 (operation, 身份组)，缺任何一类即失败）；断言：列表只含本租户、他租户 id → 404 且与「不存在」逐字节一致、响应字段 R-T1、kin-openapi 响应契约 |
-| `FailClosed` | 依赖能力（如审计模块）交付前，路由被钩子安全拒绝 | 断言任何身份调用都被拒绝且不改数据；依赖能力交付后必须转为 `Driven`（「被拒绝」的断言会失败，迫使转换） |
+| `FailClosed` | 依赖能力交付前，路由被钩子安全拒绝 | 断言任何身份调用都被拒绝且不改数据；依赖能力交付后必须转为 `Driven`（「被拒绝」的断言会失败，迫使转换）。**Story 1.21 已把唯一的 FailClosed 登记 `cancelTask`（依赖审计模块）转为 `Driven`**，该类型保留给之后依赖尚未交付能力的路由 |
 | `Exempt` | 不是按租户列举/寻址的资源（自助 operation、令牌管理） | 写明理由；至少引用一个**已存在**的专项测试函数（`Refs`，门禁核对函数真实存在） |
 
 反向同样检查：登记项必须对应一个已注册的 `tenant | either` 路由（陈旧/误登记失败）；`platform` 路由不需要登记（由骨架行统一覆盖）。登记机制自身的正反样本在 `selftest_test.go`（未登记 → 失败、缺理由/缺引用/引用不存在 → 失败、完整 → 通过、骨架由合成 OpenAPI 生成）。
@@ -43,6 +43,16 @@
 2. 在 `matrix_test.go` 增加 `drive<资源>`：用 `fixture` 里的租户 A/B、令牌、平台 acting-as 身份；种入两个租户（及平台）各自的数据；对 list / get / sub-resource / 写操作断言上述四点；请求经 `matrix.req`（自动登记身份组，并对租户可见的成功响应自动做 R-T1 断言）；响应契约用 `matrix.contract`。写操作要验证「他租户 id → 404 且数据不变」。
 3. 租户数据里若含节点/集群内部标识，**种入真实的反例**（`apistack.World.SeedInternals`：集群/节点的 uid、名称、主机名、IP；`placement.default_cluster_uids` 平台设置），证明租户视图剔除、平台视图保留。
 4. `make security` 与 `make race` 通过。
+
+### 已登记的 Driven 资源（随各 Story 追加）
+
+| 资源 | operation | Story | 驱动要点 |
+|---|---|---|---|
+| tenants/current | `getCurrentTenant` | 1.20 | 自己的租户 / acting-as 目标租户；不可用租户 404 |
+| tasks | `listTasks`、`getTask`、`listTaskEvents`、`cancelTask` | 1.14 / 1.20 / **1.21** | 列表只含本租户；他租户/平台/不存在 404 逐字节一致；`cancelTask`（取消 + 审计同事务）：自己的 pending 任务 200 并恰好写一条审计（操作者、所属租户、`acting_as`、令牌）、越权 404 不写审计、终态 409 不写审计 |
+| audit-logs | `listAuditLogs`、`getAuditLog` | **1.21** | A/B/平台级各一批审计行：列表只含本租户；平台 acting-as 与租户视角一致；`acting_as` 记录抹去平台操作者身份；`changes` 里内部标识键被剔除、聚合计数保留；他租户/平台级/不存在 404 逐字节一致；租户用 `tenant_uid` 过滤他租户得空集；平台不带 `X-Tenant-ID` 跨租户、保留管理员标签（断言器有区分力） |
+
+`ipAllowedOps`（`matrix_test.go`）：审计记录的 `ip` 是租户自己用户的来源地址（AuditLog schema 字段），因此这两个 operation 的响应不做「任何 IP 字面量」检查；节点/出口 IP 仍由内部取值表逐一检查。
 
 ## 3. 响应字段断言（R-T1 / BLK-02）
 

@@ -80,9 +80,15 @@
 ## 修订记录 2026-11-21（Story 1.20，实现细化，非推翻）
 
 - §1/§5（Scope 钩子）：完整的租户 Scope 钩子 `httpx.WithTenantScope`（`internal/platform/httpx/scopehook.go`）替换 Story 1.18 的过渡钩子。Scope 只由三样东西生成：已认证主体、路由元数据 `x-tenant-scope`、`X-Tenant-ID`——且 `X-Tenant-ID` 只在授权钩子（RBAC，`rbac.Decide`）已判定「可代该租户操作」（同时具备 `tenant:impersonate` 与路由权限）之后才被解析；没有授权决策、决策与主体/路由不一致、租户目录未装配，一律安全拒绝。acting-as 的目标租户经**租户目录**（`httpx.TenantResolver`，租户模块 `internal/tenant` 实现，每次现读不缓存）解析，**不存在、已软删除、状态非 `active`（suspended/closed/pending）一律 `404 resource.not_found`**，响应与「他租户资源」逐字节一致；目录故障按 500 处理（fail-closed）。
-- §5（审计）：acting-as 成功时 Scope 钩子把 `httpx.ActingAs{ActorID, TenantID, TenantUID, OperationID}` 放进请求上下文（`httpx.ActingAsFrom`），审计模块（Story 1.21）直接消费即可写 `audit_logs.actor_user_id + tenant_id + acting_as`。**audit_logs 仍未实现（待 Story 1.21）**：Story 1.20 只写结构化日志（Scope 钩子与过渡审计钩子都带操作者与目标租户，`audit_logs_written=false`），不假装已写。
+- §5（审计）：acting-as 成功时 Scope 钩子把 `httpx.ActingAs{ActorID, TenantID, TenantUID, OperationID}` 放进请求上下文（`httpx.ActingAsFrom`），审计模块（Story 1.21）直接消费即可写 `audit_logs.actor_user_id + tenant_id + acting_as`。**audit_logs 仍未实现（待 Story 1.21）**【已由 Story 1.21 收口，见文末修订】：Story 1.20 只写结构化日志（Scope 钩子与过渡审计钩子都带操作者与目标租户，`audit_logs_written=false`），不假装已写。
 - §4（越权语义）：租户 Console 会话访问 `platform` 路由 → 401（realm 隔离，ADR-018 §1）；租户 API Token 访问 `platform` 路由 → 403（`rbac.Decide`，NFR-14）；二者都在路由层（认证/授权钩子）拒绝，不进入 handler。租户主体指定他租户（含不存在、不可用）的 `X-Tenant-ID` → 404（先于权限判定，不泄漏存在性）。
 - §7（路由元数据检查）：`make tenantscope-check`——真实路由集合里每条 `tenant | either` 路由必须经 Scope 钩子（探针钩子 + 真实路由表，负向样本自测），见 `docs/testing/tenant-isolation-matrix.md` §4。
 - §8（铸造白名单收窄）：`tenantscope.FromPrincipal/FromTask/PlatformForJob/NewContext` 的调用白名单由 `internal/platform/` 整体 + `internal/tenant/` + `internal/scheduler/` + `cmd/*` 收窄为 `internal/platform/{httpx,taskrt,server}/`（`scripts/gates/spec.go`，`make gen-lint`）；租户模块、调度器模块、cmd 都不构造 Scope。
 - §11（隔离矩阵）：`tests/security/tenant_isolation` 已落地（骨架由 openapi 自动生成；覆盖登记；R-T1 响应字段断言器 `internal/platform/leakguard`），规则与扩充方法见 `docs/testing/tenant-isolation-matrix.md`。矩阵暴露并修复一处 R-T1 缺口：任务中心的租户视图原先只剔除 `cluster*`/`node*` 前缀的键，`egress_node*`、`targets` 等未剔除，现与断言器同一规则。
 - 租户模块：`/tenants`、`/tenants/current`、`/tenants/{id}`、`/tenants/{id}/members`、`/tenants/{id}/quotas`（配额只存取，强制执行属 Story 6.9）；种子「默认租户」（`000004`）是 MVP 运营入口（D-13）。`createTenant`（POST /tenants）是 P5，不在 M1 实现。
+
+## 修订记录 2026-11-21（Story 1.21，实现细化，非推翻）
+
+- §5（审计，**收口**）：acting-as 的「审计双记」已落地——审计记录器（`internal/platform/audit`）在业务事务内写 `audit_logs`：`actor_user_id`（操作者，API Token 取其拥有者并另记 `actor_token_id`）、`actor_tenant_id`（操作者所属租户，平台用户为空）、`tenant_id`（**被操作对象所属租户**：事件显式给出 > 租户范围 Scope 的租户（含 acting-as 目标租户）> 空）、`acting_as`（`httpx.ActingAsFrom` 或 Scope 标记）。上文「`audit_logs` 仍未实现（待 Story 1.21）」「`audit_logs_written=false`」作废。
+- §5（读取与裁剪）：`GET /audit-logs`：租户范围 Scope 在仓储层强制追加 `tenant_id = ?`（调用方无法省略），平台范围才可跨租户；面向租户的响应对平台操作者做脱敏（代租户的记录只显示「platform」，不暴露管理员身份/来源 IP/User-Agent），`changes` 递归剔除 R-T1 内部标识键（复用 `leakguard.ForbiddenKey`）；租户视角下不属于自己租户的记录、平台级记录（`tenant_id` 为空）、不存在的记录一律 `404` 逐字节一致。
+- §11（隔离矩阵）：`cancelTask` 由 `FailClosed` 转为 `Driven`（取消 + 审计同事务，四类身份逐一驱动，断言审计行的操作者/租户/acting_as/令牌）；新增 `listAuditLogs`/`getAuditLog` 的 `Driven` 驱动（A/B/平台级各一批审计行，种入节点/集群内部标识验证裁剪；断言器的 IP 字面量检查对这两个 operation 关闭——`ip` 是租户自己用户的来源地址，是 AuditLog schema 字段；节点/出口 IP 仍由内部取值表检查）。

@@ -59,3 +59,8 @@
 - §4（L23）：删除“architecture §9.2 通用码清单未列该两码”的过期说法。
 - §7（M14）：Task 类型清单以 OpenAPI `TaskType` 为唯一事实源。
 - §3：新增通用错误码 `auth.reauth_required`。
+
+## 修订记录 2026-11-21（Story 1.21，实现细化，非推翻）
+
+- §2（路由元数据 CI 检查）新增 (g)：**写 operation（POST/PUT/PATCH/DELETE）必须声明 `x-audit: true`**，确实不产生持久变更的「只读式 POST」须在 `scripts/gates/data/audit-exempt.txt` 登记并写明理由（当前 3 项：`checkDomainAccess`、`validateRule`、`parseCertificate`）；(h) **声明了 `x-audit` 的 operation 必须在 `audit.Catalog` 登记审计动作，且每个动作都有记录调用**（「声明 Audit 但未记录」）。`make audit-check` 执行 (g)(h)（静态门禁 + 真实路由集合检查，均带负向样本自测）。
+- §6（Request ID）：NFR-21 的追踪链落地——一次 API 调用的 `X-Request-ID` 写入 `audit_logs.request_id`、`tasks.request_id`（`task_events` 经任务关联）与 Worker 日志；`GET /audit-logs?request_id=`、`GET /tasks?request_id=` 可检索（`tests/integration/audit` 的 `TestRequestIDTracesAuditAndTask`）。`task_events` 本身不含 `request_id` 列（经 `task_id` 关联，无缺口，未追加迁移）。

@@ -27,6 +27,7 @@ import (
 	"github.com/wuekevin/lingedge/internal/auth/internal/domain"
 	"github.com/wuekevin/lingedge/internal/auth/internal/repository"
 	"github.com/wuekevin/lingedge/internal/platform/apierr"
+	"github.com/wuekevin/lingedge/internal/platform/audit"
 	"github.com/wuekevin/lingedge/internal/platform/clock"
 	"github.com/wuekevin/lingedge/internal/platform/redisx"
 	"github.com/wuekevin/lingedge/internal/platform/uid"
@@ -53,6 +54,8 @@ type Options struct {
 	// WithTx 划定事务边界（db.Pool.WithTx）：Service 决定哪些写入同事务，Repository 的方法经 ctx 加入该事务。
 	WithTx func(ctx context.Context, fn func(ctx context.Context) error) error
 	Redis  *redisx.Client
+	// Audit 是审计记录器（internal/platform/audit）：所有写操作的审计行在业务事务内写入（审计失败 = 事务回滚，fail-closed；IMP-19）。必填。
+	Audit  audit.Recorder
 	Hasher *Hasher
 	// Box 是信封加密（pkg/secretbox）：TOTP 密钥经它加密存储（Story 1.17）。
 	Box   *secretbox.Box
@@ -70,6 +73,7 @@ type Service struct {
 	repo     *repository.Repo
 	withTx   func(ctx context.Context, fn func(ctx context.Context) error) error
 	redis    *redisx.Client
+	audit    audit.Recorder
 	limiter  *redisx.Limiter
 	ks       redisx.Keyspace
 	hasher   *Hasher
@@ -95,7 +99,7 @@ type Service struct {
 // New 创建 Service；会计算一次哑哈希（启动时的一次性开销）。
 func New(ctx context.Context, o Options) (*Service, error) {
 	switch {
-	case o.Repo == nil, o.WithTx == nil, o.Redis == nil, o.Hasher == nil, o.IDs == nil, o.Box == nil:
+	case o.Repo == nil, o.WithTx == nil, o.Redis == nil, o.Hasher == nil, o.IDs == nil, o.Box == nil, o.Audit == nil:
 		return nil, errors.New("auth/service: 缺少必需依赖")
 	}
 	if o.Clock == nil {
@@ -118,7 +122,7 @@ func New(ctx context.Context, o Options) (*Service, error) {
 	}
 	svc := &Service{
 		permCache: redisx.NewCache(o.Redis), permTTL: ttl, permPoll: poll,
-		repo: o.Repo, withTx: o.WithTx, redis: o.Redis, limiter: redisx.NewLimiter(o.Redis, nil), ks: o.Redis.Keyspace(), hasher: o.Hasher, box: o.Box,
+		repo: o.Repo, withTx: o.WithTx, redis: o.Redis, audit: o.Audit, limiter: redisx.NewLimiter(o.Redis, nil), ks: o.Redis.Keyspace(), hasher: o.Hasher, box: o.Box,
 		clk: o.Clock, ids: o.IDs, log: o.Log.Named("auth"), settings: newSettingsCache(o.Repo, o.Clock, o.Log), dummy: dummy,
 		bgSem: make(chan struct{}, 64), touched: map[uint64]time.Time{},
 	}
@@ -505,7 +509,21 @@ func (s *Service) finishLogin(ctx context.Context, in LoginInput, ts throttleSta
 				s.log.Warn("口令哈希升级写入失败（本次登录不受影响）", zap.Error(err))
 			}
 		}
-		tok, err := s.issueMFAChallenge(ctx, in.Realm, u, in.Req)
+		var tok string
+		err := s.withTx(ctx, func(ctx context.Context) error {
+			var cerr error
+			if tok, cerr = s.issueMFAChallenge(ctx, in.Realm, u, in.Req); cerr != nil {
+				return cerr
+			}
+			// 发放第二因子挑战也留痕（口令已正确、会话尚未建立）；与挑战写入同一事务。
+			var tid uint64
+			if tenant != nil {
+				tid = tenant.ID
+			}
+			return s.audit.Record(ctx, audit.ActionAuthMFAChallenge, audit.Event{ResourceType: audit.ResourceUser, ResourceUID: u.UID, TenantID: tid,
+				Actor:   &audit.Actor{Type: audit.ActorUser, UserID: u.ID, Label: u.Email, TenantID: tid},
+				Changes: map[string]any{"realm": string(in.Realm)}})
+		})
 		if err != nil {
 			return nil, apierr.Internal(err)
 		}
@@ -567,7 +585,17 @@ func (s *Service) issueSession(ctx context.Context, sp sessionParams) (*LoginRes
 		if err := s.repo.RecordLoginSuccess(ctx, u.ID, ns.IP, now, sp.Rehash); err != nil {
 			return err
 		}
-		return s.insertLog(ctx, sp.Realm, u.Email, domain.EventLoginSuccess, sp.LogReason, &u.ID, tenantID, in)
+		if err := s.insertLog(ctx, sp.Realm, u.Email, domain.EventLoginSuccess, sp.LogReason, &u.ID, tenantID, in); err != nil {
+			return err
+		}
+		// 审计与会话建立同一事务：审计写入失败则不建立会话（fail-closed）。主体尚未进入请求上下文，操作者显式给出。
+		var actorTenant uint64
+		if tenantID != nil {
+			actorTenant = *tenantID
+		}
+		return s.audit.Record(ctx, audit.ActionAuthLogin, audit.Event{ResourceType: audit.ResourceSession, ResourceUID: sid, TenantID: actorTenant,
+			Actor:   &audit.Actor{Type: audit.ActorUser, UserID: u.ID, Label: u.Email, TenantID: actorTenant},
+			Changes: map[string]any{"realm": string(sp.Realm), "mfa": sp.MFAVerifiedAt != nil, "reason": sp.LogReason}})
 	})
 	if err != nil {
 		return nil, apierr.Internal(err)
@@ -654,7 +682,10 @@ func (s *Service) Logout(ctx context.Context, p *domain.Principal, ri RequestInf
 		if _, err := s.repo.RevokeSession(ctx, p.Session.ID, domain.RevokeLogout, now); err != nil {
 			return err
 		}
-		return s.insertLog(ctx, p.Realm, p.User.Email, domain.EventLogout, "logout", &p.User.ID, tenantIDOf(p), ri)
+		if err := s.insertLog(ctx, p.Realm, p.User.Email, domain.EventLogout, "logout", &p.User.ID, tenantIDOf(p), ri); err != nil {
+			return err
+		}
+		return s.audit.Record(ctx, audit.ActionAuthLogout, audit.Event{ResourceType: audit.ResourceSession, ResourceUID: p.Session.UID, Changes: map[string]any{"realm": string(p.Realm)}})
 	}))
 }
 
@@ -736,7 +767,10 @@ func (s *Service) RevokeSession(ctx context.Context, p *domain.Principal, sessio
 			return err
 		}
 		current = id == p.Session.ID
-		return s.insertLog(ctx, p.Realm, p.User.Email, domain.EventLogout, "session_revoked", &p.User.ID, tenantIDOf(p), ri)
+		if err := s.insertLog(ctx, p.Realm, p.User.Email, domain.EventLogout, "session_revoked", &p.User.ID, tenantIDOf(p), ri); err != nil {
+			return err
+		}
+		return s.audit.Record(ctx, audit.ActionAuthSessionRevoke, audit.Event{ResourceType: audit.ResourceSession, ResourceUID: sessionUID, Changes: map[string]any{"current": current}})
 	})
 	return current, s.wrapInternal(err)
 }
@@ -766,6 +800,48 @@ func (s *Service) ListLoginLogs(ctx context.Context, p *domain.Principal, cursor
 	}
 	if len(rows) > limit {
 		rows = rows[:limit]
+		next = base64.RawURLEncoding.EncodeToString([]byte("id:" + strconv.FormatUint(rows[len(rows)-1].ID, 10)))
+	}
+	items = make([]LogItem, 0, len(rows))
+	for _, r := range rows {
+		items = append(items, LogItem{LoginLog: r, IPText: ipString(r.IP)})
+	}
+	return items, next, nil
+}
+
+// LoginLogQuery 是平台全局登录日志的查询条件（已由 handler 校验）。
+type LoginLogQuery struct {
+	Event, Identifier string
+	IP                net.IP
+	From, To          *time.Time
+	Cursor            string
+	Limit             int
+}
+
+// ListAllLoginLogs 返回全部用户的登录事件（平台全局；id 倒序游标）；next 为空表示到末尾。路由层已限定平台主体与 login-log:read。
+func (s *Service) ListAllLoginLogs(ctx context.Context, q LoginLogQuery) (items []LogItem, next string, err error) {
+	f := repository.LoginLogFilter{Event: q.Event, Identifier: NormalizeEmail(q.Identifier), From: q.From, To: q.To}
+	if q.IP != nil {
+		if v4 := q.IP.To4(); v4 != nil {
+			f.IP = v4
+		} else {
+			f.IP = q.IP.To16()
+		}
+	}
+	if q.Cursor != "" {
+		b, derr := base64.RawURLEncoding.DecodeString(q.Cursor)
+		n, perr := strconv.ParseUint(strings.TrimPrefix(string(b), "id:"), 10, 64)
+		if derr != nil || perr != nil || !strings.HasPrefix(string(b), "id:") || n == 0 {
+			return nil, "", apierr.Validation(apierr.Detail{Field: "cursor", Reason: "invalid cursor"})
+		}
+		f.BeforeID = n
+	}
+	rows, err := s.repo.ListLoginLogsPlatform(ctx, f, q.Limit+1)
+	if err != nil {
+		return nil, "", apierr.Internal(err)
+	}
+	if len(rows) > q.Limit {
+		rows = rows[:q.Limit]
 		next = base64.RawURLEncoding.EncodeToString([]byte("id:" + strconv.FormatUint(rows[len(rows)-1].ID, 10)))
 	}
 	items = make([]LogItem, 0, len(rows))
@@ -863,7 +939,11 @@ func (s *Service) ChangePassword(ctx context.Context, p *domain.Principal, curre
 		if _, err := s.repo.RevokeUserSessions(ctx, u.ID, domain.RevokeCredentialChange, now); err != nil {
 			return err
 		}
-		return s.insertLog(ctx, p.Realm, p.User.Email, domain.EventLogout, "password_changed", &u.ID, tenantIDOf(p), ri)
+		if err := s.insertLog(ctx, p.Realm, p.User.Email, domain.EventLogout, "password_changed", &u.ID, tenantIDOf(p), ri); err != nil {
+			return err
+		}
+		// 只记「改了密」这一事实：不含任何口令明文/哈希。
+		return s.audit.Record(ctx, audit.ActionAuthPasswordChange, audit.Event{ResourceType: audit.ResourceUser, ResourceUID: p.User.UID, Changes: map[string]any{"sessions_revoked": true}})
 	})
 	if err != nil {
 		return s.wrapInternal(err)

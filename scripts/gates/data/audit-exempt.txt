@@ -1,0 +1,6 @@
+# 审计门禁（Story 1.21 AC1，`make audit-check`）的显式例外：写 operation（POST/PUT/PATCH/DELETE）默认必须声明 x-audit: true；
+# 确实不产生任何持久变更的「只读式 POST」在此登记，并写明理由。格式：`<operationId> <空白> <理由>`（理由必填）。
+# 每一项都必须真实存在于 docs/api/openapi.yaml、是写 operation 且 x-audit 不为 true（过期条目失败）；新增例外须评审，不得为「懒得写审计」而登记。
+checkDomainAccess 只读探测：对域名发起一次可达性检查并返回结果，不创建/修改/删除任何持久数据
+validateRule 只读校验：对规则文档做语法与语义校验（IMP-21 的 rule-validations），不落库
+parseCertificate 只读解析：解析上传的证书文本并返回元数据（IMP-21 的 certificate-parses），不落库、不保存私钥

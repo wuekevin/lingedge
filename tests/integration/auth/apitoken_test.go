@@ -97,8 +97,20 @@ func TestAPITokenCreatePlaintextOnce(t *testing.T) {
 	if n := containsAny(logs, tk.Token, tk.Secret); n != "" {
 		t.Errorf("日志泄露了令牌明文")
 	}
-	if !strings.Contains(logs, "API Token 已创建") || !strings.Contains(logs, `"prefix":"`+tk.Prefix+`"`) || strings.Contains(logs, `"audit_logs_written":true`) {
-		t.Errorf("应有只含前缀的结构化日志（audit_logs 待 1.21 补写，不得假装已写）")
+	if !strings.Contains(logs, "API Token 已创建") || !strings.Contains(logs, `"prefix":"`+tk.Prefix+`"`) {
+		t.Errorf("应有只含前缀的结构化日志")
+	}
+	// 审计（Story 1.21）：创建令牌与令牌写入同一事务，变更摘要只含前缀，绝不含令牌明文/密钥。
+	if n := s.e.rootInt(t, "SELECT COUNT(*) FROM §.audit_logs WHERE action = 'api_token.create' AND resource_uid = ? AND JSON_UNQUOTE(JSON_EXTRACT(changes_json, '$.prefix')) = ?", tk.UID, tk.Prefix); n != 1 {
+		t.Errorf("创建令牌应恰好写一条含前缀的审计记录: %d", n)
+	}
+	for _, secret := range []string{tk.Token, tk.Secret} {
+		if secret == "" {
+			continue
+		}
+		if n := s.e.rootInt(t, "SELECT COUNT(*) FROM §.audit_logs WHERE CONVERT(CONCAT_WS(' ', actor_label, resource_uid, CAST(changes_json AS CHAR), CAST(meta_json AS CHAR)) USING utf8mb4) LIKE ?", "%"+secret+"%"); n != 0 {
+			t.Errorf("审计记录泄露了令牌明文")
+		}
 	}
 }
 

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"net"
 	"net/http"
 	"time"
 
@@ -374,6 +375,65 @@ func (h *Handlers) loginLogs(c *gin.Context) {
 		return
 	}
 	items, next, err := h.svc.ListLoginLogs(c.Request.Context(), p, cp.Cursor, cp.Limit)
+	if err != nil {
+		httpx.Fail(c, err)
+		return
+	}
+	out := loginLogList{Items: make([]LoginLogView, 0, len(items))}
+	for _, it := range items {
+		v := LoginLogView{UID: it.UID, CreatedAt: ts(it.CreatedAt), Realm: it.Realm, Identifier: it.Identifier, Event: it.Event, UserAgent: it.UserAgent, Reason: it.Reason, RequestID: it.RequestID}
+		if it.IPText != "" {
+			ip := it.IPText
+			v.IP = &ip
+		}
+		out.Items = append(out.Items, v)
+	}
+	if next != "" {
+		out.NextCursor = &next
+	}
+	httpx.OK(c, out)
+}
+
+// listAllLoginLogs 是 GET /admin/login-logs（平台全局登录日志，Story 1.21）：游标分页，按 event/identifier/ip/from/to 过滤。
+func (h *Handlers) listAllLoginLogs(c *gin.Context) {
+	q := c.Request.URL.Query()
+	cp, err := httpx.ParseCursor(q)
+	if err != nil {
+		httpx.Fail(c, err)
+		return
+	}
+	in := service.LoginLogQuery{Cursor: cp.Cursor, Limit: cp.Limit, Event: q.Get("event"), Identifier: q.Get("identifier")}
+	var ds []apierr.Detail
+	if len(in.Event) > 32 {
+		ds = append(ds, apierr.Detail{Field: "event", Reason: "too long"})
+	}
+	if len(in.Identifier) > 255 {
+		ds = append(ds, apierr.Detail{Field: "identifier", Reason: "too long"})
+	}
+	if v := q.Get("ip"); v != "" {
+		if in.IP = net.ParseIP(v); in.IP == nil {
+			ds = append(ds, apierr.Detail{Field: "ip", Reason: "must be an IPv4 or IPv6 address"})
+		}
+	}
+	for _, t := range []struct {
+		field string
+		dst   **time.Time
+	}{{"from", &in.From}, {"to", &in.To}} {
+		if v := q.Get(t.field); v != "" {
+			tm, perr := time.Parse(time.RFC3339Nano, v)
+			if perr != nil {
+				ds = append(ds, apierr.Detail{Field: t.field, Reason: "must be an RFC 3339 timestamp"})
+				continue
+			}
+			tm = tm.UTC()
+			*t.dst = &tm
+		}
+	}
+	if len(ds) > 0 {
+		httpx.Fail(c, apierr.Validation(ds...))
+		return
+	}
+	items, next, err := h.svc.ListAllLoginLogs(c.Request.Context(), in)
 	if err != nil {
 		httpx.Fail(c, err)
 		return

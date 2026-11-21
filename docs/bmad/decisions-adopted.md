@@ -75,7 +75,7 @@ source: docs/bmad/epics.md「待用户决策清单（UD）」
 
 以下为本次对照修订日志复核时发现 `epics.md` 与修订后上游冲突、已就地纠正的项（不属 UD，不需用户决策）：
 
-1. 审计写入语义：`1.21` 原写「审计失败不阻断业务」，与 database/README §5.1「审计与业务同事务」冲突 → 改为同事务、失败即整体回滚（fail-closed）。
+1. 审计写入语义：`1.21` 原写「审计失败不阻断业务」，与 database/README §5.1「审计与业务同事务」冲突 → 改为同事务、失败即整体回滚（fail-closed）。**Story 1.21 已落地**（Service 在业务事务内经 `audit.Recorder.Record` 写入；真实 MySQL 注入审计写入失败验证业务数据不残留、500、重试成功；方案取舍见 ADR-018 修订记录 2026-11-21 Story 1.21）。
 2. 租户可见 `GET /available-clusters`（`3.35`）与修订日志「不采纳」冲突 → 删除，向导无集群选择。
 3. 调试请求「回环临时回显源站」（`3.32`）已被 ctl 封闭操作 `debug_simulate` 取代 → 改写，SSRF 无需豁免。
 4. 节点升级结果文件目录（`3.34`）原写 `/var/lib/lingedge/tools/node-upgrade/` → 改为定稿的 `/var/lib/lingedge-node-upgrade/`；`--apply-staged` 无路径参数。

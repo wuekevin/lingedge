@@ -16,6 +16,7 @@ import (
 	"github.com/wuekevin/lingedge/internal/auth/internal/domain"
 	"github.com/wuekevin/lingedge/internal/auth/internal/repository"
 	"github.com/wuekevin/lingedge/internal/platform/apierr"
+	"github.com/wuekevin/lingedge/internal/platform/audit"
 	"github.com/wuekevin/lingedge/internal/platform/db"
 	"github.com/wuekevin/lingedge/internal/platform/rbac"
 )
@@ -29,7 +30,8 @@ import (
 //     platform_admin 角色行的事务锁再计数，因此并发请求被串行化——两个并发的「各自移除对方」只有一个成功。内置角色本身不可改/删/改权限。
 //   - 防提权：授予角色（含创建用户时指定角色）、向角色加权限，要求操作者自己持有这些权限。
 //   - 租户角色只能授予 scope 为 tenant 或 both 的权限（platform 权限永不进入租户角色）。
-//   - 审计：audit_logs 的统一接入属 Story 1.21，**此处没有写 audit_logs**（待 1.21 补写）；这里只写不含敏感信息的结构化日志（操作、操作者 uid、目标 uid）。
+//   - 审计（Story 1.21）：每个写操作在**同一业务事务内**经 audit.Recorder 写 audit_logs（操作者/租户/acting_as/对象/动作/脱敏变更摘要由记录器取自请求上下文）；
+//     审计写入失败 = 事务整体回滚（fail-closed）。变更摘要不含口令、令牌、密钥。
 
 // 管理操作的长度/格式限制。
 const (
@@ -71,11 +73,6 @@ func conflict(msg, field, reason string) error {
 
 func forbidden(msg, field, reason string) error {
 	return apierr.New(apierr.AuthForbidden, msg, apierr.Detail{Field: field, Reason: reason})
-}
-
-func (s *Service) actorLog(op string, actor *domain.Principal, ri RequestInfo, fields ...zap.Field) {
-	base := []zap.Field{zap.String("op", op), zap.String("actor_uid", actor.User.UID), zap.String("request_id", ri.RequestID), zap.Bool("audit_logs_written", false)}
-	s.log.Info("RBAC 管理操作（audit_logs 待 Story 1.21 补写）", append(base, fields...)...)
 }
 
 // validateNewPassword：与改密同一策略（12–128 字符，不得等于邮箱）。
@@ -268,7 +265,12 @@ func (s *Service) CreateUser(ctx context.Context, actor *domain.Principal, in Cr
 		for _, r := range roles {
 			ids = append(ids, r.ID)
 		}
-		return s.repo.ReplaceUserPlatformRoles(ctx, id, ids, actor.User.ID)
+		if err := s.repo.ReplaceUserPlatformRoles(ctx, id, ids, actor.User.ID); err != nil {
+			return err
+		}
+		// 审计与业务写入同一事务（失败即整体回滚）：变更摘要只含邮箱/角色/是否服务端生成口令，不含口令。
+		return s.audit.Record(ctx, audit.ActionUserCreate, audit.Event{ResourceType: audit.ResourceUser, ResourceUID: newUID,
+			Changes: map[string]any{"email": email, "role_codes": in.RoleCodes, "password_generated": generated}})
 	})
 	if err != nil {
 		return UserView{}, "", s.wrapInternal(err)
@@ -281,7 +283,6 @@ func (s *Service) CreateUser(ctx context.Context, actor *domain.Principal, in Cr
 	if err != nil {
 		return UserView{}, "", err
 	}
-	s.actorLog("user.create", actor, ri, zap.String("target_uid", newUID), zap.Strings("role_codes", in.RoleCodes), zap.Bool("password_generated", generated))
 	if !generated {
 		pw = ""
 	}
@@ -359,12 +360,24 @@ func (s *Service) UpdateUser(ctx context.Context, actor *domain.Principal, uid s
 				return err
 			}
 		}
-		return nil
+		ch := map[string]any{}
+		if in.DisplayName != nil {
+			ch["display_name"] = *in.DisplayName
+		}
+		if in.Status != nil {
+			ch["status"] = *in.Status
+		}
+		if in.Locale != nil {
+			ch["locale"] = *in.Locale
+		}
+		if in.Timezone != nil {
+			ch["timezone"] = *in.Timezone
+		}
+		return s.audit.Record(ctx, audit.ActionUserUpdate, audit.Event{ResourceType: audit.ResourceUser, ResourceUID: u.UID, Changes: ch})
 	})
 	if err != nil {
 		return UserView{}, s.wrapInternal(err)
 	}
-	s.actorLog("user.update", actor, ri, zap.String("target_uid", uid), zap.Bool("status_changed", in.Status != nil))
 	return s.GetUser(ctx, target.UID)
 }
 
@@ -388,12 +401,14 @@ func (s *Service) DeleteUser(ctx context.Context, actor *domain.Principal, uid s
 		if err := s.repo.ReplaceUserPlatformRoles(ctx, u.ID, nil, 0); err != nil {
 			return err
 		}
-		return s.repo.BumpUserPermissionVersion(ctx, u.ID)
+		if err := s.repo.BumpUserPermissionVersion(ctx, u.ID); err != nil {
+			return err
+		}
+		return s.audit.Record(ctx, audit.ActionUserDelete, audit.Event{ResourceType: audit.ResourceUser, ResourceUID: u.UID})
 	})
 	if err != nil {
 		return s.wrapInternal(err)
 	}
-	s.actorLog("user.delete", actor, ri, zap.String("target_uid", uid))
 	return nil
 }
 
@@ -437,14 +452,15 @@ func (s *Service) SetUserRoles(ctx context.Context, actor *domain.Principal, uid
 		if err := s.repo.BumpUserPermissionVersion(ctx, u.ID); err != nil {
 			return err
 		}
-		affected, err = s.repo.UserAccessScopes(ctx, u.ID)
-		return err
+		if affected, err = s.repo.UserAccessScopes(ctx, u.ID); err != nil {
+			return err
+		}
+		return s.audit.Record(ctx, audit.ActionUserSetRoles, audit.Event{ResourceType: audit.ResourceUser, ResourceUID: u.UID, Changes: map[string]any{"role_codes": codes}})
 	})
 	if err != nil {
 		return UserView{}, s.wrapInternal(err)
 	}
 	s.invalidatePermissions(ctx, affected)
-	s.actorLog("user.set_roles", actor, ri, zap.String("target_uid", uid), zap.Strings("role_codes", codes))
 	return s.GetUser(ctx, target.UID)
 }
 
@@ -456,13 +472,15 @@ func (s *Service) UnlockUser(ctx context.Context, actor *domain.Principal, uid s
 		if u, err = s.repo.FindPlatformUserByUIDForUpdate(ctx, uid); err != nil {
 			return notFoundErr(err)
 		}
-		return s.repo.UnlockUser(ctx, u.ID)
+		if err := s.repo.UnlockUser(ctx, u.ID); err != nil {
+			return err
+		}
+		return s.audit.Record(ctx, audit.ActionUserUnlock, audit.Event{ResourceType: audit.ResourceUser, ResourceUID: u.UID})
 	})
 	if err != nil {
 		return UserView{}, s.wrapInternal(err)
 	}
 	s.resetThrottle(ctx, u.Email)
-	s.actorLog("user.unlock", actor, ri, zap.String("target_uid", uid))
 	return s.GetUser(ctx, uid)
 }
 
@@ -505,14 +523,17 @@ func (s *Service) ResetPassword(ctx context.Context, actor *domain.Principal, ui
 		if err := s.repo.ResetPassword(ctx, cur.ID, hash, now); err != nil {
 			return err
 		}
-		_, err = s.repo.RevokeUserSessions(ctx, cur.ID, domain.RevokeAdmin, now)
-		return err
+		if _, err = s.repo.RevokeUserSessions(ctx, cur.ID, domain.RevokeAdmin, now); err != nil {
+			return err
+		}
+		// 只记「重置了口令」与是否服务端生成；绝不含口令明文/哈希。
+		return s.audit.Record(ctx, audit.ActionUserResetPassword, audit.Event{ResourceType: audit.ResourceUser, ResourceUID: cur.UID,
+			Changes: map[string]any{"password_generated": generated, "sessions_revoked": true}})
 	})
 	if err != nil {
 		return "", s.wrapInternal(err)
 	}
 	s.resetThrottle(ctx, u.Email)
-	s.actorLog("user.reset_password", actor, ri, zap.String("target_uid", uid), zap.Bool("password_generated", generated))
 	if !generated {
 		pw = ""
 	}
@@ -525,11 +546,14 @@ func (s *Service) RevokeUserSessions(ctx context.Context, actor *domain.Principa
 	if err != nil {
 		return notFoundErr(err)
 	}
-	if _, err := s.repo.RevokeUserSessions(ctx, u.ID, domain.RevokeAdmin, s.clk.Now()); err != nil {
-		return apierr.Internal(err)
-	}
-	s.actorLog("user.revoke_sessions", actor, ri, zap.String("target_uid", uid))
-	return nil
+	err = s.withTx(ctx, func(ctx context.Context) error {
+		n, err := s.repo.RevokeUserSessions(ctx, u.ID, domain.RevokeAdmin, s.clk.Now())
+		if err != nil {
+			return err
+		}
+		return s.audit.Record(ctx, audit.ActionUserRevokeSessions, audit.Event{ResourceType: audit.ResourceUser, ResourceUID: u.UID, Changes: map[string]any{"revoked": n}})
+	})
+	return s.wrapInternal(err)
 }
 
 // ---- 角色 ----
@@ -664,12 +688,15 @@ func (s *Service) CreateRole(ctx context.Context, actor *domain.Principal, in Cr
 			}
 			return err
 		}
-		return s.repo.ReplaceRolePermissions(ctx, id, perms)
+		if err := s.repo.ReplaceRolePermissions(ctx, id, perms); err != nil {
+			return err
+		}
+		return s.audit.Record(ctx, audit.ActionRoleCreate, audit.Event{ResourceType: audit.ResourceRole, ResourceUID: uid,
+			Changes: map[string]any{"scope": in.Scope, "code": in.Code, "name": name, "permissions": perms}})
 	})
 	if err != nil {
 		return RoleView{}, s.wrapInternal(err)
 	}
-	s.actorLog("role.create", actor, ri, zap.String("role_uid", uid), zap.String("scope", in.Scope))
 	return s.GetRole(ctx, uid)
 }
 
@@ -704,12 +731,21 @@ func (s *Service) UpdateRole(ctx context.Context, actor *domain.Principal, uid s
 		if err := builtinImmutable(r); err != nil {
 			return err
 		}
-		return s.repo.UpdateRole(ctx, r.ID, name, description)
+		if err := s.repo.UpdateRole(ctx, r.ID, name, description); err != nil {
+			return err
+		}
+		ch := map[string]any{}
+		if name != nil {
+			ch["name"] = *name
+		}
+		if description != nil {
+			ch["description"] = *description
+		}
+		return s.audit.Record(ctx, audit.ActionRoleUpdate, audit.Event{ResourceType: audit.ResourceRole, ResourceUID: r.UID, Changes: ch})
 	})
 	if err != nil {
 		return RoleView{}, s.wrapInternal(err)
 	}
-	s.actorLog("role.update", actor, ri, zap.String("role_uid", uid))
 	return s.GetRole(ctx, uid)
 }
 
@@ -730,12 +766,14 @@ func (s *Service) DeleteRole(ctx context.Context, actor *domain.Principal, uid s
 		if n > 0 {
 			return conflict("role is still assigned", "role", "remove the role from its holders before deleting it")
 		}
-		return s.repo.DeleteRole(ctx, r.ID)
+		if err := s.repo.DeleteRole(ctx, r.ID); err != nil {
+			return err
+		}
+		return s.audit.Record(ctx, audit.ActionRoleDelete, audit.Event{ResourceType: audit.ResourceRole, ResourceUID: r.UID, Changes: map[string]any{"code": r.Code}})
 	})
 	if err != nil {
 		return s.wrapInternal(err)
 	}
-	s.actorLog("role.delete", actor, ri, zap.String("role_uid", uid))
 	return nil
 }
 
@@ -774,14 +812,16 @@ func (s *Service) SetRolePermissions(ctx context.Context, actor *domain.Principa
 			}
 			return err
 		}
-		affected, err = s.repo.BumpRolePermissionVersion(ctx, r.ID)
-		return err
+		if affected, err = s.repo.BumpRolePermissionVersion(ctx, r.ID); err != nil {
+			return err
+		}
+		return s.audit.Record(ctx, audit.ActionRoleSetPermissions, audit.Event{ResourceType: audit.ResourceRole, ResourceUID: r.UID,
+			Changes: map[string]any{"permissions": want, "added": added, "affected_users": len(affected)}})
 	})
 	if err != nil {
 		return RoleView{}, s.wrapInternal(err)
 	}
 	s.invalidatePermissions(ctx, affected)
-	s.actorLog("role.set_permissions", actor, ri, zap.String("role_uid", uid), zap.Int("affected_users", len(affected)))
 	return s.GetRole(ctx, uid)
 }
 

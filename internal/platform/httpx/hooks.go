@@ -39,10 +39,16 @@ type AuditOutcome struct {
 	Replayed bool
 	// Panicked 为 true 表示 handler panic（对外是 500）。
 	Panicked bool
+	// Recorded 是本请求内审计记录器写入的 audit_logs 行数（经 NoteAudited 登记；写入与业务同事务，见 internal/platform/audit）。
+	// 成功（2xx）且非重放的 Audit=true 请求 Recorded==0 即「声明了审计却没有记录」，真实审计钩子据此报警。
+	Recorded int
 }
 
 // Auditor 是审计钩子：Begin 在 handler 之前调用（可据 meta.Audit 决定是否记录；失败则请求被拒绝，因为无法保证留痕），
 // 返回的 end 在请求结束后调用（可为 nil）。对所有路由调用，包括公开路由（如登录，x-audit: true）。
+//
+// 审计行本身不由钩子写入，而由业务 Service 在**业务事务内**经审计记录器写入（Story 1.21、IMP-19：审计与业务同事务，写入失败 = 业务整体回滚，
+// fail-closed）；钩子只负责「声明了审计就必须真的记录」的运行期兜底（AuditOutcome.Recorded）。
 type Auditor interface {
 	Begin(r *http.Request, meta RouteMeta) (end func(AuditOutcome), err error)
 }

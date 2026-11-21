@@ -204,7 +204,7 @@ func TestTaskRoutesAreDenyByDefaultInRealAssembly(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		done <- server.Run(ctx, server.Options{Config: e.loadConfig(t), Roles: rs, Logger: lg, OnReady: func(i server.Info) { ready <- i },
-			Register: func(r *httpx.Router, d server.Deps) error { return taskapi.Register(r, d.Tasks) }})
+			Register: func(r *httpx.Router, d server.Deps) error { return taskapi.Register(r, d.Tasks, nil, nil) }})
 	}()
 	defer cancel()
 	var info server.Info

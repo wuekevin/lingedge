@@ -39,7 +39,7 @@ type TenantResolver interface {
 	ResolveTenant(ctx context.Context, tenantUID string) (TenantRef, error)
 }
 
-// ActingAs 是「平台管理员代租户操作」的审计上下文：Scope 钩子成功铸造 acting-as Scope 时登记，审计钩子（Story 1.21）经 ActingAsFrom 直接消费，
+// ActingAs 是「平台管理员代租户操作」的审计上下文：Scope 钩子成功铸造 acting-as Scope 时登记，审计记录器（Story 1.21）经 ActingAsFrom 直接消费，
 // 同时记录操作者（ActorID）与目标租户（TenantID/TenantUID），即 audit_logs 的 actor_user_id + tenant_id + acting_as（ADR-009 §5）。
 type ActingAs struct {
 	ActorID     uint64
@@ -76,7 +76,7 @@ func ActingAsFrom(ctx context.Context) (ActingAs, bool) {
 //   - ModeOwnTenant / ModePlatform / ModeCrossTenantRead：由主体与路由推导（tenantscope.FromPrincipal，无目标租户），并校验决策与主体种类一致；
 //   - ModeActingAs：解析 X-Tenant-ID → 租户目录；不存在、已删除、状态非 active、目录返回的 uid 与请求不符，**一律 404 resource.not_found**
 //     （响应逐字节与「他租户资源」一致，不泄漏存在性）；通过后 FromPrincipal(…, TargetTenant) 再次核对 tenant:impersonate，
-//     登记 ActingAs 审计上下文并写结构化日志（audit_logs 待 Story 1.21：本钩子不写 audit_logs，也不假装已写）。
+//     登记 ActingAs 审计上下文并写结构化日志（audit_logs 由业务 Service 在业务事务内经 audit.Recorder 写入，Story 1.21；本钩子自身不写库）。
 func WithTenantScope(h Hooks, tenants TenantResolver, log *zap.Logger) Hooks {
 	h = h.withDefaults()
 	if log == nil {
@@ -144,8 +144,8 @@ func (s tenantScope) actingAs(r *http.Request, meta RouteMeta, p tenantscope.Pri
 	a := ActingAs{ActorID: p.ActorID(), TenantID: ref.ID, TenantUID: ref.UID, OperationID: meta.OperationID}
 	RecordActingAs(r, a)
 	reqID, _ := requestid.FromContext(r.Context())
-	s.log.Info("管理员代租户操作（结构化日志；audit_logs 待 Story 1.21 写入 actor+目标租户+acting_as）",
+	s.log.Info("管理员代租户操作（结构化日志；写操作的 audit_logs 由业务 Service 在事务内写入 actor+目标租户+acting_as）",
 		zap.String("operation_id", meta.OperationID), zap.Uint64("actor_id", a.ActorID), zap.Uint64("acting_as_tenant_id", a.TenantID),
-		zap.String("acting_as_tenant_uid", a.TenantUID), zap.String("request_id", reqID), zap.Bool("audit_logs_written", false))
+		zap.String("acting_as_tenant_uid", a.TenantUID), zap.String("request_id", reqID), zap.Bool("acting_as", true))
 	return sc, nil
 }

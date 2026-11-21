@@ -214,6 +214,15 @@ func (p *Principal) TenantID() uint64 {
 	return p.Tenant.ID
 }
 
+// AuditActor 实现 audit.ActorProvider（返回基本类型，使 domain 不依赖审计包）：审计记录器据此取得操作者快照——
+// 类型（user / api_token）、操作者用户 id（API Token 取其拥有者）、令牌 id、标签（邮箱 / 令牌前缀，绝不含令牌明文）、所属租户（平台用户为 0）。
+func (p *Principal) AuditActor() (typ string, userID, tokenID uint64, label string, tenantID uint64) {
+	if p.Bearer {
+		return "api_token", p.User.ID, p.TokenID, p.TokenPrefix, p.TenantID()
+	}
+	return "user", p.User.ID, 0, p.User.Email, p.TenantID()
+}
+
 // SetPermissions 装载主体的权限集（平台主体：平台角色授予的权限；租户主体：其当前租户内角色授予的权限）。
 // 只由授权钩子在请求开始时调用一次；主体是请求级对象，不跨请求共享。
 func (p *Principal) SetPermissions(set map[string]struct{}) { p.perms = set }

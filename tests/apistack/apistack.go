@@ -6,7 +6,7 @@
 // （auth.Module.Hooks，含完整租户 Scope 钩子与租户目录）+ 真实 HTTP 监听。没有任何 Mock；用后清理；本机常驻 mysqld/redis 不受影响。
 //
 // 口令、令牌、会话 Cookie、CSRF 令牌全部在运行期生成（G-6：仓库内没有固定口令），并登记到 World.Secrets，供日志脱敏扫描（G-5）。
-// 装配与 cmd/lingedge-server 的 registerRoutes/buildHooks 保持同一组成（auth + tenant + taskapi）；漂移由隔离矩阵的「路由清单一致」用例核对。
+// 装配与 cmd/lingedge-server 的 registerRoutes/buildHooks 保持同一组成（auth + tenant + taskapi + audit）；漂移由隔离矩阵的「路由清单一致」用例核对。
 package apistack
 
 import (
@@ -30,6 +30,8 @@ import (
 	"golang.org/x/crypto/argon2"
 
 	"github.com/wuekevin/lingedge/internal/auth"
+	"github.com/wuekevin/lingedge/internal/platform/audit"
+	"github.com/wuekevin/lingedge/internal/platform/audit/auditapi"
 	"github.com/wuekevin/lingedge/internal/platform/clock"
 	"github.com/wuekevin/lingedge/internal/platform/config"
 	"github.com/wuekevin/lingedge/internal/platform/db"
@@ -86,21 +88,26 @@ type World struct {
 	RC     *redisx.Client
 	Auth   auth.Module
 	Tenant tenant.Module
+	// Audit 是真实的审计记录器/钩子（与生产同一实现）；Store 是任务存储。
+	Audit  *audit.Writer
+	Store  *taskrepo.Repo
 	Router *httpx.Router
 	Srv    *httptest.Server
 	Logs   *SyncBuf
 	Spec   *contracttest.Spec
 
+	maintPW string
 	mu      sync.Mutex
 	secrets []string
 }
 
 // Options 是装配选项。
 type Options struct {
-	// Routes 在 Handler() 之前向路由器追加测试专用路由（经真实 Router.Register，走真实钩子链）。
-	Routes func(r *httpx.Router)
-	// ExtraAudited 是额外登记到过渡审计钩子（结构化日志，audit_logs 待 Story 1.21）的 operationId（测试专用探针路由用）。
-	ExtraAudited []string
+	// Routes 在 Handler() 之前向路由器追加测试专用路由（经真实 Router.Register，走真实钩子链）。w 已装配完成（含审计记录器 w.Audit），
+	// 探针路由的处理函数可用 w.App.WithTx + w.Audit.Record 在事务内写审计（与生产 Service 同一写法）。
+	Routes func(w *World, r *httpx.Router)
+	// ExtraAuditOps 是额外登记到审计记录器的 operation 与动作（测试专用探针路由用；生产装配不传）。
+	ExtraAuditOps []audit.Op
 }
 
 // New 创建被测系统（独立临时 MySQL 库 + 独立临时 Redis + 全部迁移）。
@@ -125,11 +132,15 @@ func New(t *testing.T, opts ...Options) *World {
 	t.Cleanup(func() { _ = w.RC.Close() })
 
 	gen := uid.NewGenerator(clock.System())
-	w.Auth, err = auth.New(context.Background(), auth.Options{Pool: w.App, Redis: w.RC, Clock: clock.System(), IDs: gen, Log: lg, Argon2: testArgon, Box: newBox(t)})
+	w.Audit, err = audit.New(audit.Options{Pool: w.App, IDs: gen, Clock: clock.System(), Log: lg, ExtraOps: o.ExtraAuditOps})
 	if err != nil {
 		t.Fatal(err)
 	}
-	w.Tenant, err = tenant.New(context.Background(), tenant.Options{Pool: w.App, Clock: clock.System(), Log: lg})
+	w.Auth, err = auth.New(context.Background(), auth.Options{Pool: w.App, Redis: w.RC, Clock: clock.System(), IDs: gen, Log: lg, Argon2: testArgon, Box: newBox(t), Audit: w.Audit})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Tenant, err = tenant.New(context.Background(), tenant.Options{Pool: w.App, Clock: clock.System(), Log: lg, Audit: w.Audit})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,22 +152,19 @@ func New(t *testing.T, opts ...Options) *World {
 	if err != nil {
 		t.Fatal(err)
 	}
-	extra := map[string]bool{}
-	for _, id := range o.ExtraAudited {
-		extra[id] = true
-	}
-	hooks := w.Auth.Hooks(auth.HooksOptions{Tenants: w.Tenant.Resolver(), AuditedOperation: func(id string) bool { return extra[id] || w.Tenant.AuditedOperation(id) }})
+	w.Store = store
+	hooks := w.Auth.Hooks(auth.HooksOptions{Tenants: w.Tenant.Resolver(), Auditor: w.Audit.Auditor()})
 	w.Router, err = httpx.NewRouter(httpx.Options{Logger: lg, IDs: gen, Hooks: hooks, Idempotency: idem})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, reg := range []func(*httpx.Router) error{w.Auth.Register, w.Tenant.Register, func(r *httpx.Router) error { return taskapi.Register(r, store) }} {
+	for _, reg := range []func(*httpx.Router) error{w.Auth.Register, w.Tenant.Register, func(r *httpx.Router) error { return taskapi.Register(r, store, w.Audit, w.App.WithTx) }, func(r *httpx.Router) error { return auditapi.Register(r, w.Audit.Repo()) }} {
 		if err := reg(w.Router); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if o.Routes != nil {
-		o.Routes(w.Router)
+		o.Routes(w, w.Router)
 	}
 	h, err := w.Router.Handler()
 	if err != nil {
@@ -180,6 +188,7 @@ func (w *World) openDB() {
 	inst.Exec(t, "GRANT ALL ON `"+w.DBName+"`.* TO '"+migUser+"'@'%' WITH GRANT OPTION")
 	inst.Exec(t, "GRANT SET_USER_ID ON *.* TO '"+migUser+"'@'%'")
 	maintPW := mysqltest.RandomSecret(t)
+	w.maintPW = maintPW
 	inst.Exec(t, fmt.Sprintf("CREATE USER IF NOT EXISTS '%s'@'%%' IDENTIFIED BY '%s'", migrate.MaintUser, maintPW))
 	inst.DropUserOnCleanup(t, migrate.MaintUser)
 
@@ -204,6 +213,17 @@ func (w *World) openDB() {
 	t.Cleanup(func() { _ = w.App.Close() })
 	w.Adm = inst.Admin(t)
 	w.Adm.SetMaxOpenConns(3)
+}
+
+// MaintPool 以真实的 lingedge_maint 账号（表级 SELECT/ALTER/DROP，迁移 000003 的授权）打开 maint 连接池：只供分区维护类测试使用（请求路径不持有它）。
+func (w *World) MaintPool() *db.MaintPool {
+	w.T.Helper()
+	p, err := db.OpenMaint(Ctx(w.T), db.Config{Host: w.Inst.Host(), Port: w.Inst.Port, Name: w.DBName, User: migrate.MaintUser, Password: config.NewSecret(w.maintPW), MaxOpenConns: 2})
+	if err != nil {
+		w.T.Fatalf("OpenMaint: %v", err)
+	}
+	w.T.Cleanup(func() { _ = p.Close() })
+	return p
 }
 
 // newBox 在临时目录写 0400 主密钥文件（运行期随机生成），返回真实 FileKeyProvider 支撑的 Box（与生产同一实现）。
@@ -533,6 +553,14 @@ func (s Session) Do(method, path string, body any, opts ...ReqOpt) Resp {
 	return s.W.Do(method, path, body, append(o, opts...)...)
 }
 
+// Reauth 以会话主体的口令完成 L4 再认证（POST /auth/reauth；未启用 TOTP 的账号只需口令），使随后的 x-reauth 操作在窗口内可执行。
+func (s Session) Reauth() {
+	s.W.T.Helper()
+	if r := s.Do("POST", "/auth/reauth", map[string]string{fieldPW: s.U.Password}); r.Status != 200 {
+		s.W.T.Fatalf("再认证应成功: %d %s", r.Status, r.Body)
+	}
+}
+
 // Bearer 以 Bearer 令牌发请求（不带 Cookie 与 CSRF）。
 func (w *World) Bearer(token, method, path string, body any, opts ...ReqOpt) Resp {
 	w.T.Helper()
@@ -575,15 +603,21 @@ func (w *World) SeedInternals() Internals {
 	return in
 }
 
-// SeedTask 经 root 连接写入一个任务（tenantID 为 nil = 平台任务）；返回任务 uid。
+// SeedTask 经 root 连接写入一个已完成（success）的任务（tenantID 为 nil = 平台任务）；返回任务 uid。
 func (w *World) SeedTask(tenantID *uint64, payload map[string]any) string {
+	w.T.Helper()
+	return w.SeedTaskStatus(tenantID, "success", payload)
+}
+
+// SeedTaskStatus 经 root 连接写入指定状态的任务（pending 的任务可被取消）；返回任务 uid。
+func (w *World) SeedTaskStatus(tenantID *uint64, status string, payload map[string]any) string {
 	w.T.Helper()
 	u := IDs.MustNew()
 	b, err := json.Marshal(payload)
 	if err != nil {
 		w.T.Fatal(err)
 	}
-	w.Root("INSERT INTO §.tasks (uid, tenant_id, type, status, payload_json, request_id) VALUES (?, ?, 'cache.purge_site', 'success', CAST(? AS JSON), ?)", u, tenantID, string(b), IDs.MustNew())
+	w.Root("INSERT INTO §.tasks (uid, tenant_id, type, status, payload_json, request_id) VALUES (?, ?, 'cache.purge_site', ?, CAST(? AS JSON), ?)", u, tenantID, status, string(b), IDs.MustNew())
 	return u
 }
 

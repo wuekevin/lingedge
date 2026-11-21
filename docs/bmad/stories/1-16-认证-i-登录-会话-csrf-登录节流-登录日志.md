@@ -26,7 +26,7 @@ context:
 - **缺口 1：`sessions` 没有 `uid`。** OpenAPI 的 `Session.session_ref` 与 `DELETE /auth/sessions/{sessionId}` 是 `Uid`（ULID，不暴露自增 id，ADR-017），而 `sessions` 只有自增 `id` 与令牌哈希。**不改冻结迁移（000001–000014 一字未改）**，追加 `migrations/000015_sessions_uid.sql`（`ADD COLUMN uid CHAR(26) NULL` + 唯一索引；`expand`；CHECKSUMS 已封存）。
 - **缺口 2：`login` 没有声明 401。** 登录失败统一 `401 auth.invalid_credentials`（错误码表已有），但 `login` 的 responses 只有 200/400/429/500，契约响应校验会把 401 判为未声明。补充 `'401'`（加法）。同时把 `changePassword` 的描述由「吊销其余会话」改为「吊销全部会话」（与 AC5/ADR-018 §2 一致）。
 - 以上均记录在 **`docs/bmad/contract-changes/CC-4-sessions-uid-login-401.md`**（非破坏；`make openapi-check` 相对 `contract-v1`、`make migrations-check` 相对 `migrations-m1` 均通过）。`docs/database/platform-identity.md`、`docs/database/README.md §8.1` 已同步。
-- **没有改动**：错误码、其他 operation、proto、`audit_logs`（x-audit 的统一接入属 1.21，见「审计」）。
+- **没有改动**：错误码、其他 operation、proto、`audit_logs`（x-audit 的统一接入属 1.21，见「审计」）。 【Story 1.21 已收口：审计记录器 internal/platform/audit 在业务事务内写 audit_logs，过渡的结构化日志与 adminAuditor 已移除；见 1-21 说明】
 
 ## 架构与门禁层面的三处调整（均有自测）
 
@@ -40,7 +40,7 @@ context:
 
 做法：`auth.Module.SelfService(operationID)` 是代码可核对的闭集（本模块路由元数据中权限为空且不要求再认证的 operation，共 8 个含公开的 `login`）；`httpx.WithSelfService(hooks, isSelf)` 只对这些 operation：授权钩子放行、Scope 钩子由 `tenantscope.FromPrincipal(p, either, 无目标租户)` 从主体自身推导（**忽略 `X-Tenant-ID`，不支持代租户**，acting-as 属 1.20）、审计钩子不再因「未装配」而 500（留痕由 `login_logs` 承担）。**其他任何 operation 原样委托给默认拒绝钩子**：认证通过也不放行（真实验证：已登录的 admin 访问任务中心 `GET /tasks` 与探针路由均 `403 auth.forbidden`，handler 不执行）。1.18/1.20/1.21 交付真实钩子后，应把默认钩子换成真实实现，并评估是否保留这层包装。
 
-**审计**：x-audit 的 `logout`/`changePassword`/`revokeSession` 当前只写 `login_logs`（`logout` 事件，`reason` 区分 `logout`/`session_revoked`/`password_changed`），**不写 `audit_logs`**——audit_logs 的同事务统一接入、字段（actor/tenant/acting_as/changes）与脱敏口径属 1.21，这里不抢跑；这是遗留项（见末节）。
+**审计**：x-audit 的 `logout`/`changePassword`/`revokeSession` 当前只写 `login_logs`（`logout` 事件，`reason` 区分 `logout`/`session_revoked`/`password_changed`），**不写 `audit_logs`**——audit_logs 的同事务统一接入、字段（actor/tenant/acting_as/changes）与脱敏口径属 1.21，这里不抢跑；这是遗留项（见末节）。 【Story 1.21 已收口：审计记录器 internal/platform/audit 在业务事务内写 audit_logs，过渡的结构化日志与 adminAuditor 已移除；见 1-21 说明】
 
 ## Code Map
 
@@ -105,7 +105,7 @@ context:
 
 ## 遗留与风险
 
-- **审计**：`logout/changePassword/revokeSession` 的 `audit_logs` 同事务接入、`login` 的审计字段（actor/tenant/acting_as）属 1.21；当前只有 `login_logs`。授权/Scope 钩子（1.18/1.20）交付后，应评估是否保留 `httpx.WithSelfService` 这层包装（或把自助判定并入真实授权钩子）。
+- **审计**：`logout/changePassword/revokeSession` 的 `audit_logs` 同事务接入、`login` 的审计字段（actor/tenant/acting_as）属 1.21；当前只有 `login_logs`。授权/Scope 钩子（1.18/1.20）交付后，应评估是否保留 `httpx.WithSelfService` 这层包装（或把自助判定并入真实授权钩子）。 【Story 1.21 已收口：审计记录器 internal/platform/audit 在业务事务内写 audit_logs，过渡的结构化日志与 adminAuditor 已移除；见 1-21 说明】
 - **Bearer / API Token**：认证钩子已预留 `Bearer` 注入点（`auth.Options.Bearer`），1.19 实现；此前携带 Bearer 一律 401。Bearer 成功路径免 CSRF 的端到端用例待 1.19。
 - **TOTP**：1.17 实现 `/auth/totp/*`、`mfa_token`、`reauth`；此前启用了 TOTP 的账号无法登录（fail-closed）。`mfa_verified_at`/`reauth_at` 已有列，本 Story 不写。
 - **`/auth/me` 的权限集**只读自角色表，种子里的内置角色与权限由 1.7/1.18 提供；`acting_tenant` 恒 null（1.20）。

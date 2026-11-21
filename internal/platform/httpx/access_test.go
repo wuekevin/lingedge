@@ -144,7 +144,7 @@ func TestTenantScopeActingAsSuccess(t *testing.T) {
 		}
 	}
 	logs := buf.String()
-	for _, want := range []string{"管理员代租户操作", `"acting_as_tenant_uid":"` + tenantA + `"`, `"actor_id":7`, `"audit_logs_written":false`} {
+	for _, want := range []string{"管理员代租户操作", `"acting_as_tenant_uid":"` + tenantA + `"`, `"actor_id":7`} {
 		if !strings.Contains(logs, want) {
 			t.Errorf("日志应含 %s", want)
 		}

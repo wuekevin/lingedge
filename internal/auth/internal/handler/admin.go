@@ -13,7 +13,7 @@ import (
 
 // /admin/users|roles|permissions（Story 1.18）。路由元数据与 docs/api/openapi.yaml 的 x-permissions / x-tenant-scope / x-audit / x-reauth / x-phase
 // 及 IdempotencyKey 参数逐项一致（make contract-check 与 contracttest 核对）；全部经 httpx.Router.Register 注册，没有 501 占位。
-// 授权由 RBAC 授权钩子（authorizer.go）判定；x-reauth 由 httpx.WithReauth（先权限后再认证）；写操作的审计见 audit.go（audit_logs 待 Story 1.21）。
+// 授权由 RBAC 授权钩子（authorizer.go）判定；x-reauth 由 httpx.WithReauth（先权限后再认证）；写操作的审计由 Service 在业务事务内写 audit_logs（Story 1.21）。
 var (
 	adminRoute = func(id, method, path string, perms []string, audit, reauth, idem bool) httpx.RouteMeta {
 		return httpx.RouteMeta{OperationID: id, Method: method, Path: path, Auth: httpx.AuthRequired, Permissions: perms,
@@ -35,16 +35,17 @@ var (
 	MetaDeleteRole         = adminRoute("deleteRole", "DELETE", "/admin/roles/{roleId}", []string{"role:write"}, true, true, false)
 	MetaSetRolePermissions = adminRoute("setRolePermissions", "PUT", "/admin/roles/{roleId}/permissions", []string{"role:write"}, true, true, false)
 	MetaListPermissions    = adminRoute("listPermissions", "GET", "/admin/permissions", []string{"role:read"}, false, false, false)
+	MetaListLoginLogs      = adminRoute("listLoginLogs", "GET", "/admin/login-logs", []string{"login-log:read"}, false, false, false)
 )
 
 // AdminMetas 是本 Story 注册的全部 /admin 路由元数据。
 func AdminMetas() []httpx.RouteMeta {
 	return []httpx.RouteMeta{MetaListUsers, MetaCreateUser, MetaGetUser, MetaUpdateUser, MetaDeleteUser, MetaSetUserRoles, MetaUnlockUser,
 		MetaResetUserPassword, MetaRevokeUserSessions, MetaListRoles, MetaCreateRole, MetaGetRole, MetaUpdateRole, MetaDeleteRole,
-		MetaSetRolePermissions, MetaListPermissions}
+		MetaSetRolePermissions, MetaListPermissions, MetaListLoginLogs}
 }
 
-// IsAdminOperation 报告 operationID 是否属于本模块的 /admin 管理路由（写操作审计的结构化日志兜底只对它们生效）。
+// IsAdminOperation 报告 operationID 是否属于本模块的 /admin 管理路由。
 func IsAdminOperation(operationID string) bool {
 	for _, m := range AdminMetas() {
 		if m.OperationID == operationID {
@@ -72,6 +73,7 @@ func (h *Handlers) registerAdmin(r *httpx.Router) error {
 		r.Register(MetaDeleteRole, h.deleteRole),
 		r.Register(MetaSetRolePermissions, h.setRolePermissions),
 		r.Register(MetaListPermissions, h.listPermissions),
+		r.Register(MetaListLoginLogs, h.listAllLoginLogs),
 	)
 }
 

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/wuekevin/lingedge/internal/auth"
+	"github.com/wuekevin/lingedge/internal/platform/audit"
 	"github.com/wuekevin/lingedge/internal/platform/clock"
 	"github.com/wuekevin/lingedge/internal/platform/httpx"
 	"github.com/wuekevin/lingedge/internal/platform/logx"
@@ -51,7 +52,11 @@ func TestShutdownFlushesAuthBackgroundWrites(t *testing.T) {
 				return httpx.Hooks{}, fmt.Errorf("Deps 应带 Secrets 与 OnShutdown")
 			}
 			var err error
-			m, err = auth.New(context.Background(), auth.Options{Pool: d.DB, Redis: d.Redis, Clock: d.Clock, IDs: d.IDs, Log: d.Logger, Argon2: cfg.Auth.Argon2, Box: d.Secrets})
+			aw, aerr := audit.New(audit.Options{Pool: d.DB, IDs: d.IDs, Clock: d.Clock, Log: d.Logger})
+			if aerr != nil {
+				return httpx.Hooks{}, aerr
+			}
+			m, err = auth.New(context.Background(), auth.Options{Pool: d.DB, Redis: d.Redis, Clock: d.Clock, IDs: d.IDs, Log: d.Logger, Argon2: cfg.Auth.Argon2, Box: d.Secrets, Audit: aw})
 			if err != nil {
 				return httpx.Hooks{}, err
 			}
@@ -64,7 +69,7 @@ func TestShutdownFlushesAuthBackgroundWrites(t *testing.T) {
 				m.Flush()
 				return nil
 			})
-			return httpx.WithSelfService(httpx.Hooks{Authenticator: m.Authenticator()}, m.SelfService), nil
+			return httpx.WithSelfService(httpx.Hooks{Authenticator: m.Authenticator(), Auditor: aw.Auditor()}, m.SelfService), nil
 		},
 		Register: func(r *httpx.Router, _ server.Deps) error { return m.Register(r) },
 	}

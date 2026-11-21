@@ -225,6 +225,30 @@ func (r *Repo) ListUserLoginLogs(ctx context.Context, userID, beforeID uint64, l
 	return rows, err
 }
 
+// LoginLogFilter 是平台全局登录日志的过滤条件（空串/nil = 不过滤）。
+type LoginLogFilter struct {
+	Event      string
+	Identifier string
+	IP         []byte // 精确匹配（16/4 字节）
+	From, To   *time.Time
+	BeforeID   uint64
+}
+
+// ListLoginLogsPlatform 列出全部用户的登录事件（平台全局，GET /admin/login-logs；id 倒序，beforeID>0 时只取更早的）。路由层已限定平台主体与 login-log:read。
+// lingedge:identity-table=login_logs
+func (r *Repo) ListLoginLogsPlatform(ctx context.Context, f LoginLogFilter, limit int) ([]domain.LoginLog, error) {
+	var rows []domain.LoginLog
+	var ip any
+	if len(f.IP) > 0 {
+		ip = f.IP
+	}
+	err := r.ex(ctx).Select(ctx, &rows, db.Q(`SELECT id, uid, created_at, user_id, tenant_id, realm, identifier, event, ip, user_agent, request_id, reason
+		FROM login_logs WHERE (? = '' OR event = ?) AND (? = '' OR identifier = ?) AND (? IS NULL OR ip = ?)
+		AND (? IS NULL OR created_at >= ?) AND (? IS NULL OR created_at <= ?) AND (? = 0 OR id < ?) ORDER BY id DESC LIMIT ?`),
+		f.Event, f.Event, f.Identifier, f.Identifier, ip, ip, f.From, f.From, f.To, f.To, f.BeforeID, f.BeforeID, limit)
+	return rows, err
+}
+
 // ---- 角色与权限（只读；授权判定属 Story 1.18）----
 
 // UserAccess 读取用户在某一范围内的角色与权限集：tenantID 为 0 表示平台角色（user_roles.tenant_id IS NULL），否则为该租户内的角色。

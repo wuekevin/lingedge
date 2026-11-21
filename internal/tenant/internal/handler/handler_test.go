@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/wuekevin/lingedge/internal/platform/audit"
 	"github.com/wuekevin/lingedge/internal/platform/clock"
 	"github.com/wuekevin/lingedge/internal/platform/httpx"
 	"github.com/wuekevin/lingedge/internal/platform/httpx/contracttest"
@@ -36,12 +37,10 @@ func TestRoutesRegisteredAndMatchOpenAPI(t *testing.T) {
 		if rt.OperationID == "getCurrentTenant" != (rt.TenantScope == httpx.ScopeTenant) || (rt.TenantScope != httpx.ScopeTenant && rt.TenantScope != httpx.ScopePlatform) {
 			t.Errorf("%s: 只有 getCurrentTenant 是 tenant 路由，其余为 platform: %s", rt.OperationID, rt.TenantScope)
 		}
-		if rt.Audit != m.AuditedOperation(rt.OperationID) {
-			t.Errorf("%s: AuditedOperation 应与 x-audit 一致", rt.OperationID)
+		// 写操作必须声明审计并在 audit.Catalog 登记（Story 1.21）；读操作不审计。
+		if write := rt.Method != "GET"; rt.Audit != write || audit.Registered(rt.OperationID) != write {
+			t.Errorf("%s: 写操作须 x-audit 且在 audit.Catalog 登记，读操作不得（method=%s audit=%v registered=%v）", rt.OperationID, rt.Method, rt.Audit, audit.Registered(rt.OperationID))
 		}
-	}
-	if m.AuditedOperation("createTenant") || m.AuditedOperation("listTenants") {
-		t.Error("读操作与未注册的 operation 不应是已审计写操作")
 	}
 	if m.Resolver() != nil {
 		t.Error("ManifestOnly 不应提供租户目录（acting-as 因此保持安全拒绝）")

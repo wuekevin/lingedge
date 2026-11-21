@@ -6,6 +6,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/wuekevin/lingedge/internal/platform/audit"
 	"github.com/wuekevin/lingedge/internal/platform/clock"
 	"github.com/wuekevin/lingedge/internal/platform/db"
 	"github.com/wuekevin/lingedge/internal/platform/httpx"
@@ -19,6 +20,8 @@ type Options struct {
 	Pool  db.Pool
 	Clock clock.Clock
 	Log   *zap.Logger
+	// Audit 是审计记录器（写操作的审计与业务变更同一事务，fail-closed）；非 ManifestOnly 时必填。
+	Audit audit.Recorder
 	// ManifestOnly 仅用于导出路由清单（lingedge-server routes）：不需要数据库，处理函数不可被调用。
 	ManifestOnly bool
 }
@@ -38,7 +41,7 @@ func NewModule(_ context.Context, o Options) (*Module, error) {
 	if err != nil {
 		return nil, err
 	}
-	svc, err := service.New(service.Options{Repo: repo, WithTx: o.Pool.WithTx, Clock: o.Clock})
+	svc, err := service.New(service.Options{Repo: repo, WithTx: o.Pool.WithTx, Clock: o.Clock, Audit: o.Audit})
 	if err != nil {
 		return nil, err
 	}
@@ -59,14 +62,4 @@ func (m *Module) Resolver() httpx.TenantResolver {
 		return nil
 	}
 	return m.svc
-}
-
-// AuditedOperation 报告 operationID 是否是本模块要求审计的写 operation。
-func (m *Module) AuditedOperation(operationID string) bool {
-	for _, meta := range Metas() {
-		if meta.OperationID == operationID {
-			return meta.Audit
-		}
-	}
-	return false
 }

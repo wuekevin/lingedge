@@ -210,7 +210,7 @@ func securityMiddleware(origins map[string]bool) gin.HandlerFunc {
 
 func setMetaMiddleware(meta RouteMeta) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.Request = c.Request.WithContext(withClientIP(withMeta(c.Request.Context(), meta), c.ClientIP()))
+		c.Request = c.Request.WithContext(withUserAgent(withClientIP(withMeta(c.Request.Context(), meta), c.ClientIP()), c.Request.UserAgent()))
 		c.Next()
 	}
 }
@@ -292,6 +292,8 @@ const replayedKey = "lingedge.idempotent_replay"
 
 func auditMiddleware(h Auditor, meta RouteMeta) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		trail := &auditTrail{}
+		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), auditTrailKey{}, trail))
 		end, err := h.Begin(c.Request, meta)
 		if err != nil {
 			Fail(c, err)
@@ -304,7 +306,7 @@ func auditMiddleware(h Auditor, meta RouteMeta) gin.HandlerFunc {
 		panicked := true
 		defer func() {
 			replayed, _ := c.Get(replayedKey)
-			out := AuditOutcome{Status: c.Writer.Status(), Replayed: replayed == true, Panicked: panicked} //nolint:errorlint // bool 比较
+			out := AuditOutcome{Status: c.Writer.Status(), Replayed: replayed == true, Panicked: panicked, Recorded: int(trail.n.Load())} //nolint:errorlint // bool 比较
 			if panicked {
 				out.Status = http.StatusInternalServerError
 			}

@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/wuekevin/lingedge/internal/platform/apierr"
+	"github.com/wuekevin/lingedge/internal/platform/audit"
 	"github.com/wuekevin/lingedge/internal/platform/clock"
 	"github.com/wuekevin/lingedge/internal/platform/httpx"
 	"github.com/wuekevin/lingedge/internal/platform/httpx/contracttest"
@@ -34,6 +35,11 @@ func (p *principal) ActorID() uint64             { return p.actor }
 func (p *principal) IsPlatform() bool            { return p.platform }
 func (p *principal) TenantID() uint64            { return p.tenant }
 func (p *principal) HasPermission(s string) bool { return p.perms[s] }
+
+// AuditActor 实现 audit.ActorProvider（审计记录器据此取得操作者快照）。
+func (p *principal) AuditActor() (string, uint64, uint64, string, uint64) {
+	return "user", p.actor, 0, "taskrt-test-actor", p.tenant
+}
 
 // 头 X-Test-Principal："tenant|<tenantID>|<actorID>|perm;perm" 或 "platform|0|<actorID>|perm;perm"。
 type testHooks struct{}
@@ -111,7 +117,11 @@ func newAPI(t *testing.T) *apiEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := taskapi.Register(r, e.store); err != nil {
+	aw, err := audit.New(audit.Options{Pool: e.app, IDs: e.ids, Clock: clock.System()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := taskapi.Register(r, e.store, aw, e.app.WithTx); err != nil {
 		t.Fatal(err)
 	}
 	// 耗时操作的 202 路径：用契约里真实存在的 operation（purgeUrls，M1 缓存刷新）的元数据挂一个测试处理函数，
@@ -312,12 +322,22 @@ func TestTaskCenterAPI(t *testing.T) {
 	if st := a.status(t, task.UID); st != "pending" {
 		t.Fatalf("越权取消不得改变任务: %s", st)
 	}
+	if n := a.rootInt(t, "SELECT COUNT(*) FROM §.audit_logs WHERE action = 'task.cancel'"); n != 0 {
+		t.Fatalf("被拒绝/越权的取消不得写审计: %d", n)
+	}
 	if got := decode[taskJSON](t, a.call(t, "cancelTask", "POST", "/api/v1/tasks/"+task.UID+"/cancel", pa, "")); got.Status != "canceled" || !got.CancelRequested {
 		t.Fatalf("取消结果: %+v", got)
+	}
+	// 取消与审计同一事务：成功取消恰好一条审计（对象类型 task、对象 uid、所属租户）。
+	if n := a.rootInt(t, "SELECT COUNT(*) FROM §.audit_logs WHERE action = 'task.cancel' AND resource_type = 'task' AND resource_uid = ? AND tenant_id = ?", task.UID, a.ta); n != 1 {
+		t.Fatalf("取消应恰好写一条审计: %d", n)
 	}
 	rec = a.call(t, "cancelTask", "POST", "/api/v1/tasks/"+task.UID+"/cancel", pa, "")
 	if got := decode[struct{ Error struct{ Code string } }](t, rec); rec.Code != 409 || got.Error.Code != "task.not_cancelable" {
 		t.Fatalf("终态取消应 409 task.not_cancelable: %d %s", rec.Code, rec.Body.String())
+	}
+	if n := a.rootInt(t, "SELECT COUNT(*) FROM §.audit_logs WHERE action = 'task.cancel'"); n != 1 {
+		t.Fatalf("409 没有发生变更，不得再写审计: %d", n)
 	}
 	// running 任务的协作式取消：200 + cancel_requested=true，状态仍 running。
 	e := a.env

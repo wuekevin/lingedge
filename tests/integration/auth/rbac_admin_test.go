@@ -336,24 +336,22 @@ func TestAdminUsersLifecycle(t *testing.T) {
 		t.Errorf("删除用户应清除其角色授予")
 	}
 
-	// ---- 日志脱敏（G-5）：生成/设定/当前的所有口令都不得出现在任何日志里；管理操作日志诚实标注 audit_logs 未写入 ----
+	// ---- 日志脱敏（G-5）：生成/设定/当前的所有口令都不得出现在任何日志里，也不得出现在审计记录里（Story 1.21）----
 	s.mod.Flush()
 	logs := s.logs.String()
 	for _, secret := range []string{temp, reset1, supplied, chosen, setPW} {
 		if strings.Contains(logs, secret) {
 			t.Errorf("日志泄露了口令 %q…", secret[:6])
 		}
-	}
-	for _, want := range []string{"user.create", "user.reset_password", "audit_logs_written", "待 Story 1.21"} {
-		if !strings.Contains(logs, want) {
-			t.Errorf("应有不含敏感信息的结构化管理操作日志（缺 %q）", want)
+		if n := s.e.rootInt(t, "SELECT COUNT(*) FROM §.audit_logs WHERE CONVERT(CONCAT_WS(' ', actor_label, resource_uid, CAST(changes_json AS CHAR), CAST(meta_json AS CHAR)) USING utf8mb4) LIKE ?", "%"+secret+"%"); n != 0 {
+			t.Errorf("审计记录泄露了口令 %q…", secret[:6])
 		}
 	}
-	if strings.Contains(logs, `"audit_logs_written":true`) {
-		t.Errorf("不得假装已写 audit_logs")
-	}
-	if n := s.e.rootInt(t, "SELECT COUNT(*) FROM §.audit_logs"); n != 0 {
-		t.Errorf("audit 模块（1.21）未实现，本 Story 不得写 audit_logs: %d", n)
+	// 审计记录（与业务同事务写入 audit_logs）：管理写操作各留一条，操作者是平台管理员，无 acting_as。
+	for _, act := range []string{"user.create", "user.reset_password", "user.update", "user.delete", "user.set_roles"} {
+		if n := s.e.rootInt(t, "SELECT COUNT(*) FROM §.audit_logs WHERE action = ? AND actor_type = 'user' AND acting_as = 0 AND result = 'success'", act); n < 1 {
+			t.Errorf("管理操作 %s 应写入 audit_logs", act)
+		}
 	}
 	s.assertNoPlatformPermInTenantRoles()
 }
@@ -618,6 +616,10 @@ func TestRolesCRUDAndTenantRoleScopeRule(t *testing.T) {
 	}
 	if n := s.e.rootInt(t, "SELECT COUNT(*) FROM §.roles WHERE code = 'idem_role'"); n != 1 {
 		t.Errorf("幂等重放不得重复创建: %d", n)
+	}
+	// 审计（Story 1.21）：重放不重复记录——两次请求只有一次真正执行，恰好一条 role.create 审计。
+	if n := s.e.rootInt(t, "SELECT COUNT(*) FROM §.audit_logs WHERE action = 'role.create' AND resource_uid = ?", a.JSON(t)["uid"]); n != 1 {
+		t.Errorf("幂等重放不得重复写审计: %d", n)
 	}
 	_ = fmt.Sprintf
 }

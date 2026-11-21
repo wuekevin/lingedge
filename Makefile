@@ -41,13 +41,13 @@ endef
 
 .PHONY: help build verify-build test race lint fmt vet check-scaffold clean \
         gen-lint arch-check golangci shell-check repo-check gate-selftest vuln verify-gates \
-        contract-bin contract-selftest openapi-breaking migrations-check migrations-seal freeze-check perms-check tenantscope-check contract-check \
+        contract-bin contract-selftest openapi-breaking migrations-check migrations-seal freeze-check perms-check tenantscope-check audit-check contract-check \
         print-ldflags migrate migrate-test proto proto-check openapi-check frontend e2e edge-test security release
 
 help:
 	@echo "目标: build verify-build test race lint migrate migrate-test proto proto-check openapi-check frontend e2e edge-test security release"
 	@echo "辅助: fmt vet check-scaffold clean gen-lint arch-check golangci shell-check gate-selftest vuln verify-gates"
-	@echo "契约(Story 1.3): contract-check（= contract-selftest openapi-check proto-check migrations-check freeze-check perms-check[Story 1.18] tenantscope-check[Story 1.20]）migrations-seal"
+	@echo "契约(Story 1.3): contract-check（= contract-selftest openapi-check proto-check migrations-check freeze-check perms-check[Story 1.18] tenantscope-check[Story 1.20] audit-check[Story 1.21]）migrations-seal"
 	@echo "迁移(Story 1.6): migrate（MIGRATE_ARGS=plan|up|down|status|recover|lint ...）migrate-test"
 	@echo "未实现的目标会输出 NOT_IMPLEMENTED(story X.Y) 并以非零退出。"
 
@@ -208,7 +208,15 @@ tenantscope-check:
 	$(GO) test -count=1 -run 'TestCheckScopeCoverage' ./internal/platform/httpx/contracttest/
 	$(GO) test -count=1 -run 'TestTenantScopeCoverage' ./cmd/lingedge-server/
 
-contract-check: contract-selftest openapi-check proto-check migrations-check freeze-check perms-check tenantscope-check
+# 审计覆盖（Story 1.21 AC1、FR-23）：「声明 Audit 但未记录」与「写 operation 缺 Audit 声明」都被发现——
+# ① `gates audit`：openapi 的写 operation 须声明 x-audit（例外清单 scripts/gates/data/audit-exempt.txt，带理由）、audit.Catalog ⇄ openapi 一致、每个声明的动作都有 .Record(ctx, audit.ActionX, …) 调用；
+# ② 真实路由集合的同类检查（cmd/lingedge-server 的 TestAuditCoverage）；检查器自身的负向样本在 scripts/gates/audit_test.go（make gate-selftest）与 internal/platform/httpx/contracttest。
+audit-check:
+	$(GATES) audit
+	$(GO) test -count=1 -run 'TestCheckAuditCoverageNegativeSamples' ./internal/platform/httpx/contracttest/
+	$(GO) test -count=1 -run 'TestAuditCoverage' ./cmd/lingedge-server/
+
+contract-check: contract-selftest openapi-check proto-check migrations-check freeze-check perms-check tenantscope-check audit-check
 
 frontend:
 	$(call not_implemented,1.36)

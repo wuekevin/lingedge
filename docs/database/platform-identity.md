@@ -267,7 +267,8 @@ C2。`role_id` FK→roles CASCADE；`permission_id` FK→permissions CASCADE。�
 - 分区：`PARTITION BY RANGE COLUMNS(created_at)` 按月，**含 `pmax VALUES LESS THAN (MAXVALUE)` 兜底分区**（无 `pmax` 时越界 INSERT 报 ERROR 1526，实测）；Worker 的内部周期作业 `partition.maintain`（非 OpenAPI TaskType，AA-8）用 `lingedge_maint`（表级 ALTER/DROP）每日把 `pmax` `REORGANIZE` 出未来 N 个月分区，保留期到期 `DROP PARTITION`（README §5.1）。
 - 与业务变更**同事务**写入；分区表无外键（实测 ERROR 1506）。
 - 不可变：BEFORE UPDATE/DELETE 触发器（README §5；建触发器需迁移账号具 `SET_USER_ID` 或 `log_bin_trust_function_creators=1`，README §5.1）；应用账号仅 `INSERT, SELECT`。
-- 保留：365 天 `[ASSUMPTION]`（OQ-6），DROP PARTITION。
+- 保留：365 天 `[ASSUMPTION]`（OQ-6），DROP PARTITION。**保留期的 `DROP PARTITION` 清理属 Story 3.48（`retention.cleanup`），Story 1.21 未实现**：1.21 只落地「预建分区 + 保留 `pmax`」（内部周期作业 `partition.maintain`，Story 1.15 内置，非 TaskType）与真实审计写入下的联调（`tests/integration/audit` 的 `TestPartitionMaintainRealAuditTable`：lingedge_maint 把 `pmax` 里的行搬入新分区、行数不变、`pmax` 保留、维护后应用账号写入落入新分区、maint 账号没有 INSERT/UPDATE/DELETE）。
+- 写入（Story 1.21）：由业务 Service 在业务事务内经 `audit.Recorder.Record` 写入（失败 = 业务整体回滚，fail-closed）；`changes_json` 写入前经 `pkg/redact` 脱敏，序列化超 16 KiB 整体替换为 `{"truncated":true}`；`ip` 为 4/16 字节二进制；`request_id` 取请求的 `X-Request-ID`（后台来源新生成）。应用账号对该表只有 `SELECT, INSERT`（真实账号的 UPDATE/DELETE/TRUNCATE/DROP/ALTER 被拒，1142）；API 没有任何修改/删除路径。
 - 租户可见范围：租户仅可读 `tenant_id = 自己` 且 `acting_as` 不泄漏平台内部字段（Service 做字段裁剪）。
 
 ## 4. 任务、租约、幂等、事件

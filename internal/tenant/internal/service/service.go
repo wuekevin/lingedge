@@ -2,7 +2,8 @@
 //
 // 约定：平台路由（/tenants*）以平台 Scope + 路径里的目标租户 uid 操作；不存在的租户一律 404（与非法 uid 同形）；
 // 租户可见字段不含节点/集群内部标识（R-T1）——tenants.settings 由平台写入，写入时拒绝带内部标识的键（leakguard.ForbiddenKey）。
-// 写操作的审计：audit 模块（Story 1.21）未实现，本模块不写 audit_logs，也不假装已写（过渡的结构化日志在审计钩子里）。
+// 写操作的审计（Story 1.21）：每个写操作在**同一业务事务内**经 audit.Recorder 写 audit_logs（tenant_id = 目标租户，acting_as 与操作者取自请求上下文），
+// 审计写入失败 = 事务整体回滚（fail-closed）。
 package service
 
 import (
@@ -16,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/wuekevin/lingedge/internal/platform/apierr"
+	"github.com/wuekevin/lingedge/internal/platform/audit"
 	"github.com/wuekevin/lingedge/internal/platform/clock"
 	"github.com/wuekevin/lingedge/internal/platform/db"
 	"github.com/wuekevin/lingedge/internal/platform/httpx"
@@ -39,25 +41,28 @@ const (
 type Options struct {
 	Repo   *repository.Repo
 	WithTx func(ctx context.Context, fn func(ctx context.Context) error) error
-	Clock  clock.Clock
+	// Audit 是审计记录器（必填）。
+	Audit audit.Recorder
+	Clock clock.Clock
 }
 
 // Service 是租户服务。
 type Service struct {
 	repo   *repository.Repo
 	withTx func(ctx context.Context, fn func(ctx context.Context) error) error
+	audit  audit.Recorder
 	clk    clock.Clock
 }
 
 // New 创建租户服务。
 func New(o Options) (*Service, error) {
-	if o.Repo == nil || o.WithTx == nil {
-		return nil, errors.New("tenant/service: 缺少 Repo 或 WithTx")
+	if o.Repo == nil || o.WithTx == nil || o.Audit == nil {
+		return nil, errors.New("tenant/service: 缺少 Repo、WithTx 或 Audit")
 	}
 	if o.Clock == nil {
 		o.Clock = clock.System()
 	}
-	return &Service{repo: o.Repo, withTx: o.WithTx, clk: o.Clock}, nil
+	return &Service{repo: o.Repo, withTx: o.WithTx, clk: o.Clock, audit: o.Audit}, nil
 }
 
 var _ httpx.TenantResolver = (*Service)(nil)
@@ -181,8 +186,28 @@ func (s *Service) Update(ctx context.Context, sc scope.Scope, tenantUID string, 
 		if _, err := s.repo.UpdateTenantAcrossTenants(ctx, sc, t.ID, upd); err != nil {
 			return err
 		}
-		out, err = s.byUID(ctx, tenantUID)
-		return err
+		if out, err = s.byUID(ctx, tenantUID); err != nil {
+			return err
+		}
+		ch := map[string]any{}
+		if upd.Name != nil {
+			ch["name"] = *upd.Name
+		}
+		if upd.ContactEmail != nil {
+			ch["contact_email"] = *upd.ContactEmail
+		}
+		if upd.Locale != nil {
+			ch["locale"] = *upd.Locale
+		}
+		if in.Settings != nil { // settings 是自由 JSON：摘要只记键名，不记取值
+			keys := make([]string, 0, len(in.Settings))
+			for k := range in.Settings {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			ch["settings_keys"] = keys
+		}
+		return s.audit.Record(ctx, audit.ActionTenantUpdate, audit.Event{ResourceType: audit.ResourceTenant, ResourceUID: t.UID, TenantID: t.ID, Changes: ch})
 	})
 	return out, err
 }
@@ -282,8 +307,11 @@ func (s *Service) AddMember(ctx context.Context, sc scope.Scope, actorID uint64,
 		if err := s.repo.BumpPermissionVersion(ctx, sc, u.ID); err != nil {
 			return err
 		}
-		out, err = s.repo.GetMember(ctx, sc, t.ID, u.ID)
-		return err
+		if out, err = s.repo.GetMember(ctx, sc, t.ID, u.ID); err != nil {
+			return err
+		}
+		return s.audit.Record(ctx, audit.ActionTenantMemberAdd, audit.Event{ResourceType: audit.ResourceTenant, ResourceUID: t.UID, TenantID: t.ID,
+			Changes: map[string]any{"member_email": email, "role_codes": codes}})
 	})
 	return out, err
 }
@@ -364,8 +392,18 @@ func (s *Service) SetQuotas(ctx context.Context, sc scope.Scope, tenantUID strin
 				return err
 			}
 		}
-		out, err = s.quotasOf(ctx, sc, t.ID)
-		return err
+		if out, err = s.quotasOf(ctx, sc, t.ID); err != nil {
+			return err
+		}
+		ch := make(map[string]any, len(keys))
+		for _, k := range keys {
+			if limits[k] == nil {
+				ch[k] = nil // 不限
+			} else {
+				ch[k] = *limits[k]
+			}
+		}
+		return s.audit.Record(ctx, audit.ActionTenantQuotasPut, audit.Event{ResourceType: audit.ResourceTenant, ResourceUID: t.UID, TenantID: t.ID, Changes: map[string]any{"limits": ch}})
 	})
 	return out, err
 }

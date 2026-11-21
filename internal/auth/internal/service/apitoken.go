@@ -22,6 +22,7 @@ import (
 
 	"github.com/wuekevin/lingedge/internal/auth/internal/domain"
 	"github.com/wuekevin/lingedge/internal/platform/apierr"
+	"github.com/wuekevin/lingedge/internal/platform/audit"
 	"github.com/wuekevin/lingedge/internal/platform/db"
 	"github.com/wuekevin/lingedge/internal/platform/rbac"
 	"github.com/wuekevin/lingedge/internal/platform/redisx"
@@ -354,19 +355,28 @@ func (s *Service) CreateAPIToken(ctx context.Context, p *domain.Principal, in Cr
 			return TokenView{}, "", apierr.Internal(err)
 		}
 	}
-	token, newUID, err := s.insertToken(ctx, nt)
+	var token, newUID string
+	// 令牌写入与审计同一事务（失败即整体回滚：不会留下「没有审计的令牌」）。变更摘要只含前缀/名称/作用域，绝不含令牌明文或哈希。
+	err = s.withTx(ctx, func(ctx context.Context) error {
+		var ierr error
+		if token, newUID, ierr = s.insertToken(ctx, nt); ierr != nil {
+			return ierr
+		}
+		prefix, _ := ParseAPIToken(token)
+		return s.audit.Record(ctx, audit.ActionAPITokenCreate, audit.Event{ResourceType: audit.ResourceAPIToken, ResourceUID: newUID,
+			Changes: map[string]any{"prefix": prefix, "name": name, "scopes": scopes, "has_cidrs": len(cidrs) > 0, "expires_at": exp.UTC().Format(time.RFC3339)}})
+	})
 	if err != nil {
-		return TokenView{}, "", apierr.Internal(err)
+		return TokenView{}, "", s.wrapInternal(err)
 	}
 	prefix, _ := ParseAPIToken(token)
 	row, err := s.repo.FindOwnedAPIToken(ctx, userID, tenantID, newUID)
 	if err != nil {
 		return TokenView{}, "", apierr.Internal(err)
 	}
-	// 结构化日志（audit_logs 待 Story 1.21 补写）：只记前缀与 uid，不记明文，也不记哈希。
-	s.log.Info("API Token 已创建（结构化日志；audit_logs 待 Story 1.21 补写）", zap.String("prefix", prefix), zap.String("uid", row.UID),
-		zap.String("owner_uid", p.User.UID), zap.Int("scopes", len(scopes)), zap.Bool("has_cidrs", len(cidrs) > 0),
-		zap.Bool("audit_logs_written", false), zap.String("request_id", ri.RequestID))
+	// 结构化日志：只记前缀与 uid，不记明文，也不记哈希（审计记录已在上面的事务内写入 audit_logs）。
+	s.log.Info("API Token 已创建", zap.String("prefix", prefix), zap.String("uid", row.UID),
+		zap.String("owner_uid", p.User.UID), zap.Int("scopes", len(scopes)), zap.Bool("has_cidrs", len(cidrs) > 0), zap.String("request_id", ri.RequestID))
 	return toTokenView(row), token, nil
 }
 
@@ -418,7 +428,9 @@ func (s *Service) RotateAPIToken(ctx context.Context, p *domain.Principal, token
 			return err
 		}
 		oldHash, oldPrefix = old.Hash, old.Prefix
-		return nil
+		newPrefix, _ := ParseAPIToken(token)
+		return s.audit.Record(ctx, audit.ActionAPITokenRotate, audit.Event{ResourceType: audit.ResourceAPIToken, ResourceUID: newUID,
+			Changes: map[string]any{"prefix": newPrefix, "rotated_from_uid": tokenUID, "rotated_from_prefix": old.Prefix, "scopes": scopes}})
 	})
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
@@ -432,9 +444,8 @@ func (s *Service) RotateAPIToken(ctx context.Context, p *domain.Principal, token
 		return TokenView{}, "", apierr.Internal(err)
 	}
 	newPrefix, _ := ParseAPIToken(token)
-	s.log.Info("API Token 已轮换（旧令牌已吊销；结构化日志；audit_logs 待 Story 1.21 补写）", zap.String("prefix", newPrefix), zap.String("rotated_from_prefix", oldPrefix),
-		zap.String("uid", newUID), zap.String("rotated_from_uid", tokenUID), zap.String("owner_uid", p.User.UID),
-		zap.Bool("audit_logs_written", false), zap.String("request_id", ri.RequestID))
+	s.log.Info("API Token 已轮换（旧令牌已吊销）", zap.String("prefix", newPrefix), zap.String("rotated_from_prefix", oldPrefix),
+		zap.String("uid", newUID), zap.String("rotated_from_uid", tokenUID), zap.String("owner_uid", p.User.UID), zap.String("request_id", ri.RequestID))
 	return toTokenView(row), token, nil
 }
 
@@ -453,14 +464,21 @@ func (s *Service) RevokeAPIToken(ctx context.Context, p *domain.Principal, token
 		return apierr.Internal(err)
 	}
 	s.dropTokenKey(ctx, row.Hash)
-	changed, err := s.repo.RevokeAPIToken(ctx, row.ID, s.clk.Now())
-	if err != nil {
-		return apierr.Internal(err)
+	var changed bool
+	if err := s.withTx(ctx, func(ctx context.Context) error {
+		var rerr error
+		if changed, rerr = s.repo.RevokeAPIToken(ctx, row.ID, s.clk.Now()); rerr != nil {
+			return rerr
+		}
+		// 已吊销的再吊销是幂等的（204）：同样留痕（changed=false），避免「成功响应却无审计」的歧义。
+		return s.audit.Record(ctx, audit.ActionAPITokenRevoke, audit.Event{ResourceType: audit.ResourceAPIToken, ResourceUID: row.UID,
+			Changes: map[string]any{"prefix": row.Prefix, "changed": changed}})
+	}); err != nil {
+		return s.wrapInternal(err)
 	}
 	s.dropTokenKey(ctx, row.Hash)
 	if changed {
-		s.log.Info("API Token 已吊销（结构化日志；audit_logs 待 Story 1.21 补写）", zap.String("prefix", row.Prefix), zap.String("uid", row.UID),
-			zap.String("owner_uid", p.User.UID), zap.Bool("audit_logs_written", false), zap.String("request_id", ri.RequestID))
+		s.log.Info("API Token 已吊销", zap.String("prefix", row.Prefix), zap.String("uid", row.UID), zap.String("owner_uid", p.User.UID), zap.String("request_id", ri.RequestID))
 	}
 	return nil
 }

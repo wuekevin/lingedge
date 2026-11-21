@@ -190,10 +190,10 @@ func TestXReauthOperationsEnforcedInChain(t *testing.T) {
 		if realOps[o.id] {
 			continue
 		}
-		// 占位路由：要求审计（x-audit）的在 audit 模块（1.21）装配前仍被审计钩子安全拒绝（500，不放宽）；其余应到达 handler。
+		// 占位路由：要求审计（x-audit）却没有在 audit.Catalog 登记动作的，被真实审计钩子 fail-closed 拒绝（500，handler 不执行）；其余应到达 handler。
 		if audited[o.id] {
 			if r.Status != 500 || strings.Contains(string(r.Body), "reached") {
-				t.Errorf("%s 要求审计但审计钩子未实现，应被安全拒绝（500）: %d %s", o.id, r.Status, r.Body)
+				t.Errorf("%s 要求审计但未在审计目录登记，应被审计钩子安全拒绝（500）: %d %s", o.id, r.Status, r.Body)
 			}
 		} else if !strings.Contains(string(r.Body), "reached") {
 			t.Errorf("%s 占位路由应到达 handler: %d %s", o.id, r.Status, r.Body)
@@ -415,7 +415,7 @@ func TestNoPlaintextSecretsAnywhere(t *testing.T) {
 		}
 	}
 	if !strings.Contains(logs, "TOTP 已启用") {
-		t.Error("应有「TOTP 已启用」的结构化日志（审计待 1.21 补写 audit_logs）")
+		t.Error("应有「TOTP 已启用」的结构化日志（审计记录另见 audit_logs）")
 	}
 	// 2) Redis 全部键与值。
 	rdb := goredis.NewClient(&goredis.Options{Addr: s.redis.Addr()})

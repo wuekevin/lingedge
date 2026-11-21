@@ -23,8 +23,9 @@ const (
 	// 列表只含本租户、他租户 id → 404 与「不存在」逐字节一致、响应字段 R-T1、kin-openapi 响应契约。驱动登记它实际发出的 (operation, 身份) 对，
 	// 缺少任何一类身份即失败（不能只声明不覆盖）。
 	Driven Kind = "driven"
-	// FailClosed：路由在其依赖能力（如审计模块）交付前被钩子安全拒绝（handler 不执行）；矩阵断言任何身份调用都被拒绝且不改变数据。
-	// 依赖能力交付后该路由必须转为 Driven（届时断言「被拒绝」的测试会失败，迫使转换）。
+	// FailClosed：路由在其依赖能力交付前被钩子安全拒绝（handler 不执行）；矩阵断言任何身份调用都被拒绝且不改变数据。
+	// 依赖能力交付后该路由必须转为 Driven（届时断言「被拒绝」的测试会失败，迫使转换）。Story 1.21 已把唯一的 FailClosed 登记（cancelTask）转为 Driven；
+	// 该类型保留给之后可能出现的、依赖尚未交付能力的路由。
 	FailClosed Kind = "fail-closed"
 	// Exempt：不是「按租户列举/寻址的资源」（自助 operation 只作用于调用者自己；令牌管理只作用于自己名下的令牌）。必须写明理由，并引用已存在的
 	// 专项测试（Refs 里的测试函数必须真实存在，否则失败）。
@@ -55,8 +56,10 @@ var Registry = map[string]Coverage{
 	"listTasks":      {Kind: Driven, Resource: "tasks"},
 	"getTask":        {Kind: Driven, Resource: "tasks"},
 	"listTaskEvents": {Kind: Driven, Resource: "tasks"},
-	"cancelTask": {Kind: FailClosed, Resource: "tasks", Reason: "x-audit: true：audit 模块（Story 1.21）交付前审计钩子对该路由 fail-closed（500，handler 不执行）；" +
-		"矩阵断言任何身份调用都不改变任务状态。Story 1.21 交付后必须转为 Driven（届时「被拒绝」的断言会失败，迫使转换）"},
+	"cancelTask":     {Kind: Driven, Resource: "tasks"}, // Story 1.21：审计交付后由 FailClosed 转为 Driven（取消 + 审计同事务，四类身份逐一驱动）
+	// 审计日志（Story 1.21）：audit_logs.tenant_id 是被操作对象所属租户；租户主体（含 acting-as）只见自己租户且字段裁剪。
+	"listAuditLogs": {Kind: Driven, Resource: "audit-logs"},
+	"getAuditLog":   {Kind: Driven, Resource: "audit-logs"},
 	// 令牌管理（Story 1.19）。
 	"createApiToken": {Kind: Exempt, Reason: tokenReason, Refs: []TestRef{{authIT, "TestTenantTokenIsolation"}, {authIT, "TestAPITokenManagementOwnershipAndList"}}},
 	"getApiToken":    {Kind: Exempt, Reason: tokenReason, Refs: []TestRef{{authIT, "TestTenantTokenIsolation"}, {authIT, "TestAPITokenManagementOwnershipAndList"}}},

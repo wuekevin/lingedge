@@ -9,6 +9,7 @@ import (
 
 	"github.com/wuekevin/lingedge/internal/auth/internal/repository"
 	"github.com/wuekevin/lingedge/internal/auth/internal/service"
+	"github.com/wuekevin/lingedge/internal/platform/audit"
 	"github.com/wuekevin/lingedge/internal/platform/clock"
 	"github.com/wuekevin/lingedge/internal/platform/config"
 	"github.com/wuekevin/lingedge/internal/platform/db"
@@ -38,6 +39,8 @@ type Options struct {
 	PermCacheTTL time.Duration
 	// PermPollEvery 是权限失效广播的轮询兜底周期（<=0 取 30 秒）；测试可调小。
 	PermPollEvery time.Duration
+	// Audit 是审计记录器（internal/platform/audit）：写操作的审计与业务变更同一事务（fail-closed，IMP-19）；非 ManifestOnly 时必填。
+	Audit audit.Recorder
 	// ManifestOnly 仅用于导出路由清单（lingedge-server routes）：不需要数据库与 Redis，处理函数不可被调用。
 	ManifestOnly bool
 }
@@ -67,7 +70,7 @@ func NewModule(ctx context.Context, o Options) (*Module, error) {
 	if err != nil {
 		return nil, err
 	}
-	svc, err := service.New(ctx, service.Options{Repo: repo, WithTx: o.Pool.WithTx, Redis: o.Redis, Hasher: h, Box: o.Box, Clock: o.Clock, IDs: o.IDs, Log: o.Log, PermCacheTTL: o.PermCacheTTL, PermPollEvery: o.PermPollEvery})
+	svc, err := service.New(ctx, service.Options{Repo: repo, WithTx: o.Pool.WithTx, Redis: o.Redis, Hasher: h, Box: o.Box, Clock: o.Clock, IDs: o.IDs, Log: o.Log, PermCacheTTL: o.PermCacheTTL, PermPollEvery: o.PermPollEvery, Audit: o.Audit})
 	if err != nil {
 		return nil, err
 	}
@@ -126,9 +129,8 @@ type HooksOptions struct {
 	// Tenants 是租户目录（租户模块的 Resolver）：Scope 钩子据此把 X-Tenant-ID 解析为真实且可用的租户，admin 代租户（acting-as）才会被放行；
 	// 为 nil（未装配）时 acting-as 保持安全拒绝（403）——不存在「没有验证目标租户也放行」的路径。
 	Tenants httpx.TenantResolver
-	// AuditedOperation 报告 operationID 是否是其他模块（租户模块）的、要求审计的写 operation，且已有过渡的结构化日志留痕：
-	// 过渡审计钩子对它们同样放行（audit_logs 待 Story 1.21）；其余要求审计的 operation 仍被 DenyAuditor 拒绝。nil = 只放行本模块的管理 operation。
-	AuditedOperation func(operationID string) bool
+	// Auditor 是审计钩子（audit.Writer.Auditor()，Story 1.21）；nil = 安全拒绝默认（要求审计的路由一律 500，fail-closed）。
+	Auditor httpx.Auditor
 }
 
 // Hooks 是 REST 四个钩子的唯一装配（cmd/lingedge-server 与集成测试共用，避免装配漂移）：
@@ -137,12 +139,12 @@ type HooksOptions struct {
 //	Authorizer     RBAC（Story 1.18）：权限集 ∩ 路由声明；平台/租户主体 × x-tenant-scope × X-Tenant-ID 的授权矩阵（rbac.Decide），
 //	               放行时登记授权决策；x-reauth 在权限通过之后由 httpx.WithReauth 执行（先权限后再认证）。
 //	Scope          完整的租户 Scope 钩子 httpx.WithTenantScope（Story 1.20）：Scope 只由已认证主体 + 路由元数据 + X-Tenant-ID（经授权钩子放行后）生成；
-//	               acting-as 解析目标租户（不存在/不可用 → 404）并登记审计上下文 httpx.ActingAsFrom。
-//	Auditor        安全拒绝默认；仅本模块的 /admin 管理 operation 与 /auth/api-tokens*、HooksOptions.AuditedOperation 登记的写 operation 走结构化日志过渡
-//	               （不是 audit_logs，待 Story 1.21）；acting-as 请求的日志同时带操作者与目标租户。
-//	WithSelfService  /auth/* 自助 operation 的最小授权语义（1.16；1.18–1.21 交付后评估是否保留）。
+//	               acting-as 解析目标租户（不存在/不可用 → 404）并登记审计上下文 httpx.ActingAsFrom（审计记录器据此写 acting_as）。
+//	Auditor        真实审计钩子（Story 1.21，HooksOptions.Auditor）：运行期兜底「声明了审计却没有记录」；审计行由 Service 在业务事务内写入。
+//	               未注入时保持安全拒绝默认（DenyAuditor）。
+//	WithSelfService  /auth/* 自助 operation 的最小授权语义（1.16；审计钩子不再被它绕过）。
 func (m *Module) Hooks(o HooksOptions) httpx.Hooks {
-	base := httpx.Hooks{Authenticator: m.Authenticator(), Authorizer: m.authzHook(), Auditor: adminAuditor{inner: httpx.DenyAuditor{}, log: m.log, extra: o.AuditedOperation}}
+	base := httpx.Hooks{Authenticator: m.Authenticator(), Authorizer: m.authzHook(), Auditor: o.Auditor}
 	base = httpx.WithTenantScope(base, o.Tenants, m.log)
 	return httpx.WithReauth(httpx.WithSelfService(base, m.SelfService), m.ReauthChecker())
 }

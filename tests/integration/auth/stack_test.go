@@ -23,6 +23,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/wuekevin/lingedge/internal/auth"
+	"github.com/wuekevin/lingedge/internal/platform/audit"
 	"github.com/wuekevin/lingedge/internal/platform/clock"
 	"github.com/wuekevin/lingedge/internal/platform/config"
 	"github.com/wuekevin/lingedge/internal/platform/httpx"
@@ -52,12 +53,14 @@ func (s *syncBuf) String() string              { s.mu.Lock(); defer s.mu.Unlock(
 
 // stack 是被测系统：真实认证模块 + httpx 路由器（固定中间件链 + 真实钩子装配）+ 真实 HTTP 监听。
 type stack struct {
-	t      *testing.T
-	e      *env
-	redis  *redistest.Instance
-	rc     *redisx.Client
-	clk    *fakeClock
-	mod    auth.Module
+	t     *testing.T
+	e     *env
+	redis *redistest.Instance
+	rc    *redisx.Client
+	clk   *fakeClock
+	mod   auth.Module
+	// aw 是真实的审计记录器/钩子（与生产同一实现，Story 1.21）。
+	aw     *audit.Writer
 	srv    *httptest.Server
 	router *httpx.Router
 	logs   *syncBuf
@@ -133,7 +136,7 @@ func newStack(t *testing.T, o ...stackOpts) *stack {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hooks := assemble(s.mod)
+	hooks := assemble(s.mod, s.aw)
 	if opt.spyScope {
 		s.spy = &spyState{}
 		hooks.Scope = &spyScope{st: s.spy, inner: hooks.Scope}
@@ -183,7 +186,12 @@ func newStack(t *testing.T, o ...stackOpts) *stack {
 
 func (s *stack) newModule(lg *zap.Logger, clk clock.Clock) auth.Module {
 	s.t.Helper()
-	m, err := auth.New(context.Background(), auth.Options{Pool: s.e.app, Redis: s.rc, Clock: clk, IDs: uid.NewGenerator(clock.System()), Log: lg, Argon2: testArgon, Box: s.box, PermCacheTTL: s.opt.permTTL, PermPollEvery: s.opt.permPoll})
+	aw, err := audit.New(audit.Options{Pool: s.e.app, IDs: uid.NewGenerator(clock.System()), Clock: clk, Log: lg})
+	if err != nil {
+		s.t.Fatal(err)
+	}
+	s.aw = aw
+	m, err := auth.New(context.Background(), auth.Options{Pool: s.e.app, Redis: s.rc, Clock: clk, IDs: uid.NewGenerator(clock.System()), Log: lg, Argon2: testArgon, Box: s.box, PermCacheTTL: s.opt.permTTL, PermPollEvery: s.opt.permPoll, Audit: aw})
 	if err != nil {
 		s.t.Fatal(err)
 	}
@@ -407,7 +415,7 @@ func (s *stack) restartServer(s2 *stack) *httptest.Server {
 		s.t.Fatal(err)
 	}
 	r, err := httpx.NewRouter(httpx.Options{Logger: zap.NewNop(), IDs: uid.NewGenerator(clock.System()),
-		Hooks: assemble(s2.mod), Idempotency: idem})
+		Hooks: assemble(s2.mod, s2.aw), Idempotency: idem})
 	if err != nil {
 		s.t.Fatal(err)
 	}
@@ -445,7 +453,9 @@ func weakHash(t testing.TB, pw string) string {
 }
 
 // assemble 是真实钩子装配（auth.Module.Hooks，与 cmd/lingedge-server 的 assembleHooks 同一份）。
-func assemble(m auth.Module) httpx.Hooks { return m.Hooks(auth.HooksOptions{}) }
+func assemble(m auth.Module, aw *audit.Writer) httpx.Hooks {
+	return m.Hooks(auth.HooksOptions{Auditor: aw.Auditor()})
+}
 
 // newBox 在临时目录写 0400 主密钥文件（运行期随机生成），返回真实 FileKeyProvider 支撑的 Box（与生产同一实现）。
 func newBox(t testing.TB) *secretbox.Box {

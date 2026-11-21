@@ -44,7 +44,7 @@ context:
 - **来源 IP**：`httpx.ClientIPFrom`（路由器在链首登记 Gin `ClientIP()`，遵守 `Options.TrustedProxies`）——伪造 `X-Forwarded-For` 不能绕过 `allowed_cidrs`（测试：可信代理下左侧伪造的白名单地址无效、多个 XFF 头、`X-Real-IP`/`Forwarded` 不被采信；对端不可信时 XFF 完全被忽略；IPv6、IPv4 映射 IPv6）；来源未知 fail-closed。
 - **`last_used_at`**：每令牌每进程至多每分钟异步写一次（后台写入、并发有上限，不阻塞请求）。
 - **Scope（1.20 边界，保持 fail-closed）**：本 Story 不产出完整 Scope 钩子。令牌主体的授权决策经 `rbac.Decide` 产出并交给过渡 Scope 钩子：自己的租户/平台级/跨租户只读 → 落成 Scope；平台令牌 + `X-Tenant-ID`（acting-as，需 `tenant:impersonate`）授权通过但 Scope 仍**安全拒绝 403**（测试逐项断言 handler 不执行），不放行未实现的部分。
-- **审计**：audit 模块（1.21）未实现，**未写 audit_logs**，登记「待 1.21 补写」；令牌创建/轮换/吊销只写不含敏感信息的结构化日志（前缀、令牌 uid、操作者 uid、`request_id`，`audit_logs_written=false`），`adminAuditor` 仅对本模块 `/admin/*` 与 `/auth/api-tokens*` 放宽，其余要求审计的 operation 仍被 DenyAuditor 拒绝。
+- **审计**：audit 模块（1.21）未实现，**未写 audit_logs**，登记「待 1.21 补写」；令牌创建/轮换/吊销只写不含敏感信息的结构化日志（前缀、令牌 uid、操作者 uid、`request_id`，`audit_logs_written=false`），`adminAuditor` 仅对本模块 `/admin/*` 与 `/auth/api-tokens*` 放宽，其余要求审计的 operation 仍被 DenyAuditor 拒绝。 【Story 1.21 已收口：审计记录器 internal/platform/audit 在业务事务内写 audit_logs，过渡的结构化日志与 adminAuditor 已移除；见 1-21 说明】
 
 ## 默认值与口径（[ASSUMPTION] 标注）
 
@@ -63,7 +63,7 @@ context:
 
 ## Tasks & Acceptance
 
-- [x] AC1 `TestAPITokenCreatePlaintextOnce`（形态、SHA-256+前缀入库、`tenant_id` NULL、默认 90 天、GET/列表不含明文、幂等重放不回显且不重复创建、全库全部文本/JSON 列 + Redis 键值 + 日志无明文、日志只记前缀且 `audit_logs_written=false`、kin-openapi 契约）；`service/apitoken_test.go`（形态/熵/格式校验、redact 识别令牌形态）。
+- [x] AC1 `TestAPITokenCreatePlaintextOnce`（形态、SHA-256+前缀入库、`tenant_id` NULL、默认 90 天、GET/列表不含明文、幂等重放不回显且不重复创建、全库全部文本/JSON 列 + Redis 键值 + 日志无明文、日志只记前缀且 `audit_logs_written=false`、kin-openapi 契约）；`service/apitoken_test.go`（形态/熵/格式校验、redact 识别令牌形态）。 【Story 1.21 已收口：审计记录器 internal/platform/audit 在业务事务内写 audit_logs，过渡的结构化日志与 adminAuditor 已移除；见 1-21 说明】
 - [x] AC2 `TestAPITokenScopesMustBeSubsetOfCreator`（子集通过；越权 403；字典外/`token:manage`/空/过多/名称/未知字段/非法 CIDR 400；被拒绝不写库；无 `token:manage` 403；租户创建者平台权限越界 403）、`TestAPITokenCreateRequiresRecentMFAAndCookieSession`（TOTP 账号：窗口外创建与轮换 403 `auth.reauth_required`，列表/吊销不受影响，再认证后可创建；Bearer 不能创建/轮换/吊销/列出令牌且不改令牌表）、`TestAPITokenAllowedCIDRs`、`TestAPITokenExpiry`、`TestAPITokenExpirySettings`。
 - [x] AC3 `TestAPITokenRevocationIsImmediate`（缓存命中状态下吊销下一个请求即 401 且缓存键被清除；残留/回填的旧缓存键不能复活；Redis 运行中 SIGKILL 后认证/吊销/轮换仍正确、Restart 后自动回填；Redis 从未可用）、`TestAPITokenRotationChain`（3 级轮换链、`rotated_from_id`/`rotated_from_uid`、旧令牌立即 401、继承名称/CIDR/scopes/有效期、已吊销不能再轮换、他人 404、scopes 与创建者当前权限取交集、全失去 403 且不吊销）。
 - [x] AC4 `TestBearerScopeEnforcementAndPolicy`（作用域越界 403、平台令牌访问平台资源、不回落 Cookie、Bearer 优先于 Cookie、自助 operation 一律 403 且不影响创建者会话、8 种失败原因 401 逐字节相同且不泄漏原因、服务端日志记原因与前缀、`token_auth_failed` 恰一条）、`TestTenantTokenIsolation`（租户令牌读写自己租户免 CSRF；他租户/不存在的 `X-Tenant-ID` 404；平台资源 403（NFR-14）；他租户与平台管理员对令牌的 GET/DELETE/rotate 404；令牌管理不接受代租户；acting-as 安全拒绝；成员被移除/租户停用 401）、`TestAPITokenShrinksWithCreator`（降权收缩、新增权限不扩大、禁用/管理员停用/删除 401 与恢复、真实管理 API 路径）、`TestAPITokenFollowsCreatorLoginPolicy`（强制 TOTP、须先改密）。
@@ -86,7 +86,7 @@ context:
 
 ## 遗留与风险
 
-- **待 1.21 补写 audit_logs**：令牌创建/轮换/吊销当前只有结构化日志（`audit_logs_written=false`）；1.21 交付后以真实 Auditor 替换 `adminAuditor`，并记录 actor / 资源 / 变更摘要（禁含明文、哈希）。
+- **待 1.21 补写 audit_logs**：令牌创建/轮换/吊销当前只有结构化日志（`audit_logs_written=false`）；1.21 交付后以真实 Auditor 替换 `adminAuditor`，并记录 actor / 资源 / 变更摘要（禁含明文、哈希）。 【Story 1.21 已收口：审计记录器 internal/platform/audit 在业务事务内写 audit_logs，过渡的结构化日志与 adminAuditor 已移除；见 1-21 说明】
 - **完整 Scope 钩子属 1.20**：平台令牌的 acting-as（`X-Tenant-ID`）仍被过渡 Scope 钩子安全拒绝；租户令牌的 Scope 仅按令牌所属租户设定（授权决策 `own_tenant`）。1.20 交付后应补：acting-as 下的令牌（`tenant:impersonate` 令牌）整链、目标租户存在/可用性校验、令牌写操作审计里 actor 与目标租户。
 - **租户配额 `api_tokens`**：`tenant_quotas` 已有 `api_tokens` 配额键，本 Story 未接线（租户/配额模块属后续 Story）；当前没有令牌数量上限（仅 scopes/CIDR 数量上限）。
 - **门禁变更**：`api_tokens` 移出「禁入身份表」名单（见上）——请评审确认「Scope 之前以 token_hash 为键」的豁免理由。
