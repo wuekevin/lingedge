@@ -370,7 +370,7 @@ func TestGateCommandsNegativeAndCleanup(t *testing.T) {
 	}
 	dst := copyRepo(t)
 	// 门禁在 gates 目录自身被跳过；副本里的 docs/ 不存在，品牌与口令门禁只看代码与配置。
-	for _, g := range []string{"arch", "testdouble", "passwords", "brand", "shell", "repo", "tasktype", "trustdomain", "flags"} {
+	for _, g := range []string{"arch", "testdouble", "passwords", "brand", "shell", "repo", "tasktype", "trustdomain", "flags", "extract"} {
 		if code, out := runGate(t, dst, g); code != 0 {
 			t.Fatalf("干净副本的 %s 门禁应通过，退出码 %d:\n%s", g, code, out)
 		}
@@ -437,6 +437,10 @@ func TestGateCommandsNegativeAndCleanup(t *testing.T) {
 		{
 			name: "旧 CLI 标志名（清单过期放行未带 -manifest）", gate: "flags", wantRule: "flags-legacy",
 			files: map[string]string{"docs/operations/x.md": "离线安装可加 --allow-" + "expired 放行。\n"},
+		},
+		{
+			name: "非白名单位置直接解析归档", gate: "extract", wantRule: "extract-archive", wantText: "G-4",
+			files: map[string]string{"internal/tools/downloader/unpack.go": "package downloader\n\nimport \"archive/tar\"\n\nvar _ = tar.TypeReg\n"},
 		},
 		{
 			name: "shell -c", gate: "shell", wantRule: "shell-c",

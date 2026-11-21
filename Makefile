@@ -230,7 +230,7 @@ edge-test:
 
 # 本目标当前只覆盖 Story 1.2 的静态门禁：G-6 固定口令、G-11 测试替身隔离、G-12 命令注入（Story 1.14 追加任务类型白名单 tasktype）、NFR-29 品牌。
 # Story 1.11 追加 G-5（日志脱敏扫描：向真实 logx 注入私钥/Token/主密钥/明文，断言输出无泄露，含负向自测）。
-# 威胁模型 §9 的其余门禁（G-1…G-4、G-7…G-10、G-13）尚未接入，由对应 Story 逐项追加到本目标；
+# 威胁模型 §9 的其余门禁（G-1、G-3、G-7…G-10、G-13；Story 1.26 起 G-4 已接入：gates extract + tests/security 路径穿越向量集）尚未接入，由对应 Story 逐项追加到本目标；
 # Story 1.23 追加三个信任域门禁（gates trustdomain：Server 代码路径不得存在加载发行清单私钥的逻辑；tests/security/trustdomain 对真实二进制符号表做同样检查，含负向样本）与 G-5 签名密钥材料日志脱敏用例。
 # Story 1.20 追加 G-2（多租户隔离矩阵 tests/security/tenant_isolation：真实临时 MySQL/Redis 上的真实进程内装配；缺 MySQL/Redis 时测试以「等待环境验证」跳过——
 # 跳过不代表通过，LINGEDGE_REQUIRE_MYSQL=1 / LINGEDGE_REQUIRE_REDIS=1 可把缺失视为失败）。
@@ -243,8 +243,9 @@ security:
 	$(GATES) tasktype
 	$(GATES) trustdomain
 	$(GATES) flags
+	$(GATES) extract
 	$(GO) test -count=1 ./tests/security/...
-	@echo "make security: 已覆盖 G-2（租户隔离矩阵）/G-5/G-6/G-11/G-12（含任务类型白名单 tasktype）/三个信任域（trustdomain）/CLI 旧标志名（flags，MIN-04）/品牌；未接入（随对应 Story 追加）: G-1 G-3 G-4 G-7 G-8 G-9 G-10 G-13" >&2
+	@echo "make security: 已覆盖 G-2（租户隔离矩阵）/G-4（Tools 解压：extract 门禁 + tests/security 路径穿越向量集）/G-5/G-6/G-11/G-12（含任务类型白名单 tasktype、Tools 白名单执行入口 safeexec 的元字符注入向量）/三个信任域（trustdomain）/CLI 旧标志名（flags，MIN-04）/品牌；未接入（随对应 Story 追加）: G-1 G-3 G-7 G-8 G-9 G-10 G-13" >&2
 
 release:
 	$(call not_implemented,1.34)

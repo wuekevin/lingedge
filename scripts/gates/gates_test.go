@@ -705,3 +705,37 @@ func TestFlags(t *testing.T) {
 		}
 	})
 }
+
+func TestExtract(t *testing.T) {
+	neg := []struct{ name, rel, content string }{
+		{"tar", "internal/tools/downloader/x.go", "package downloader\n\nimport \"archive/tar\"\n\nvar _ = tar.TypeReg\n"},
+		{"zip", "internal/node/x.go", "package node\n\nimport \"archive/zip\"\n\nvar _ = zip.Deflate\n"},
+		{"别名", "cmd/lingedge/x.go", "package main\n\nimport t \"archive/tar\"\n\nvar _ = t.TypeReg\n"},
+		{"分组 import", "internal/media/x.go", "package media\n\nimport (\n\t\"fmt\"\n\t\"archive/zip\"\n)\n\nvar _ = fmt.Sprint\nvar _ = zip.Deflate\n"},
+		{"security 的兄弟目录不豁免", "internal/tools/securityx/x.go", "package securityx\n\nimport \"archive/tar\"\n\nvar _ = tar.TypeReg\n"},
+	}
+	for _, c := range neg {
+		t.Run("负向/"+c.name, func(t *testing.T) {
+			root := t.TempDir()
+			write(t, root, c.rel, c.content)
+			expectRule(t, mustRun(t, runExtract, root, options{}), "extract-archive", c.rel)
+		})
+	}
+	pos := []struct{ name, rel, content string }{
+		{"唯一入口", "internal/tools/security/extract.go", "package security\n\nimport \"archive/tar\"\n\nvar _ = tar.TypeReg\n"},
+		{"测试代码构造样本", "internal/tools/security/x_test.go", "package security\n\nimport \"archive/tar\"\n\nvar _ = tar.TypeReg\n"},
+		{"其他包的测试", "internal/node/x_test.go", "package node\n\nimport \"archive/tar\"\n\nvar _ = tar.TypeReg\n"},
+		{"开发期工具", "scripts/x/x.go", "package main\n\nimport \"archive/tar\"\n\nvar _ = tar.TypeReg\n"},
+		{"无关 import", "internal/node/y.go", "package node\n\nimport \"compress/gzip\"\n\nvar _ = gzip.BestSpeed\n"},
+		{"文档提及", "docs/x.md", "import \"archive/tar\"\n"},
+	}
+	for _, c := range pos {
+		t.Run("正向/"+c.name, func(t *testing.T) {
+			root := t.TempDir()
+			write(t, root, c.rel, c.content)
+			if fs := mustRun(t, runExtract, root, options{}); len(fs) != 0 {
+				t.Fatalf("不应失败: %v", fs)
+			}
+		})
+	}
+}

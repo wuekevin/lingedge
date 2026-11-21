@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/wuekevin/lingedge/pkg/redact"
+	"github.com/wuekevin/lingedge/internal/tools/security"
 )
 
 // 日志级别（--log-level）。
@@ -81,9 +81,9 @@ func (l *fileLogger) log(level string, step int, msg string, fields map[string]a
 	if l == nil || levelRank(level) < l.min {
 		return
 	}
-	line := logLine{TS: l.now().UTC().Format(time.RFC3339Nano), Level: level, RunID: l.runID, Step: step, Msg: redact.String(msg)}
+	line := logLine{TS: l.now().UTC().Format(time.RFC3339Nano), Level: level, RunID: l.runID, Step: step, Msg: security.RedactString(msg)}
 	if len(fields) > 0 {
-		if m, ok := redact.Value(fields).(map[string]any); ok {
+		if m, ok := security.RedactValue(fields).(map[string]any); ok {
 			line.Fields = m
 		}
 	}
@@ -97,69 +97,9 @@ func (l *fileLogger) log(level string, step int, msg string, fields map[string]a
 	_, _ = l.f.Write(append(b, '\n'))
 }
 
-// redactArgs 返回可安全记录的 argv 副本（AC6）：
-//   - 敏感标志（--token、--password…，名称经 redact.Key 判定；*-file 是路径，不是机密）的值记为 `***`，
-//     无论写成 `--token X` 还是 `--token=X`；
-//   - `--set key=value` 在 key 敏感时值记为 `***`；
-//   - 其余元素再经 redact.String 兜底（令牌形态/URL 口令等）。
-func redactArgs(args []string) []string {
-	out := make([]string, 0, len(args))
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		if a == "--" {
-			out = append(out, args[i:]...)
-			break
-		}
-		if !strings.HasPrefix(a, "--") {
-			out = append(out, redact.String(a))
-			continue
-		}
-		name, val, hasEq := strings.Cut(a[2:], "=")
-		switch {
-		case sensitiveFlag(name):
-			if hasEq {
-				out = append(out, "--"+name+"="+redact.Mask)
-			} else {
-				out = append(out, a)
-				if i+1 < len(args) {
-					out = append(out, redact.Mask)
-					i++
-				}
-			}
-		case name == "set":
-			if !hasEq {
-				out = append(out, a)
-				if i+1 < len(args) {
-					out = append(out, redactSet(args[i+1]))
-					i++
-				}
-			} else {
-				out = append(out, "--set="+redactSet(val))
-			}
-		default:
-			out = append(out, redact.String(a))
-		}
-	}
-	return out
-}
-
-func sensitiveFlag(name string) bool {
-	if strings.HasSuffix(name, "-file") {
-		return false
-	}
-	return redact.Key(name)
-}
-
-func redactSet(kv string) string {
-	k, v, ok := strings.Cut(kv, "=")
-	if !ok {
-		return redact.String(kv)
-	}
-	if redact.Key(k) {
-		return k + "=" + redact.Mask
-	}
-	return k + "=" + redact.String(v)
-}
+// redactArgs 返回可安全记录的 argv 副本（AC6）。规则实现于 internal/tools/security.RedactArgs（Story 1.26 起，
+// 其内部复用 pkg/redact，全 Tools 只有这一处命令行脱敏规则）。
+func redactArgs(args []string) []string { return security.RedactArgs(args) }
 
 // argvString 用于提示文本（如 sudo 提示）：元素含空白/元字符时加单引号，仅用于显示，从不交给 shell 执行。
 func argvString(args []string) string {

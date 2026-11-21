@@ -2,7 +2,7 @@
 //
 // 用法：go run ./scripts/gates <子命令> [-root 仓库根目录]
 //
-// 子命令：gen-lint（生成/校验 .golangci.yml）、arch、testdouble、passwords、brand、shell、repo（Repository 的 Scope 首参，Story 1.5）、tasktype（任务类型白名单，Story 1.14）、perms（权限注册表 ⇄ 种子 ⇄ OpenAPI x-permissions 一致性，Story 1.18）、audit（写 operation 必须声明 x-audit、声明的审计动作必须有记录者，Story 1.21）、trustdomain（Server 代码路径不得存在加载发行清单私钥的逻辑，Story 1.23）、flags（旧 CLI 标志名 0 命中，Story 1.25 AC7）、all（除 gen-lint 写入外全部运行）。
+// 子命令：gen-lint（生成/校验 .golangci.yml）、arch、testdouble、passwords、brand、shell、repo（Repository 的 Scope 首参，Story 1.5）、tasktype（任务类型白名单，Story 1.14）、perms（权限注册表 ⇄ 种子 ⇄ OpenAPI x-permissions 一致性，Story 1.18）、audit（写 operation 必须声明 x-audit、声明的审计动作必须有记录者，Story 1.21）、trustdomain（Server 代码路径不得存在加载发行清单私钥的逻辑，Story 1.23）、flags（旧 CLI 标志名 0 命中，Story 1.25 AC7）、extract（归档只能经 security.SafeExtract 解压，G-4，Story 1.26）、all（除 gen-lint 写入外全部运行）。
 // 任一发现即以退出码 1 结束；参数或运行环境错误以退出码 2 结束。仅依赖标准库（perms 门禁另引用同模块的 internal/platform/rbac 权限注册表）。
 package main
 
@@ -159,6 +159,7 @@ var gates = []gate{
 	{"audit", runAudit},
 	{"trustdomain", runTrustDomain},
 	{"flags", runFlags},
+	{"extract", runExtract},
 }
 
 func main() {
@@ -167,7 +168,7 @@ func main() {
 
 func run(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "用法: gates <gen-lint|arch|testdouble|passwords|brand|shell|repo|tasktype|perms|audit|trustdomain|flags|all> [-root dir] [-skip-build] [-check]")
+		fmt.Fprintln(os.Stderr, "用法: gates <gen-lint|arch|testdouble|passwords|brand|shell|repo|tasktype|perms|audit|trustdomain|flags|extract|all> [-root dir] [-skip-build] [-check]")
 		return 2
 	}
 	cmd := args[0]
