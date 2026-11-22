@@ -35,6 +35,10 @@ LDFLAGS := -s -w -X $(MODULE)/pkg/version.Version=$(VERSION) -X $(MODULE)/pkg/ve
 # 仓库无提交时 go build 的 VCS 戳会失败，版本信息统一经 ldflags 注入。
 GOBUILD := GOFLAGS= CGO_ENABLED=0 $(GO) build -trimpath -buildvcs=false -ldflags '$(LDFLAGS)'
 
+# 前端 workspace（Story 1.36、ADR-014）：pnpm 版本由 frontend/package.json 的 packageManager 固定；全部检查入口见 frontend/README.md。
+PNPM     ?= pnpm
+FRONTEND := frontend
+
 define not_implemented
 	@echo "NOT_IMPLEMENTED(story $(1))" >&2; exit 1
 endef
@@ -42,6 +46,7 @@ endef
 .PHONY: help build verify-build test race lint fmt vet check-scaffold clean \
         gen-lint arch-check golangci shell-check repo-check gate-selftest vuln verify-gates \
         release-keys-check contract-bin contract-selftest openapi-breaking migrations-check migrations-seal freeze-check perms-check tenantscope-check audit-check contract-check \
+        frontend-install frontend-lint frontend-test frontend-types-check frontend-gate-selftest frontend-check \
         print-ldflags migrate migrate-test proto proto-check openapi-check frontend e2e edge-test security release release-finalize release-verify release-sign release-sign-test release-test secrets-check
 
 help:
@@ -49,6 +54,7 @@ help:
 	@echo "辅助: fmt vet check-scaffold clean gen-lint arch-check golangci shell-check gate-selftest vuln verify-gates"
 	@echo "契约(Story 1.3): contract-check（= contract-selftest openapi-check proto-check migrations-check freeze-check perms-check[Story 1.18] tenantscope-check[Story 1.20] audit-check[Story 1.21]）migrations-seal"
 	@echo "迁移(Story 1.6): migrate（MIGRATE_ARGS=plan|up|down|status|recover|lint ...）migrate-test"
+	@echo "前端(Story 1.36): frontend-check（= 依赖锁定/ESLint/架构门禁/令牌与对比度/i18n 缺键/类型漂移/vue-tsc/vitest/构建/隔离与 mock 检查）；已并入 lint（frontend-lint）、test（frontend-test）、gate-selftest（frontend-gate-selftest）、contract-check（frontend-types-check）、verify-build（frontend）"
 	@echo "发行(Story 1.34): release → release-finalize → release-verify（两轮离线签名，见 docs/operations/release.md）release-sign（构建离线签名工具）release-sign-test release-test secrets-check"
 	@echo "未实现的目标会输出 NOT_IMPLEMENTED(story X.Y) 并以非零退出。"
 
@@ -76,12 +82,15 @@ build:
 print-ldflags:
 	@echo '$(LDFLAGS)'
 
+# Go 构建产物校验 + 前端生产构建后的隔离与 mock 检查（Story 1.36：Console 产物不含 platform 端点/Admin 路由，生产构建不含 mock 入口）。
 verify-build:
 	@bash scripts/verify-build.sh $(DIST) "$(CMDS)"
+	@$(MAKE) --no-print-directory frontend
 
-# 前端单元测试随 Story 1.36 接入；此处仅 Go 部分。
+# Go 测试 + 前端 vitest（shared 组件/格式化/i18n；门禁脚本自测在 gate-selftest）。
 test:
 	$(GO) test ./...
+	@$(MAKE) --no-print-directory frontend-test
 
 # 竞态检测下集成测试明显变慢（tests/integration/auth 单包约 10 分钟，已逼近 go test 默认的 10 分钟包超时），故显式放宽包超时。
 race:
@@ -94,11 +103,13 @@ vet:
 	$(GO) vet ./...
 	$(GO) vet -tags lingedge_testdouble ./...
 
-# make lint：gofmt + go vet + 脚手架结构测试 + 依赖图/结构检查 + golangci-lint（depguard 依赖方向与 sqlx 边界、forbidigo 禁 exec/直接读时钟/SQL 拼接/受限池与 Scope 构造）+ shell 拼接检查 + Repository Scope 首参检查。
+# make lint：gofmt + go vet + 脚手架结构测试 + 依赖图/结构检查 + golangci-lint（depguard 依赖方向与 sqlx 边界、forbidigo 禁 exec/直接读时钟/SQL 拼接/受限池与 Scope 构造）+ shell 拼接检查 + Repository Scope 首参检查
+# + 前端静态检查（frontend-lint，Story 1.36）。
 lint: vet
 	@out=$$(gofmt -l .); if [ -n "$$out" ]; then echo "gofmt 未格式化:" >&2; echo "$$out" >&2; exit 1; fi
 	$(GO) test -short -count=1 ./tests/scaffold/...
 	$(MAKE) --no-print-directory arch-check golangci shell-check repo-check
+	$(MAKE) --no-print-directory frontend-lint
 
 # 据 ADR-001 依赖图（scripts/gates/spec.go）重新生成 .golangci.yml；改依赖图后必须运行并提交。
 gen-lint:
@@ -126,6 +137,7 @@ gate-selftest:
 	$(GO) test -count=1 ./scripts/gates/...
 	GOLANGCI_LINT='$(GOLANGCI_LINT)' $(GO) test -count=1 -v ./tests/gates/...
 	$(MAKE) --no-print-directory release-sign-test
+	$(MAKE) --no-print-directory frontend-gate-selftest
 
 # 依赖漏洞扫描（G-7 的 Go 部分；需访问 vuln.go.dev，不在 make security 内，完整供应链门禁属 Story 1.34）。
 vuln:
@@ -226,10 +238,44 @@ audit-check:
 	$(GO) test -count=1 -run 'TestCheckAuditCoverageNegativeSamples' ./internal/platform/httpx/contracttest/
 	$(GO) test -count=1 -run 'TestAuditCoverage' ./cmd/lingedge-server/
 
-contract-check: contract-selftest openapi-check proto-check migrations-check freeze-check perms-check tenantscope-check audit-check
+# 前端类型漂移（Story 1.36 AC2）：frontend/shared/src/api-types/openapi.gen.ts 由 docs/api/openapi.yaml 生成；重新生成并逐字节比对，
+# openapi.yaml 变动而生成物未同步 → 失败（改 OpenAPI 后运行 `pnpm -C frontend run gen:types` 并提交）。
+frontend-types-check: frontend-install
+	$(PNPM) -C $(FRONTEND) run check:types
 
-frontend:
-	$(call not_implemented,1.36)
+contract-check: contract-selftest openapi-check proto-check migrations-check freeze-check perms-check tenantscope-check audit-check frontend-types-check
+
+# --- 前端 workspace（Story 1.36、ADR-014、docs/architecture/dev-environment.md §4）------------------------------------------
+# 依赖必须经 --frozen-lockfile 安装（锁文件入库；精确版本由 check:deps 校验；生命周期脚本关闭）。
+frontend-install:
+	$(PNPM) -C $(FRONTEND) install --frozen-lockfile
+
+# 静态检查：依赖锁定 + 架构门禁（全仓禁 v-html/硬编码色值/硬编码文案；shared 禁路由表/菜单/权限/会话/API 客户端）+ ESLint
+# + 令牌与 DESIGN.md 一致/无漂移 + 文字对比度 ≥ 4.5:1 + i18n 缺键 + vue-tsc。
+frontend-lint: frontend-install
+	$(PNPM) -C $(FRONTEND) run lint
+	$(PNPM) -C $(FRONTEND) run check:tokens
+	$(PNPM) -C $(FRONTEND) run check:contrast
+	$(PNPM) -C $(FRONTEND) run check:i18n
+	$(PNPM) -C $(FRONTEND) run typecheck
+
+# shared 的 vitest（三态组件、格式化、i18n）。
+frontend-test: frontend-install
+	$(PNPM) -C $(FRONTEND) run test:shared
+
+# 门禁脚本自身的正向/负向自测（lint 负向用例、依赖锁定、i18n、令牌/对比度、构建隔离、mock、真实 vite 构建 e2e、pnpm 脚本关闭实测）。
+frontend-gate-selftest: frontend-install
+	$(PNPM) -C $(FRONTEND) run test:selftest
+
+# 前端生产构建（admin、console 各自独立的 Vite 工程）+ Console/Admin 构建隔离检查（IMP-14）+ mock 入口检查（NFR-1）。
+frontend: frontend-install
+	$(PNPM) -C $(FRONTEND) run build
+	$(PNPM) -C $(FRONTEND) run check:isolation
+	$(PNPM) -C $(FRONTEND) run check:mock
+
+# 前端全部检查一次跑完（等价于上面各目标之和）。
+frontend-check: frontend-install
+	$(PNPM) -C $(FRONTEND) run check
 
 e2e:
 	$(call not_implemented,1.37)

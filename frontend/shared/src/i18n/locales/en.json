@@ -1,0 +1,41 @@
+{
+  "state": {
+    "loading": {
+      "label": "Loading…",
+      "slow": "Still loading…",
+      "cancel": "Cancel",
+      "retry": "Retry"
+    },
+    "error": {
+      "title": "Unable to load {subject}",
+      "titleGeneric": "Something went wrong",
+      "retry": "Retry",
+      "requestId": "Request ID",
+      "copy": "Copy",
+      "copied": "Copied",
+      "copyFailed": "Copy failed, please select it manually",
+      "kind": {
+        "network": "The network connection was interrupted. Check your network and try again.",
+        "server": "The control plane is temporarily unavailable. Please try again later.",
+        "forbidden": "You do not have permission to perform this action.",
+        "notFound": "The target does not exist or has been deleted.",
+        "conflict": "Resource conflict. Adjust your request and try again.",
+        "preconditionFailed": "It was modified by someone else. Refresh and try again.",
+        "validation": "The submitted content failed validation. Check it and try again.",
+        "rateLimited": "Too many requests. Please try again later.",
+        "unknown": "An unknown error occurred. Try again; if it persists, contact an administrator and provide the Request ID."
+      }
+    },
+    "empty": {
+      "noData": {
+        "title": "No data yet",
+        "description": "There is nothing here yet."
+      },
+      "noResults": {
+        "title": "No results match the filters",
+        "description": "Nothing matches the current filters.",
+        "clearFilters": "Clear filters"
+      }
+    }
+  }
+}

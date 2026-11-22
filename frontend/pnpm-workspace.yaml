@@ -1,0 +1,13 @@
+# ADR-014：四个工作区包。admin / console 是互相独立的 Vite 工程，仅共享无权限语义的 shared。
+packages:
+  - admin
+  - console
+  - website
+  - shared
+
+# 关闭所有生命周期脚本（依赖的 preinstall/install/postinstall 与工作区自身脚本）。
+# 重要（Story 1.36 实测，pnpm 12.18.0）：pnpm 12 不再从 .npmrc 读取 ignore-scripts，.npmrc 里的同名项对它无效——
+# 必须写在这里（camelCase）。.npmrc 里保留 ignore-scripts=true 仅用于 npm/旧版 pnpm 的兜底。
+# 行为由 scripts/pnpm-hardening.test.mjs 用真实 pnpm install 验证。需要构建脚本的依赖须先经审核登记（README「生命周期脚本审核」）。
+ignoreScripts: true
+engineStrict: true

@@ -1,0 +1,9 @@
+{
+  "name": "@lingedge/website",
+  "version": "0.1.0",
+  "private": true,
+  "description": "官网（Nuxt 3，不使用 Arco；Story 2.1 交付）。本 Story 仅占位工作区成员并声明对 shared 的依赖。",
+  "dependencies": {
+    "@lingedge/shared": "workspace:0.1.0"
+  }
+}

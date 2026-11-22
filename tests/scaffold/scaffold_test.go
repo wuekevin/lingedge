@@ -290,7 +290,7 @@ func TestNoDockerArtifacts(t *testing.T) {
 func TestMakefileTargets(t *testing.T) {
 	root := repoRoot(t)
 	notImplemented := map[string]string{
-		"frontend": "1.36", "e2e": "1.37", "edge-test": "3.22",
+		"e2e": "1.37", "edge-test": "3.22",
 	}
 	// security 自 Story 1.2 起为真实目标（运行静态门禁，不再是占位）；其余新增门禁目标同理。
 	implemented := []string{"build", "verify-build", "test", "race", "lint", "security", "gen-lint", "arch-check", "golangci", "shell-check", "gate-selftest", "vuln", "verify-gates",
@@ -299,7 +299,9 @@ func TestMakefileTargets(t *testing.T) {
 		// Story 1.6 起为真实目标（迁移框架与迁移测试台）。
 		"migrate", "migrate-test",
 		// Story 1.34 起为真实目标（发行流水线与离线签名流程；make release 不再是 NOT_IMPLEMENTED）。
-		"release", "release-finalize", "release-verify", "release-sign", "release-sign-test", "release-test", "secrets-check"}
+		"release", "release-finalize", "release-verify", "release-sign", "release-sign-test", "release-test", "secrets-check",
+		// Story 1.36 起为真实目标（前端 workspace 基座；make frontend 不再是 NOT_IMPLEMENTED）。
+		"frontend", "frontend-install", "frontend-lint", "frontend-test", "frontend-types-check", "frontend-gate-selftest", "frontend-check"}
 
 	for _, tgt := range implemented {
 		cmd := exec.Command("make", "-n", "--no-print-directory", tgt)
@@ -335,12 +337,18 @@ func TestMakefileWiresGates(t *testing.T) {
 		return string(out)
 	}
 	want := map[string][]string{
-		"lint":          {"go vet", "gofmt -l", "tests/scaffold", "arch-check", "golangci", "shell-check"},
+		// Story 1.36：前端静态检查并入 lint（依赖锁定/架构门禁/ESLint、令牌与对比度、i18n 缺键、vue-tsc 任一项消失即失败）。
+		"lint":          {"go vet", "gofmt -l", "tests/scaffold", "arch-check", "golangci", "shell-check", "install --frozen-lockfile", "run lint", "run check:tokens", "run check:contrast", "run check:i18n", "run typecheck"},
 		"arch-check":    {"scripts/gates arch"},
 		"golangci":      {"golangci-lint", "@v2.15.0", "run ./..."},
 		"shell-check":   {"scripts/gates shell"},
 		"security":      {"scripts/gates testdouble", "scripts/gates passwords", "scripts/gates brand", "scripts/gates shell", "scripts/gates secrets"},
-		"gate-selftest": {"./scripts/gates/...", "GOLANGCI_LINT=", "./tests/gates/...", "release-sign-test"},
+		"gate-selftest": {"./scripts/gates/...", "GOLANGCI_LINT=", "./tests/gates/...", "release-sign-test", "run test:selftest"},
+		// Story 1.36：前端 vitest 并入 test；生产构建后的 Console 隔离与 mock 检查并入 verify-build（不得放宽）。
+		"test":           {"go test ./...", "run test:shared"},
+		"verify-build":   {"scripts/verify-build.sh", "run build", "run check:isolation", "run check:mock"},
+		"frontend":       {"install --frozen-lockfile", "run build", "run check:isolation", "run check:mock"},
+		"frontend-check": {"install --frozen-lockfile", "run check"},
 		// Story 1.34：make release 必须先过内置发行公钥守卫（RELEASE=1 → release-keys -require），再进入流水线；不得绕过。
 		"release":      {"release-keys-check", "RELEASE=1", "scripts/release build", "-version"},
 		"verify-gates": {"golangci-lint", "scripts/gates testdouble", "./tests/gates/..."},
@@ -351,7 +359,7 @@ func TestMakefileWiresGates(t *testing.T) {
 		"migrations-check":  {"bin/contract migrations-check", "-base-ref 'contract-v1'"},
 		"freeze-check":      {"bin/contract freeze-check"},
 		"contract-selftest": {"scripts/contract", "go vet ./...", "go test -count=1 ./..."},
-		"contract-check":    {"bin/contract openapi-check", "scripts/proto-check-gen.sh", "bin/contract migrations-check", "bin/contract freeze-check", "go test -count=1 ./..."},
+		"contract-check":    {"bin/contract openapi-check", "scripts/proto-check-gen.sh", "bin/contract migrations-check", "bin/contract freeze-check", "go test -count=1 ./...", "run check:types"},
 		// Story 1.6：迁移测试台必须真实接入内嵌迁移 lint、迁移包单测与真实 MySQL 的 tests/migrations（任一项从配方消失即失败）。
 		"migrate-test": {"cmd/lingedge-server migrate lint", "./internal/platform/migrate/...", "LINGEDGE_REQUIRE_MYSQL=1", "./tests/migrations/..."},
 		"migrate":      {"cmd/lingedge-server", "bin/lingedge-server migrate"},

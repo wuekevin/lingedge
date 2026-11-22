@@ -52,3 +52,9 @@
 
 - **IMP-14**：§3、§5 的 Console 隔离检查由“子串 grep（`/admin/`、`/nodes`、`/clusters`）”改为“按 `x-tenant-scope: platform` operation 的路径模板精确匹配”。原因：`GET /admin/audit-logs` 为 `either`、`/sites/{siteId}/clusters` 路径含 `/clusters`，子串规则要么误报要么形同虚设。配套：审计读取移出 `/admin/*`（`/audit-logs`），站点集群绑定改为平台独占 `/sites/{siteId}/cluster-bindings`，租户不再有“可绑定集群”列表（BLK-02，见 ADR-009 §5）。
 - **IMP-17**：Admin / Console / 官网必须使用互不相同的主机名（host-only Cookie），由 Tools 强制，避免仅靠 Cookie 名隔离 realm。
+
+## 修订记录 2026-11-22（Story 1.36 实现核对）
+
+- **工具链版本以实测为准**：TypeScript 采用 5.9.3（不是 registry 最新 7.0.2——`typescript-eslint` 与 `openapi-typescript` 的 peer 范围不放行）；pnpm 12.18.0；Vite 8.3.8；vue-tsc 3.3.14；Arco Design Vue 2.59.0。完整矩阵与证据见 `frontend/README.md`「兼容矩阵」。
+- **生命周期脚本开关位置**：pnpm 12 不读取 `.npmrc` 的 `ignore-scripts`，有效配置为 `pnpm-workspace.yaml` 的 `ignoreScripts: true`；`.npmrc` 仅作兜底。由 `check-deps` 强制并有真实 `pnpm install` 自测。
+- **§5 构建隔离的落地细节**：路径模板匹配的左右边界（引号/反引号/`/api/v1` 起、非路径字符止）、同形状下更具体静态路径的排除、同形状混合 scope 的路径单列不入清单；Admin 路由前缀清单为 `frontend/isolation/admin-route-prefixes.json`（现 `/admin`，随 1.38 路由表登记）；Admin 产物反向检查 Console realm 常量，Console 产物同时检查 Admin realm 常量。已知限制：字符串拼接的端点无法被模板匹配，API 层须用模板字面量。

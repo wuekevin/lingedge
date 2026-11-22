@@ -1,0 +1,41 @@
+{
+  "state": {
+    "loading": {
+      "label": "加载中…",
+      "slow": "仍在加载…",
+      "cancel": "取消",
+      "retry": "重试"
+    },
+    "error": {
+      "title": "无法加载{subject}",
+      "titleGeneric": "出了点问题",
+      "retry": "重试",
+      "requestId": "Request ID",
+      "copy": "复制",
+      "copied": "已复制",
+      "copyFailed": "复制失败，请手动选择",
+      "kind": {
+        "network": "网络连接中断，请检查网络后重试。",
+        "server": "主控暂时不可用，请稍后重试。",
+        "forbidden": "你没有权限执行此操作。",
+        "notFound": "目标不存在或已被删除。",
+        "conflict": "资源冲突，请调整后重试。",
+        "preconditionFailed": "已被他人修改，请刷新后重试。",
+        "validation": "提交的内容未通过校验，请检查后重试。",
+        "rateLimited": "操作过于频繁，请稍后重试。",
+        "unknown": "发生未知错误，请重试；若仍失败请联系管理员并提供 Request ID。"
+      }
+    },
+    "empty": {
+      "noData": {
+        "title": "尚无数据",
+        "description": "这里还没有内容。"
+      },
+      "noResults": {
+        "title": "筛选无结果",
+        "description": "没有符合当前筛选条件的内容。",
+        "clearFilters": "清除筛选"
+      }
+    }
+  }
+}

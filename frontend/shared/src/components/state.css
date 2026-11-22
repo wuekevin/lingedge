@@ -1,0 +1,43 @@
+/* 三态组件共用样式：只使用 --le-* 令牌，不含任何色值/文案。 */
+.le-state {
+  font-family: var(--le-font-sans);
+  font-size: var(--le-text-body-size);
+  line-height: var(--le-text-body-line-height);
+  color: var(--le-color-text-secondary);
+}
+.le-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.le-state-btn {
+  height: 32px;
+  padding: 0 var(--le-space-3);
+  border: 1px solid var(--le-color-border-strong);
+  border-radius: var(--le-radius-md);
+  background: var(--le-color-bg-surface);
+  color: var(--le-color-text-primary);
+  font: inherit;
+  cursor: pointer;
+}
+.le-state-btn:hover {
+  border-color: var(--le-color-brand-primary);
+  color: var(--le-color-brand-primary);
+}
+.le-state-btn:focus-visible {
+  outline: 2px solid var(--le-color-brand-primary);
+  outline-offset: 2px;
+}
+.le-state-btn--primary {
+  border-color: var(--le-color-brand-primary);
+  background: var(--le-color-brand-primary);
+  color: var(--le-color-on-brand);
+}
+.le-state-btn--primary:hover {
+  border-color: var(--le-color-brand-primary-hover);
+  background: var(--le-color-brand-primary-hover);
+  color: var(--le-color-on-brand);
+}

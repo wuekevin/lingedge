@@ -67,12 +67,12 @@ inputs:
 | 包 | 用途 | 查询版本（npm） | 备注 |
 |---|---|---|---|
 | Node.js | 前端构建 / 官网 SSR 运行时 | 本机 v26.8.2；npm 11.19.1 | 官网 SSR（P2+）的生产 Node 版本区间**实现时核对**，并由 Tools 声明与检测（FR-14） |
-| pnpm | 工作区包管理 | 12.21.0 | ADR-014；**固定使用 `packageManager` 字段**，实现时核对与 Node 26 的兼容 |
+| pnpm | 工作区包管理 | 12.21.0 | ADR-014；**固定使用 `packageManager` 字段**。**Story 1.36 实测采用 12.18.0**（本机实装，Node 26.8.2 下 install/build/test 全通过）；12.x 不再读取 `.npmrc` 的 `ignore-scripts`，须在 `pnpm-workspace.yaml` 配 `ignoreScripts: true`（详见 `frontend/README.md`） |
 | vue | 基线固定 Vue 3 | 3.5.45 | |
 | @arco-design/web-vue | Arco Design | 2.59.0 | 基线固定 |
 | arco-design-pro-vue | Admin/Console 脚手架模板 | 2.7.3 | 模板自带的 Vite/TS/依赖版本与下行各项的兼容性**实现时核对**，不得盲目升级 |
 | vite | 构建 | 8.3.8 | **与 Arco Pro 模板及插件兼容性待核对** |
-| typescript | 语言 | 7.0.2 | **与 vue-tsc、Nuxt 3、Arco 类型兼容性待核对**；固定值以兼容性验证结果为准 |
+| typescript | 语言 | 7.0.2 | **与 vue-tsc、Nuxt 3、Arco 类型兼容性待核对**；固定值以兼容性验证结果为准。**Story 1.36 核对结果：采用 5.9.3，不取 7.0.2**（`typescript-eslint@8.73.0` peer `<6.1.0`、`openapi-typescript@7.13.0` peer `^5.x`）；兼容矩阵见 `frontend/README.md` |
 | pinia | 状态 | 4.1.0 | 基线固定；与 Vue/Nuxt 3 兼容性实现时核对 |
 | vue-router | 路由 | 5.5.1 | 同上；Nuxt 自带路由，不重复引入 |
 | vue-i18n | 国际化 | 11.4.20 | 基线固定 |

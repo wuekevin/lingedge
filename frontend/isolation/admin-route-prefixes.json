@@ -1,0 +1,4 @@
+{
+  "note": "Admin 前端路由的 path 前缀清单（ADR-014 §5）。Console 产物中出现这些前缀（作为独立路径字符串，如 \"/admin/…\" 或 /api/v1/admin/…）即失败。Admin 路由表由 Story 1.38 交付，新增路由前缀时必须同步登记于此；平台端点（x-tenant-scope: platform）的清单不在此手写，由 scripts/check-isolation.mjs 从 docs/api/openapi.yaml 自动生成。",
+  "prefixes": ["/admin"]
+}
