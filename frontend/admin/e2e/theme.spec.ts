@@ -36,7 +36,7 @@ for (const scheme of ['light', 'dark'] as const) {
       expect(c.problems).toEqual([]);
     });
 
-    test(`${scheme}：外壳首页（生产构建空态）与 404`, async ({ page }) => {
+    test(`${scheme}：外壳首页（生产构建，真实菜单）与 404`, async ({ page }) => {
       const c = watchConsole(page);
       await apiLogin(page, prodUrl(), env('LE_E2E_AUDITOR_EMAIL'), env('LE_E2E_AUDITOR_PW'));
       await page.goto(`${prodUrl()}/`);
@@ -55,7 +55,8 @@ for (const scheme of ['light', 'dark'] as const) {
       await page.goto(`${fxUrl()}/ops/dirty-form`);
       await expect(page.getByTestId('fixture-page')).toBeVisible();
       await page.locator('[data-menu-item="fx.tasks"]').click();
-      await page.locator('[data-menu-item="fx.audit"]').click();
+      await page.locator('[data-menu-item="ops.audit"]').click();
+      await expect(page.getByTestId('audit-page')).toBeVisible();
       await audit(page, scheme, 'shell');
       // 搜索弹层
       await page.keyboard.press('Control+k');

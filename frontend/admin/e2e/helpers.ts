@@ -138,7 +138,14 @@ export async function contrastFailures(page: Page, min = 4.5): Promise<{ failure
 
 /** 等待浮层/抽屉的进出场动画真正结束：Vue Transition 在第一帧带 *-enter-from（此时 getAnimations() 还是空的），只看 getAnimations 会在浮层仍是 opacity 0 时就放行。 */
 export async function settled(page: Page): Promise<void> {
-  await page.waitForFunction(() => !document.querySelector('[class*="-enter-from"], [class*="-enter-active"], [class*="-leave-from"], [class*="-leave-active"]') && document.getAnimations().length === 0, undefined, { timeout: 10_000 });
+  // 无限循环的动画（按钮加载中的旋转图标）是稳定状态，不是「正在淡入」：只等有限时长的动画结束。进出场的淡入淡出都是有限动画，仍会被等待（selftest 覆盖两种情形）。
+  await page.waitForFunction(
+    () =>
+      !document.querySelector('[class*="-enter-from"], [class*="-enter-active"], [class*="-leave-from"], [class*="-leave-active"]') &&
+      document.getAnimations().filter((a) => a.effect?.getComputedTiming().iterations !== Infinity).length === 0,
+    undefined,
+    { timeout: 10_000 },
+  );
 }
 
 export async function expectContrast(page: Page, label: string): Promise<void> {
@@ -194,3 +201,41 @@ export function totpCode(secret: string, atMs = Date.now()): string {
   const bin = (((h[off] ?? 0) & 0x7f) << 24) | (((h[off + 1] ?? 0) & 0xff) << 16) | (((h[off + 2] ?? 0) & 0xff) << 8) | ((h[off + 3] ?? 0) & 0xff);
   return String(bin % 1_000_000).padStart(6, '0');
 }
+
+// ---- Story 1.39 辅助 ----
+/** 把一次性明文记到 Go 侧的 sink 文件：Go 据此扫描日志/审计/库里是否泄漏明文，并核对库内只存哈希。文件在 Go 侧的临时目录里，不在仓库内。 */
+export function sinkSecret(value: string): void {
+  fs.appendFileSync(env('LE_E2E_SINK'), `${value}\n`);
+}
+
+/** 会话的 CSRF 令牌（经 /auth/me）：用于测试里直接发起的写请求（造数据）。 */
+export async function csrfOf(page: Page, base: string): Promise<string> {
+  const r = await page.context().request.get(`${base}/api/v1/auth/me`);
+  expect(r.status(), 'me').toBe(200);
+  return ((await r.json()) as { csrf_token: string }).csrf_token;
+}
+
+/** TOTP 重放保护：同一个 30 秒步内服务端只接受一次。按已用步记账，必要时等到下一步，保证每个验证码都是新的。 */
+let lastTotpStep = -1;
+export async function freshTotp(secret: string): Promise<string> {
+  const step = () => Math.floor(Date.now() / 30000);
+  while (step() <= lastTotpStep) await new Promise((r) => setTimeout(r, 500));
+  lastTotpStep = step();
+  return totpCode(secret);
+}
+
+/** 经 UI 登录（口令 [+ TOTP 或恢复码]）；返回时已进入外壳或改口令页。 */
+export async function uiLogin(page: Page, base: string, email: string, pw: string): Promise<void> {
+  await page.goto(`${base}/login`);
+  await page.getByTestId('login-email').fill(email);
+  await page.getByTestId('login-pw').fill(pw);
+  await page.getByTestId('login-submit').click();
+}
+
+export const sidebarItems = (page: Page) => page.locator('[data-menu-item]').evaluateAll((els) => els.map((e) => e.getAttribute('data-menu-item')));
+export const sidebarGroups = (page: Page) => page.locator('[data-menu-group]').evaluateAll((els) => els.map((e) => e.getAttribute('data-menu-group')));
+
+export const noOverflow = async (page: Page, label: string): Promise<void> => {
+  const o = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, iw: window.innerWidth }));
+  expect(o.sw, `${label}: horizontal overflow`).toBeLessThanOrEqual(o.iw);
+};

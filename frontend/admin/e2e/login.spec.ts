@@ -1,7 +1,7 @@
 import { apiLogin, env, expect, prodUrl, recoveryCodes, shot, test, totpCode, watchConsole } from './helpers';
 import type { Page } from '@playwright/test';
 
-// 登录与会话（AC1）——生产构建 × 真实 server：口令 + TOTP、恢复码、租户账号被拒、须改口令、Cookie 与 CSRF、空菜单外壳。
+// 登录与会话（AC1）——生产构建 × 真实 server：口令 + TOTP、恢复码、租户账号被拒、须改口令、Cookie 与 CSRF、外壳（真实页面）。
 
 const wrongSecret = () => `Wr${Math.random().toString(36).slice(2)}!x`;
 
@@ -155,25 +155,33 @@ test('须改口令的账号：登录后只能到改口令页；表单校验；�
   expect(c.problems).toEqual([]);
 });
 
-test('生产外壳：没有任何已交付业务页面时侧栏无菜单、首页如实空态；夹具路由与未知路径一律 404；无「敬请期待」', async ({ page }) => {
+test('生产外壳：只有已登记的真实页面（只读审计员）；夹具路由、P2 设置页与未知路径一律 404；无「敬请期待」', async ({ page }) => {
   const c = watchConsole(page);
   await apiLogin(page, prodUrl(), env('LE_E2E_AUDITOR_EMAIL'), env('LE_E2E_AUDITOR_PW'));
   await page.goto(`${prodUrl()}/`);
   await expect(page.getByTestId('admin-shell')).toBeVisible();
-  await expect(page.locator('[data-menu-group]')).toHaveCount(0);
-  await expect(page.locator('[data-menu-item]')).toHaveCount(0);
-  await expect(page.getByTestId('home-pages')).toHaveText('0');
-  await expect(page.getByTestId('home-page').locator('[data-le-state="empty"]')).toBeVisible();
+  // 菜单 = 已登记 ∧ 模块已交付 ∧ 权限：审计员有全部 :read，没有 token:manage；只出现用户管理 / 自动化运维 / 系统设置三组，其余 14 组整组不渲染
+  expect(await page.locator('[data-menu-group]').evaluateAll((els) => els.map((e) => e.getAttribute('data-menu-group')))).toEqual(['users', 'ops', 'settings']);
+  expect(await page.locator('[data-menu-item]').evaluateAll((els) => els.map((e) => e.getAttribute('data-menu-item')))).toEqual([
+    'users.list', 'users.roles', 'users.login-logs', 'users.audit',
+    'ops.audit',
+    'settings.basic', 'settings.brand', 'settings.login', 'settings.admins', 'settings.roles', 'settings.version',
+  ]);
+  await expect(page.getByTestId('home-pages')).toHaveText('11');
+  await expect(page.getByTestId('home-page').locator('[data-le-state="empty"]')).toHaveCount(0);
   await expect(page.getByTestId('home-roles')).toContainText('platform_auditor');
   await expect(page.getByTestId('home-modules')).toContainText('auth');
   await expect(page.getByTestId('home-run-mode')).toHaveText('自用模式');
   expect(await page.locator('body').innerText()).not.toMatch(/敬请期待|即将推出|Coming soon/i);
-  // 夹具页面只存在于 e2e 构建：生产构建下它们和任何未知路径一样是 404（不是 403）
-  for (const p of ['/ops/tasks', '/nodes/maintenance', '/definitely/not/here']) {
+  // 夹具页面只存在于 e2e 构建；P2 才交付的设置页（邮件/API/系统安全/数据保留/系统日志）没有登记 = 不存在：与任何未知路径一样是 404（不是 403）
+  for (const p of ['/ops/tasks', '/nodes/maintenance', '/settings/mail', '/settings/api', '/settings/security', '/settings/retention', '/settings/logs', '/definitely/not/here']) {
     await page.goto(`${prodUrl()}${p}`);
     await expect(page.getByTestId('not-found-page'), p).toBeVisible();
     await expect(page.getByTestId('forbidden-page')).toHaveCount(0);
   }
+  // 已登记但无权限：403（API Token 需要 token:manage，审计员没有）
+  await page.goto(`${prodUrl()}/users/api-tokens`);
+  await expect(page.getByTestId('forbidden-page')).toBeVisible();
   // 刷新保持会话；清除会话 Cookie 后刷新回到登录页
   await page.goto(`${prodUrl()}/`);
   await page.reload();

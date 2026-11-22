@@ -159,7 +159,13 @@
       "email": "{field}格式不正确",
       "minLength": "{field}至少 {min} 个字符",
       "maxLength": "{field}不能超过 {max} 个字符",
-      "same": "两次输入的{field}不一致"
+      "same": "两次输入的{field}不一致",
+      "integer": "{field}必须是整数",
+      "range": "{field}必须在 {min} 到 {max} 之间",
+      "url": "{field}必须是以 http:// 或 https:// 开头的网址",
+      "color": "{field}必须是 #RRGGBB 形式的颜色",
+      "timezone": "{field}必须是有效的 IANA 时区名",
+      "locales": "{field}至少选择一种语言"
     }
   },
   "errors": {
@@ -169,13 +175,29 @@
         "totp_invalid": "验证码或恢复码不正确（或已使用）。",
         "unauthenticated": "登录状态无效或已超时，请重新登录。",
         "forbidden": "你没有执行该操作的权限。",
-        "pw_policy": "新口令不符合强度策略。"
+        "pw_policy": "新口令不符合强度策略。",
+        "reauth_required": "这是敏感操作，需要先重新验证身份。",
+        "totp_required": "请输入 TOTP 验证码。"
       },
       "rate_limit": {
         "exceeded": "尝试次数过多，请稍后再试。"
       },
       "validation": {
         "failed": "提交的内容未通过校验。"
+      },
+      "client": {
+        "reauth_cancelled": "已取消重新验证，操作未执行。"
+      },
+      "resource": {
+        "not_found": "对象不存在或已被删除。",
+        "conflict": "操作与当前状态冲突，请刷新后重试。",
+        "precondition_failed": "数据已被他人修改，请刷新后重试。"
+      },
+      "idempotency": {
+        "key_reuse": "同一个请求被重复提交且内容不同，请重新打开对话框再试。"
+      },
+      "feature": {
+        "disabled": "当前运行模式下该功能未开启。"
       }
     },
     "retryAfter": "请在 {seconds} 秒后重试。",
@@ -184,5 +206,409 @@
   "common": {
     "cancel": "取消",
     "close": "关闭"
+  },
+  "pages": {
+    "usersList": "用户列表",
+    "usersRoles": "用户角色",
+    "usersTokens": "API Token",
+    "usersLoginLogs": "登录日志",
+    "usersAudit": "操作审计",
+    "opsAudit": "审计日志",
+    "settingsBasic": "基本设置",
+    "settingsBrand": "品牌设置",
+    "settingsLogin": "登录设置",
+    "settingsAdmins": "管理员管理",
+    "settingsRoles": "权限角色",
+    "settingsVersion": "版本信息",
+    "kw": {
+      "users": "管理员 账号 成员",
+      "tokens": "令牌 访问凭据 token",
+      "audit": "操作记录 审计",
+      "runMode": "运行模式 自用 商业",
+      "roles": "角色 权限 权限矩阵"
+    }
+  },
+  "danger": {
+    "level": {
+      "L2": "二级确认",
+      "L3": "三级 · 输入确认",
+      "L4": "四级 · 重新验证身份"
+    },
+    "reauthHint": "此操作还需要重新验证身份：如果最近没有验证过，提交后会要求你再次输入口令。",
+    "typeToConfirm": "请输入 {word} 以确认",
+    "audit": "此操作将记录到审计日志（操作人、时间、对象、Request ID）。"
+  },
+  "reauth": {
+    "title": "重新验证身份",
+    "description": "这是敏感操作，需要再次验证你的身份。验证通过后在有效期内不会重复询问。",
+    "pw": "当前口令",
+    "code": "TOTP 验证码（6 位）",
+    "codeInvalid": "请输入 6 位数字验证码",
+    "submit": "验证并继续"
+  },
+  "oneTime": {
+    "once": "以下内容只显示这一次，关闭后无法再次查看。请现在复制并妥善保存。",
+    "copy": "复制",
+    "copied": "已复制到剪贴板",
+    "copyFailed": "浏览器不允许自动复制，请手动选中并复制上面的内容。",
+    "close": "我已保存，关闭"
+  },
+  "pager": {
+    "label": "分页",
+    "info": "第 {page} / {pages} 页，共 {total} 条",
+    "prev": "上一页",
+    "next": "下一页",
+    "cursorInfo": "第 {page} 页",
+    "limit": "每页条数"
+  },
+  "filters": {
+    "label": "筛选条件",
+    "any": "全部",
+    "from": "起始时间",
+    "to": "截止时间",
+    "apply": "应用筛选",
+    "clear": "清除筛选",
+    "problem": {
+      "invalid": "时间格式无效",
+      "order": "起始时间不能晚于截止时间"
+    }
+  },
+  "loginLogs": {
+    "col": {
+      "time": "时间",
+      "event": "事件",
+      "identifier": "账号",
+      "realm": "入口",
+      "ip": "来源 IP",
+      "reason": "原因"
+    },
+    "event": {
+      "login_success": "登录成功",
+      "login_failed": "登录失败",
+      "logout": "退出登录",
+      "totp_failed": "验证码错误",
+      "locked": "账号锁定",
+      "token_auth_failed": "令牌认证失败"
+    }
+  },
+  "audit": {
+    "aliasNote": "当前为「用户操作」预置筛选（资源类型 = user），可在下方清除。",
+    "col": {
+      "time": "时间",
+      "actor": "操作人",
+      "action": "操作",
+      "resource": "对象",
+      "result": "结果",
+      "requestId": "Request ID",
+      "detail": "详情"
+    },
+    "filter": {
+      "resourceType": "资源类型",
+      "resourceUid": "资源 uid",
+      "actorUid": "操作人 uid"
+    },
+    "result": {
+      "success": "成功",
+      "failure": "失败",
+      "denied": "拒绝"
+    },
+    "detail": "详情",
+    "detailIp": "来源 IP",
+    "detailChanges": "变更摘要（已脱敏）",
+    "noChanges": "无变更摘要",
+    "actorType": {
+      "user": "用户",
+      "api_token": "API Token",
+      "system": "系统",
+      "node": "节点"
+    }
+  },
+  "users": {
+    "scope": "这里管理平台管理员账号。创建、提权、重置口令和删除属于高风险操作，会要求重新验证身份并记录审计。",
+    "create": {
+      "open": "新建管理员",
+      "title": "新建管理员",
+      "locale": "界面语言",
+      "roles": "初始角色（可选）",
+      "initial": "初始口令（可选）",
+      "initialHint": "留空则由系统生成一次性临时口令，只显示一次；首次登录必须修改口令。",
+      "reauthHint": "创建管理员需要重新验证身份。",
+      "submit": "创建"
+    },
+    "col": {
+      "email": "邮箱",
+      "name": "显示名",
+      "status": "状态",
+      "roles": "角色",
+      "totp": "二步验证",
+      "lastLogin": "最近登录",
+      "actions": "操作"
+    },
+    "self": "当前账号",
+    "mustChange": "须改口令",
+    "noRoles": "无角色",
+    "totpOn": "已启用",
+    "totpOff": "未启用",
+    "status": {
+      "active": "正常",
+      "disabled": "已停用",
+      "locked": "已锁定",
+      "pending": "待激活"
+    },
+    "action": {
+      "roles": "分配角色",
+      "enable": "启用",
+      "unlock": "解锁",
+      "disable": "停用",
+      "revoke": "吊销会话",
+      "reset": "重置口令",
+      "delete": "删除"
+    },
+    "roles": {
+      "title": "分配角色：{name}",
+      "none": "没有可分配的平台角色（或你没有查看角色的权限）。",
+      "reauthHint": "修改角色（含提权）需要重新验证身份。",
+      "save": "保存角色"
+    },
+    "toast": {
+      "created": "管理员已创建",
+      "rolesSaved": "角色已更新",
+      "reset": "口令已重置，该用户须在下次登录时修改",
+      "disable": "账号已停用",
+      "revoke": "会话已吊销",
+      "delete": "账号已删除",
+      "enabled": "账号已启用",
+      "unlocked": "账号已解锁"
+    },
+    "danger": {
+      "disable": {
+        "title": "停用 {name}？",
+        "impact": "该账号将无法登录，现有会话随之失效。可随时重新启用。",
+        "ok": "停用账号"
+      },
+      "revoke": {
+        "title": "吊销 {name} 的全部会话？",
+        "impact": "该用户的所有登录会话立即失效，需要重新登录。",
+        "ok": "吊销全部会话"
+      },
+      "reset": {
+        "title": "重置 {name} 的口令？",
+        "impact": "该用户的全部会话立即失效，并在下次登录时被强制修改口令。如果由系统生成临时口令，只会显示一次。",
+        "ok": "重置口令"
+      },
+      "delete": {
+        "title": "删除 {name}？",
+        "impact": "该账号将被删除，其角色与全部会话一并失效。历史审计记录保留。此操作不可撤销。",
+        "ok": "删除账号"
+      }
+    },
+    "reset": {
+      "manual": "手工设定临时口令（可选）",
+      "manualHint": "留空则由系统生成并只显示一次；设定时长度 12–128 位。"
+    },
+    "once": {
+      "createdTitle": "管理员已创建：临时口令",
+      "resetTitle": "口令已重置：临时口令",
+      "description": "请通过安全渠道把它交给该用户；用户首次登录时必须修改口令。",
+      "label": "临时口令"
+    }
+  },
+  "roles": {
+    "col": {
+      "name": "名称",
+      "code": "代码",
+      "scope": "范围",
+      "kind": "类型",
+      "perms": "权限数",
+      "description": "说明"
+    },
+    "scope": {
+      "platform": "平台",
+      "tenant": "租户"
+    },
+    "builtin": "内置",
+    "custom": "自定义",
+    "select": "查看/编辑",
+    "detail": "角色：{name}",
+    "builtinNote": "内置角色不可修改，这里只读展示它的权限。",
+    "saveMeta": "保存名称与说明",
+    "delete": {
+      "open": "删除角色",
+      "title": "删除角色 {name}？",
+      "impact": "角色 {code} 将被删除。仍有持有者的角色不能删除，请先把它从持有者身上移除。此操作不可撤销。",
+      "ok": "删除角色"
+    },
+    "matrix": {
+      "title": "权限矩阵",
+      "filter": "按权限筛选",
+      "resource": "资源",
+      "notApplicable": "该角色范围不适用",
+      "save": "保存权限",
+      "reauthHint": "修改角色权限需要重新验证身份；只能授予你自己持有的权限。"
+    },
+    "noneSelected": "选择一个角色以查看或编辑它的权限。",
+    "create": {
+      "open": "新建角色",
+      "title": "新建角色",
+      "codeHint": "小写字母开头，只含小写字母、数字、下划线，2–64 位。",
+      "codeInvalid": "代码必须以小写字母开头，只含小写字母、数字、下划线（2–64 位）",
+      "reauthHint": "创建角色需要重新验证身份；创建后在权限矩阵里分配权限。",
+      "submit": "创建角色"
+    },
+    "toast": {
+      "permsSaved": "权限已保存",
+      "metaSaved": "名称与说明已保存",
+      "created": "角色已创建",
+      "deleted": "角色已删除"
+    }
+  },
+  "tokens": {
+    "scope": "这里管理你本人名下的 API Token。令牌明文只在创建时显示一次，库内仅保存哈希。",
+    "empty": {
+      "title": "还没有 API Token",
+      "description": "创建后可用于脚本或集成访问 API；权限范围不能超过你自己的权限。"
+    },
+    "col": {
+      "name": "名称",
+      "prefix": "前缀",
+      "scopes": "权限范围",
+      "status": "状态",
+      "expires": "到期时间",
+      "lastUsed": "最近使用"
+    },
+    "state": {
+      "active": "有效",
+      "revoked": "已吊销",
+      "expired": "已过期"
+    },
+    "noExpiry": "使用系统默认有效期",
+    "neverUsed": "从未使用",
+    "action": {
+      "rotate": "轮换",
+      "revoke": "吊销"
+    },
+    "create": {
+      "open": "创建 Token",
+      "title": "创建 API Token",
+      "scopes": "权限范围",
+      "scopesHint": "只能选择你自己拥有的权限，至少一项。",
+      "scopeFilter": "筛选权限",
+      "scopesRequired": "请至少选择一项权限",
+      "cidrs": "允许的来源网段（可选，每行或逗号分隔）",
+      "expiresHint": "留空则使用系统默认有效期。",
+      "expiresInvalid": "到期时间必须晚于现在",
+      "submit": "创建"
+    },
+    "danger": {
+      "rotate": {
+        "title": "轮换 Token「{name}」？",
+        "impact": "将生成一个新令牌并立即吊销旧令牌，使用旧令牌的脚本会失败。新令牌只显示一次。",
+        "ok": "轮换令牌"
+      },
+      "revoke": {
+        "title": "吊销 Token「{name}」？",
+        "impact": "该令牌立即失效且无法恢复，使用它的脚本会失败。",
+        "ok": "吊销令牌"
+      }
+    },
+    "toast": {
+      "revoked": "令牌已吊销"
+    },
+    "once": {
+      "createdTitle": "Token 已创建",
+      "rotatedTitle": "Token 已轮换",
+      "description": "完整令牌如下。请立即复制并保存到安全的地方。",
+      "label": "完整令牌"
+    }
+  },
+  "settings": {
+    "saved": "设置已保存",
+    "save": "保存",
+    "reset": "撤销更改",
+    "readonly": "你没有修改系统设置的权限，当前为只读。",
+    "basic": {
+      "field": {
+        "general_base_url": "Server 公开网址",
+        "general_admin_url": "Admin 入口网址",
+        "general_console_url": "Console 入口网址",
+        "general_docs_url": "文档站网址",
+        "general_status_url": "状态页网址",
+        "general_timezone": "系统默认时区",
+        "general_locales": "可用语言",
+        "general_registration_open": "开放租户自助注册"
+      },
+      "hint": {
+        "general_base_url": "节点注册令牌与 gRPC 证书使用它；修改会影响节点接入，需要重新验证身份。",
+        "general_timezone": "IANA 时区名，例如 Asia/Shanghai；存储与 API 一律使用 UTC。",
+        "general_registration_open": "仅商业模式下生效；修改需要重新验证身份。"
+      },
+      "mode": {
+        "title": "运行模式",
+        "current": "当前运行模式：",
+        "desc": "自用模式隐藏商业功能；商业模式开放租户、计费等能力。切换不需要重新迁移，但会立即改变可见的功能与接口。",
+        "switch": "切换为{mode}",
+        "dialogTitle": "切换运行模式为「{mode}」？",
+        "confirm": "切换为{mode}",
+        "switched": "运行模式已切换为{mode}",
+        "impact": {
+          "commercial": "切换为商业模式后，商业功能（租户自助注册、计费等）将对外开放，菜单与接口立即变化。",
+          "self_hosted": "切换为自用模式后，商业功能将被隐藏，相关接口立即返回「功能未开启」。"
+        }
+      }
+    },
+    "brand": {
+      "desc": "品牌设置由 Admin 与官网共用；保存后顶栏会立即读到新的品牌名。",
+      "mediaNote": "Logo 与 Favicon 属于媒体资源，随官网 CMS（P2）提供上传；保存时保持现有设置不变。",
+      "field": {
+        "name": "品牌名（中文）",
+        "name_en": "品牌名（英文）",
+        "primary_color": "主色（#RRGGBB）",
+        "support_email": "支持邮箱"
+      }
+    },
+    "login": {
+      "desc": "登录与会话策略。这些属于安全敏感设置，保存需要重新验证身份。",
+      "crossSession": "滑动过期不能超过绝对过期",
+      "field": {
+        "login_totp_required_for_admin": "强制管理员启用 TOTP",
+        "login_throttle_window_s": "登录节流窗口（秒）",
+        "login_throttle_account_max": "窗口内单账号最大失败次数",
+        "login_throttle_ip_max": "窗口内单 IP 最大失败次数",
+        "auth_session_idle_ttl_s": "会话滑动过期（秒）",
+        "auth_session_absolute_ttl_s": "会话绝对过期（秒）",
+        "auth_reauth_window_s": "再认证有效期（秒）",
+        "auth_mfa_window_s": "近期 MFA 有效期（秒）"
+      },
+      "hint": {
+        "login_totp_required_for_admin": "开启后，未启用 TOTP 的管理员只能进入启用流程。",
+        "auth_reauth_window_s": "敏感操作验证通过后，这段时间内不重复询问。"
+      }
+    }
+  },
+  "version": {
+    "core": "核心",
+    "server": "Server 版本",
+    "api": "API 版本",
+    "build": "构建",
+    "installation": "安装 ID",
+    "migration": "数据库迁移版本",
+    "pending": "待应用迁移数",
+    "components": "已安装组件",
+    "noComponents": "暂无已登记的组件。",
+    "none": "—",
+    "col": {
+      "component": "组件",
+      "instance": "实例",
+      "host": "主机",
+      "version": "版本",
+      "status": "状态",
+      "installedAt": "安装时间"
+    },
+    "status": {
+      "installed": "已安装",
+      "upgrading": "升级中",
+      "failed": "失败",
+      "uninstalled": "已卸载"
+    }
   }
 }

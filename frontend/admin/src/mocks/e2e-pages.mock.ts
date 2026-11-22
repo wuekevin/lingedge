@@ -5,8 +5,11 @@ import type { PageDef } from '../registry/types';
 import { useTabDirty } from '../composables/useTabDirty';
 
 // 仅用于 e2e 构建（vite --mode e2e → dist/admin-e2e）的夹具页面。生产构建不含本文件（动态 import 受 import.meta.env.MODE === 'e2e' 保护，check:mock 校验）。
-// 它们存在的唯一目的：让真实浏览器 E2E 能对「真实 server + 真实 /auth/me」验证外壳的菜单裁剪、403/404、标签页、搜索与手机宽度——
-// 页面本身只是带键名的占位内容；模块键与权限点取自真实后端（模块是否已交付由真实 /auth/me 决定，夹具不能改变它）。
+// 它们存在的唯一目的：让真实浏览器 E2E 能对「真实 server + 真实 /auth/me」验证外壳在**没有对应真实页面**时的行为——
+// 模块未交付（nodelist、sched）、仅商业模式（billing）、复杂编辑页的手机标注（rules）、未保存更改（dirty），以及节点/任务类页面（Story 1.39 之后真实页面仍未交付的菜单组：
+// tasks、rollback、maintenance）。Story 1.39 起用户/角色/设置/审计都是**真实页面**（生产构建里可用，登记在 registry/pages.ts），这里不再提供它们的占位页：
+// 外壳的菜单/搜索/403/标签/手机宽度的 E2E 都直接对真实页面验证。页面本身只是带键名的占位内容；模块键与权限点取自真实后端
+// （模块是否已交付由真实 /auth/me 决定，夹具不能改变它）。
 // 标题全部是英文夹具文案（不是产品文案，不进 locales）。
 
 const page = (key: string, extra?: () => ReturnType<typeof h>[]): (() => Promise<Component>) => {
@@ -49,17 +52,12 @@ export function bootE2EPages(i18n: AdminI18n): PageDef[] {
   console.warn('LE_MOCK_ENTRY e2e fixture pages active');
   const titles: Record<string, string> = {
     tasks: 'Task status and alerts',
-    audit: 'Audit log',
     rollback: 'Trigger rollback',
     maintenance: 'Node maintenance',
     nodelist: 'Node list (module not delivered)',
-    users: 'User list',
-    roles: 'Roles and permissions',
-    settings: 'Basic settings',
     rules: 'Rule editor (complex editing)',
     billing: 'Billing orders (commercial only)',
     sched: 'Scheduling policies (module not delivered)',
-    alias: 'Audit log (alias entry)',
     dirty: 'Dirty form',
   };
   const msgs = Object.fromEntries(Object.entries(titles).map(([k, v]) => [k, v]));
@@ -76,15 +74,10 @@ export function bootE2EPages(i18n: AdminI18n): PageDef[] {
   });
   return [
     p('tasks', '/ops/tasks', 'ops', 'tasks', ['task:read']),
-    p('audit', '/ops/audit', 'ops', 'audit', ['audit:read']),
     p('rollback', '/ops/rollback', 'ops', 'tasks', ['config:rollback']),
     p('dirty', '/ops/dirty-form', 'ops', 'tasks', ['task:read'], { component: dirtyPage }),
     p('maintenance', '/nodes/maintenance', 'nodes', 'system', ['node:manage']),
     p('nodelist', '/nodes/list', 'nodes', 'nodes', ['node:read']),
-    p('users', '/users/list', 'users', 'auth', ['user:read']),
-    p('alias', '/users/audit', 'users', 'audit', ['audit:read'], { aliasOf: 'fx.audit' }),
-    p('roles', '/settings/roles', 'settings', 'auth', ['role:read']),
-    p('settings', '/settings/basic', 'settings', 'system', ['setting:read']),
     p('rules', '/settings/rule-editor', 'settings', 'system', ['setting:read'], { complexEdit: true }),
     p('billing', '/billing/orders', 'billing', 'auth', ['billing:read'], { runModes: ['commercial'] }),
     p('sched', '/scheduling/policies', 'scheduling', 'scheduler', ['scheduling:read']),

@@ -8,7 +8,7 @@ const selftest = process.env.LE_E2E_SELFTEST === '1';
 
 export default defineConfig({
   testDir: '.',
-  testMatch: selftest ? 'selftest.spec.ts' : ['login.spec.ts', 'shell.spec.ts', 'mobile.spec.ts', 'theme.spec.ts'],
+  testMatch: selftest ? 'selftest.spec.ts' : ['login.spec.ts', 'shell.spec.ts', 'mobile.spec.ts', 'theme.spec.ts', 'system.spec.ts', 'system-settings.spec.ts'],
   fullyParallel: false,
   workers: 1,
   retries: 0,

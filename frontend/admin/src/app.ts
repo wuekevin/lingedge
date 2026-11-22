@@ -4,13 +4,16 @@ import { createApp, type App as VueApp } from 'vue';
 import type { Router, RouterHistory } from 'vue-router';
 import App from './App.vue';
 import { REGISTRY_KEY } from './layout/keys';
+import { createAdminApi } from './api/admin';
 import { createAuthApi } from './api/auth';
+import { ADMIN_API_KEY } from './api/context';
 import { createApiClient } from './api/client';
 import type { AdminI18n } from './i18n';
 import type { PageDef } from './registry/types';
 import { createRegistry, type Registry } from './registry/registry';
 import { createAdminRouter } from './router';
 import { ROUTE } from './router/routes';
+import { bindReauthApi, useReauthStore } from './stores/reauth';
 import { bindAuthApi, useSessionStore } from './stores/session';
 import { useTabsStore } from './stores/tabs';
 
@@ -38,6 +41,7 @@ export function createAdminApp(opts: AdminAppOptions): AdminAppHandle {
   const session = useSessionStore(pinia);
   const tabs = useTabsStore(pinia);
   const registry = createRegistry(opts.pages);
+  const reauth = useReauthStore(pinia);
   const router = createAdminRouter({ registry, ...(opts.history ? { history: opts.history } : {}) });
 
   const client = createApiClient({
@@ -48,6 +52,7 @@ export function createAdminApp(opts: AdminAppOptions): AdminAppHandle {
     },
     actingTenantUid: () => session.actingTenant?.uid ?? null,
     locale: () => String(opts.i18n.global.locale.value),
+    reauth: () => reauth.request(),
     onUnauthorized: () => {
       // 会话失效（过期/被吊销）：清空身份与全部标签，回到登录页并保留回跳。
       if (session.status !== 'authed') return;
@@ -57,7 +62,10 @@ export function createAdminApp(opts: AdminAppOptions): AdminAppHandle {
       void router.replace({ name: ROUTE.login, query: back && back !== '/' ? { redirect: back } : {} });
     },
   });
-  bindAuthApi(createAuthApi(client));
+  const authApi = createAuthApi(client);
+  bindAuthApi(authApi);
+  bindReauthApi(authApi);
+  app.provide(ADMIN_API_KEY, createAdminApi(client));
 
   app.provide(REGISTRY_KEY, registry);
   app.use(opts.i18n);

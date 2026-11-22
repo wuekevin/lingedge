@@ -166,9 +166,9 @@ frontend/
 
 ## Admin（Story 1.38，`frontend/admin`）
 
-**是什么**：管理员后台的外壳与登录。Vue 3 + TS + Arco 2.59.0 + vue-router + pinia + vue-i18n（共享词条 + `admin/src/locales`）。业务页面（系统设置、用户与角色、API Token、审计…）由 1.39 起接入，**本 Story 不渲染任何业务页面或占位页**。
+**是什么**：管理员后台的外壳与登录。Vue 3 + TS + Arco 2.59.0 + vue-router + pinia + vue-i18n（共享词条 + `admin/src/locales`）。业务页面（系统设置、用户与角色、API Token、审计…）由 1.39 起接入（见下一节「Admin 系统管理页」）；**1.38 本身不渲染任何业务页面或占位页**。
 
-**已交付页面注册表（FR-31、UX-1）**：`src/registry/pages.ts` 的 `productionPages` 是唯一入口——页面只有登记后才存在于路由表、侧栏和全局搜索，没有登记就不存在（没有「敬请期待」、没有灰显占位）。当前为空（登录/改口令/403/404/首页是外壳自己的系统路由，不在清单里）。登记一个页面：
+**已交付页面注册表（FR-31、UX-1）**：`src/registry/pages.ts` 的 `productionPages` 是唯一入口——页面只有登记后才存在于路由表、侧栏和全局搜索，没有登记就不存在（没有「敬请期待」、没有灰显占位）。1.38 时为空，1.39 起登记系统管理页（登录/改口令/403/404/首页是外壳自己的系统路由，不在清单里）。登记一个页面：
 
 ```ts
 { key: 'ops.tasks', path: '/ops/tasks', group: 'ops', titleKey: 'menu.page.opsTasks', module: 'tasks',
@@ -188,8 +188,22 @@ frontend/
 
 **测试**：`make frontend-test` 含 Admin 的 vitest（`admin/src/**/*.test.ts`：注册表校验与权限/模块对账、可见性/菜单裁剪/搜索索引、守卫、API 客户端、会话、标签、三态、登录页、整个外壳的挂载级测试）；`make e2e` 含 Admin 的 Playwright 场景（`tests/integration/setup/adminweb_browser_test.go` 拉起：真实 `lingedge-server`（先经 setup 向导完成安装并切到正常模式，管理员绑定 TOTP）+ 独立临时 mysqld/redis + 额外账号（只读审计员、租户账号、须改口令的管理员）+ 真实 Chromium；静态服务 `admin/e2e/serve.mjs` 等价于生产 Nginx 形态）：登录/TOTP/恢复码（单次有效）/租户账号被拒/须改口令/Cookie 与 CSRF、空菜单生产外壳、无权限菜单隐藏、直访 403/404、标签与搜索、代管横幅、手机宽度、亮/暗/跟随系统的逐页对比度审计（≥4.5:1，含搜索/确认/账号菜单弹层与手机抽屉；审计前等待浮层进出场动画结束——浮层在 `*-enter-from` 阶段 opacity 为 0，只看 `getAnimations()` 会审到透明元素，已用 `settled()` 修正并在截图中人工核对）；审计器自测见 `admin/e2e/selftest.spec.ts`。夹具页面只是占位内容，**模块与权限来自真实后端**：`fx.*` 页面选用真实已交付模块（tasks/audit/auth/system）与真实权限点，并用「未交付模块」（nodes/scheduler）与「仅商业模式」页面验证 404 路径。
 
+## Admin 系统管理页（Story 1.39，`frontend/admin/src/views/system`）
+
+**页面清单**（`registry/pages.ts`，生产构建里可用；ia.md §1.11/§1.15/§1.17 的 M1 页面，不多不少，`registry.test.ts` 精确对账）：用户列表 `/users/list`（别名：`/settings/admins`）、权限角色 `/settings/roles`（别名：`/users/roles`）、API Token `/users/api-tokens`、登录日志 `/users/login-logs`、审计日志 `/ops/audit`（别名：`/users/audit`，预置「用户操作」筛选）、基本设置 `/settings/basic`（含运行模式）、品牌设置 `/settings/brand`、登录设置 `/settings/login`、版本信息 `/settings/version`。邮件/API/系统安全/数据保留/系统日志（P2）**不登记 = 不渲染**。别名与规范页面共用同一个组件加载器（测试断言 `component` 同一引用），搜索只索引规范页面（UX-3）。
+
+**危险操作与再认证（UX-12、IMP-12）**：`components/DangerDialog.vue` 统一 L2/L3（L4 = 再认证）对话框——说明影响范围、确认键用动词、L3 要求逐字键入确认词（确认键初始禁用）、**页脚固定审计提示**（「此操作将记录到审计日志（操作人、时间、对象、Request ID）。」）。运行模式切换 = L3（键入目标模式）；删除用户/重置口令/吊销会话/停用/吊销或轮换 Token = L2；删除角色 = L3（键入角色代码）。**L4 再认证走后端现成的 `POST /auth/reauth` 与 `x-reauth: true`（1.17/1.18/1.22），没有新增契约、没有 CC-14、前端不做任何判定**：API 客户端（`api/client.ts`）收到 `403 auth.reauth_required` → `stores/reauth.ts` 弹出验证框（口令；账号已启用 TOTP 则另加 6 位验证码）→ 服务端校验通过后**自动重试原请求一次**（同请求体、同幂等键）；取消 → `client.reauth_cancelled`，原请求不重试；重试后仍被要求 → 如实报错不循环；口令错误（401）验证框保持打开且不被当作会话过期（`auth:false`）。再认证窗口 `auth.reauth_window_s`（默认 300 秒）可在「登录设置」里改，E2E 用 10 秒窗口实测「窗口外再次被要求验证」。
+
+**一次性明文**（`components/SecretDialog.vue`）：API Token 创建/轮换、服务端生成的临时口令——只展示一次、可复制（剪贴板不可用时如实提示手动复制）、不允许 Esc/遮罩误关、关闭后父组件丢弃并从 DOM 移除；库内只存哈希由 E2E 在库里逐个核对（令牌明文的 SHA-256 恰好匹配一行 `token_hash`，明文不得原样入库），明文本身经 sink 文件交给 Go 侧扫描服务端日志/审计/凭据文件。
+
+**列表与表单**：游标分页（`composables/useCursorList.ts`，游标栈支持上一页，只认最后一次请求）+ 过滤（审计：action/资源类型/资源 uid/操作人 uid/结果/Request ID/起止时间；登录日志：事件/账号/IP/起止时间；时间转 RFC 3339 UTC，起止颠倒被拦）；设置表单 `SettingsForm.vue`（校验规则与后端 `sysconfig` 注册表一一对应，只提交变更的键，未保存更改标记标签）；表格在手机宽度下改为逐行卡片（`le-table--stack`，单元格带 `data-label`）；页面随标签保活，切回时重新读取（`useRefreshOnActivate`）。品牌名取自 `GET /admin/settings/brand`（顶栏），保存后立即刷新。
+
+**UX-27（没有任何「执行命令」入口）静态检查**：`pnpm run check:no-command`（已并入 `pnpm run lint`）——词条（admin/console 的 zh-CN/en）里不得出现「执行命令/运行脚本/网页终端/Shell」类措辞、页面注册表的 key/path 不得是 exec/terminal/shell/command/script/ssh 入口、应用依赖里不得引入 xterm/ssh2/node-pty 类库；`scripts/no-command-entry.test.mjs` 用临时目录里的负向样本证明每一类都能检出，且对真实仓库断言干净。运行期另有 Playwright 逐页文字检查。
+
+**测试**：vitest（`views/system/system.test.ts` 等：再认证全路径、一次性明文、游标/过滤参数、别名预置、L2/L3 对话框、只读、三态、中英文无漏键、手机卡片结构）；Playwright（`admin/e2e/system.spec.ts`、`system-settings.spec.ts`，生产构建 × 真实 server × 真实 Chromium，由 `TestBrowserAdminSystem`/`TestBrowserAdminSystemSettings` 拉起，含 Go 侧对库与审计的独立核对）。1.38 的 e2e 夹具页面（`mocks/e2e-pages.mock.ts`）只保留没有真实页面的菜单组（节点、任务、回滚）与「模块未交付/仅商业模式/复杂编辑/未保存更改」场景；用户/角色/设置/审计的外壳测试一律对真实页面。E2E 的 `settled()` 现在忽略无限循环动画（按钮加载中的旋转图标），仍等待有限时长的进出场动画（自测覆盖）。
+
 ## 未在本 Story 内的事项
 
 - `website`（Nuxt 3.x、Tailwind、官网页面）：Story 2.1；本 Story 只占位成员并验证 preset。
-- Admin 业务页面（系统设置/用户与角色/API Token/审计）：Story 1.39 起，经注册表接入；Admin 静态产物的 Tools 安装与发行：Story 1.40；Console：P5。echarts 等图表库：4.x。
+- Admin 业务页面：系统管理页 1.39 已交付（见上），其余业务页面随各模块 Story 经注册表接入；Admin 静态产物的 Tools 安装与发行：Story 1.40；Console：P5。echarts 等图表库：4.x。
 - 远端 CI 尚未实际运行（仓库无远端），`ci.yml` 已加入 Node 26.8.2 与 pnpm 12.18.0 步骤，首次运行结果以实际为准。

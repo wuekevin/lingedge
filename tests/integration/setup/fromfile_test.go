@@ -17,6 +17,11 @@ import (
 // pwKey 是 YAML 里的口令键名（运行期拼接：本文件不含任何「口令键 = 字面量」形态，G-6）。
 var pwKey = "pass" + "word"
 
+const (
+	e2eServerVersion = "1.39.0-e2e"
+	e2eServerCommit  = "e2e0139"
+)
+
 var (
 	binOnce sync.Once
 	binPath string
@@ -33,7 +38,10 @@ func serverBin(t testing.TB) string {
 			return
 		}
 		binPath = filepath.Join(dir, "lingedge-server")
-		cmd := exec.Command("go", "build", "-trimpath", "-buildvcs=false", "-o", binPath, "github.com/wuekevin/lingedge/cmd/lingedge-server")
+		// 注入一个可辨认的版本号与提交号（Story 1.39）：Admin「版本信息」页显示的是真实 Server 版本，E2E 必须能区分它与默认值 0.0.0-dev，
+		// 不能是巧合相等；其余测试不依赖具体版本号。
+		ldflags := "-X github.com/wuekevin/lingedge/pkg/version.Version=" + e2eServerVersion + " -X github.com/wuekevin/lingedge/pkg/version.Commit=" + e2eServerCommit
+		cmd := exec.Command("go", "build", "-trimpath", "-buildvcs=false", "-ldflags", ldflags, "-o", binPath, "github.com/wuekevin/lingedge/cmd/lingedge-server")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			binErr = fmt.Errorf("构建 lingedge-server 失败: %v\n%s", err, out)
 		}

@@ -159,7 +159,13 @@
       "email": "{field} is not a valid email address",
       "minLength": "{field} must be at least {min} characters",
       "maxLength": "{field} must be at most {max} characters",
-      "same": "The two {field} values do not match"
+      "same": "The two {field} values do not match",
+      "integer": "{field} must be a whole number",
+      "range": "{field} must be between {min} and {max}",
+      "url": "{field} must be a URL starting with http:// or https://",
+      "color": "{field} must be a color like #RRGGBB",
+      "timezone": "{field} must be a valid IANA time zone name",
+      "locales": "Select at least one language for {field}"
     }
   },
   "errors": {
@@ -169,13 +175,29 @@
         "totp_invalid": "The code is wrong, or the recovery code was already used.",
         "unauthenticated": "Your sign-in is invalid or timed out. Please sign in again.",
         "forbidden": "You do not have permission to do this.",
-        "pw_policy": "The new password does not meet the strength policy."
+        "pw_policy": "The new password does not meet the strength policy.",
+        "reauth_required": "This is a sensitive action: verify your identity first.",
+        "totp_required": "Enter the TOTP code."
       },
       "rate_limit": {
         "exceeded": "Too many attempts. Please try again later."
       },
       "validation": {
         "failed": "The submitted content failed validation."
+      },
+      "client": {
+        "reauth_cancelled": "Re-verification was cancelled. The action was not performed."
+      },
+      "resource": {
+        "not_found": "The object does not exist or was deleted.",
+        "conflict": "The action conflicts with the current state. Refresh and try again.",
+        "precondition_failed": "The data was changed by someone else. Refresh and try again."
+      },
+      "idempotency": {
+        "key_reuse": "The same request was submitted twice with different content. Reopen the dialog and try again."
+      },
+      "feature": {
+        "disabled": "This feature is not enabled in the current run mode."
       }
     },
     "retryAfter": "Try again in {seconds} s.",
@@ -184,5 +206,409 @@
   "common": {
     "cancel": "Cancel",
     "close": "Close"
+  },
+  "pages": {
+    "usersList": "Users",
+    "usersRoles": "User roles",
+    "usersTokens": "API tokens",
+    "usersLoginLogs": "Login logs",
+    "usersAudit": "Operation audit",
+    "opsAudit": "Audit log",
+    "settingsBasic": "General settings",
+    "settingsBrand": "Brand settings",
+    "settingsLogin": "Sign-in settings",
+    "settingsAdmins": "Administrators",
+    "settingsRoles": "Roles and permissions",
+    "settingsVersion": "Version information",
+    "kw": {
+      "users": "administrators accounts members",
+      "tokens": "token credential access",
+      "audit": "operations record audit",
+      "runMode": "run mode self-hosted commercial",
+      "roles": "roles permissions matrix"
+    }
+  },
+  "danger": {
+    "level": {
+      "L2": "Level 2 · Confirm",
+      "L3": "Level 3 · Type to confirm",
+      "L4": "Level 4 · Re-verify identity"
+    },
+    "reauthHint": "This action also needs identity re-verification: if you have not verified recently, you will be asked for your credentials again after you submit.",
+    "typeToConfirm": "Type {word} to confirm",
+    "audit": "This action is recorded in the audit log (operator, time, object, Request ID)."
+  },
+  "reauth": {
+    "title": "Verify your identity",
+    "description": "This is a sensitive action and needs your identity verified again. You will not be asked again for a while after it succeeds.",
+    "pw": "Current credential",
+    "code": "TOTP code (6 digits)",
+    "codeInvalid": "Enter the 6-digit code",
+    "submit": "Verify and continue"
+  },
+  "oneTime": {
+    "once": "This is shown only once. You cannot view it again after closing. Copy it now and keep it safe.",
+    "copy": "Copy",
+    "copied": "Copied to the clipboard",
+    "copyFailed": "The browser blocked automatic copying. Select the text above and copy it manually.",
+    "close": "I have saved it, close"
+  },
+  "pager": {
+    "label": "Pagination",
+    "info": "Page {page} of {pages}, {total} in total",
+    "prev": "Previous",
+    "next": "Next",
+    "cursorInfo": "Page {page}",
+    "limit": "Per page"
+  },
+  "filters": {
+    "label": "Filters",
+    "any": "Any",
+    "from": "From",
+    "to": "To",
+    "apply": "Apply filters",
+    "clear": "Clear filters",
+    "problem": {
+      "invalid": "Invalid time",
+      "order": "The start time cannot be later than the end time"
+    }
+  },
+  "loginLogs": {
+    "col": {
+      "time": "Time",
+      "event": "Event",
+      "identifier": "Account",
+      "realm": "Realm",
+      "ip": "Source IP",
+      "reason": "Reason"
+    },
+    "event": {
+      "login_success": "Signed in",
+      "login_failed": "Sign-in failed",
+      "logout": "Signed out",
+      "totp_failed": "Wrong code",
+      "locked": "Account locked",
+      "token_auth_failed": "Token auth failed"
+    }
+  },
+  "audit": {
+    "aliasNote": "The \"user operations\" preset filter is applied (resource type = user). You can clear it below.",
+    "col": {
+      "time": "Time",
+      "actor": "Operator",
+      "action": "Action",
+      "resource": "Object",
+      "result": "Result",
+      "requestId": "Request ID",
+      "detail": "Details"
+    },
+    "filter": {
+      "resourceType": "Resource type",
+      "resourceUid": "Resource uid",
+      "actorUid": "Operator uid"
+    },
+    "result": {
+      "success": "Success",
+      "failure": "Failure",
+      "denied": "Denied"
+    },
+    "detail": "Details",
+    "detailIp": "Source IP",
+    "detailChanges": "Changes (redacted)",
+    "noChanges": "No change summary",
+    "actorType": {
+      "user": "User",
+      "api_token": "API token",
+      "system": "System",
+      "node": "Node"
+    }
+  },
+  "users": {
+    "scope": "Manage platform administrator accounts here. Creating, promoting, resetting credentials and deleting are high-risk and require identity re-verification and are audited.",
+    "create": {
+      "open": "New administrator",
+      "title": "New administrator",
+      "locale": "Interface language",
+      "roles": "Initial roles (optional)",
+      "initial": "Initial credential (optional)",
+      "initialHint": "Leave empty to get a one-time temporary credential generated by the system, shown once. It must be changed at first sign-in.",
+      "reauthHint": "Creating an administrator requires identity re-verification.",
+      "submit": "Create"
+    },
+    "col": {
+      "email": "Email",
+      "name": "Display name",
+      "status": "Status",
+      "roles": "Roles",
+      "totp": "Two-step",
+      "lastLogin": "Last sign-in",
+      "actions": "Actions"
+    },
+    "self": "You",
+    "mustChange": "Must change",
+    "noRoles": "No roles",
+    "totpOn": "Enabled",
+    "totpOff": "Not enabled",
+    "status": {
+      "active": "Active",
+      "disabled": "Disabled",
+      "locked": "Locked",
+      "pending": "Pending"
+    },
+    "action": {
+      "roles": "Assign roles",
+      "enable": "Enable",
+      "unlock": "Unlock",
+      "disable": "Disable",
+      "revoke": "Revoke sessions",
+      "reset": "Reset credential",
+      "delete": "Delete"
+    },
+    "roles": {
+      "title": "Assign roles: {name}",
+      "none": "There are no platform roles to assign (or you cannot view roles).",
+      "reauthHint": "Changing roles (including promotion) requires identity re-verification.",
+      "save": "Save roles"
+    },
+    "toast": {
+      "created": "Administrator created",
+      "rolesSaved": "Roles updated",
+      "reset": "Credential reset. The user must change it at the next sign-in",
+      "disable": "Account disabled",
+      "revoke": "Sessions revoked",
+      "delete": "Account deleted",
+      "enabled": "Account enabled",
+      "unlocked": "Account unlocked"
+    },
+    "danger": {
+      "disable": {
+        "title": "Disable {name}?",
+        "impact": "This account will no longer be able to sign in and its sessions end. You can enable it again at any time.",
+        "ok": "Disable account"
+      },
+      "revoke": {
+        "title": "Revoke all sessions of {name}?",
+        "impact": "All sign-in sessions of this user end immediately and they must sign in again.",
+        "ok": "Revoke all sessions"
+      },
+      "reset": {
+        "title": "Reset the credential of {name}?",
+        "impact": "All sessions of this user end immediately and the user is forced to change the credential at the next sign-in. A system-generated temporary credential is shown only once.",
+        "ok": "Reset credential"
+      },
+      "delete": {
+        "title": "Delete {name}?",
+        "impact": "The account is deleted and its roles and sessions are removed. Historical audit records are kept. This cannot be undone.",
+        "ok": "Delete account"
+      }
+    },
+    "reset": {
+      "manual": "Set a temporary credential yourself (optional)",
+      "manualHint": "Leave empty to have the system generate one, shown once. When set, use 12-128 characters."
+    },
+    "once": {
+      "createdTitle": "Administrator created: temporary credential",
+      "resetTitle": "Credential reset: temporary credential",
+      "description": "Hand it to the user over a secure channel. The user must change it at the first sign-in.",
+      "label": "Temporary credential"
+    }
+  },
+  "roles": {
+    "col": {
+      "name": "Name",
+      "code": "Code",
+      "scope": "Scope",
+      "kind": "Kind",
+      "perms": "Permissions",
+      "description": "Description"
+    },
+    "scope": {
+      "platform": "Platform",
+      "tenant": "Tenant"
+    },
+    "builtin": "Built-in",
+    "custom": "Custom",
+    "select": "View / edit",
+    "detail": "Role: {name}",
+    "builtinNote": "Built-in roles cannot be changed. Their permissions are shown read-only.",
+    "saveMeta": "Save name and description",
+    "delete": {
+      "open": "Delete role",
+      "title": "Delete role {name}?",
+      "impact": "Role {code} will be deleted. A role that still has holders cannot be deleted: remove it from them first. This cannot be undone.",
+      "ok": "Delete role"
+    },
+    "matrix": {
+      "title": "Permission matrix",
+      "filter": "Filter permissions",
+      "resource": "Resource",
+      "notApplicable": "Not applicable to this role scope",
+      "save": "Save permissions",
+      "reauthHint": "Changing role permissions requires identity re-verification. You can only grant permissions you hold yourself."
+    },
+    "noneSelected": "Select a role to view or edit its permissions.",
+    "create": {
+      "open": "New role",
+      "title": "New role",
+      "codeHint": "Starts with a lowercase letter; lowercase letters, digits and underscores only; 2-64 characters.",
+      "codeInvalid": "The code must start with a lowercase letter and contain only lowercase letters, digits and underscores (2-64 characters)",
+      "reauthHint": "Creating a role requires identity re-verification. Assign permissions in the matrix afterwards.",
+      "submit": "Create role"
+    },
+    "toast": {
+      "permsSaved": "Permissions saved",
+      "metaSaved": "Name and description saved",
+      "created": "Role created",
+      "deleted": "Role deleted"
+    }
+  },
+  "tokens": {
+    "scope": "Manage your own API tokens here. The token is shown in plain text only once, when created; only a hash is stored.",
+    "empty": {
+      "title": "No API tokens yet",
+      "description": "Once created, a token lets scripts and integrations call the API. Its scopes cannot exceed your own permissions."
+    },
+    "col": {
+      "name": "Name",
+      "prefix": "Prefix",
+      "scopes": "Scopes",
+      "status": "Status",
+      "expires": "Expires",
+      "lastUsed": "Last used"
+    },
+    "state": {
+      "active": "Active",
+      "revoked": "Revoked",
+      "expired": "Expired"
+    },
+    "noExpiry": "System default lifetime",
+    "neverUsed": "Never used",
+    "action": {
+      "rotate": "Rotate",
+      "revoke": "Revoke"
+    },
+    "create": {
+      "open": "Create token",
+      "title": "Create API token",
+      "scopes": "Scopes",
+      "scopesHint": "You can only pick permissions you hold yourself; at least one.",
+      "scopeFilter": "Filter permissions",
+      "scopesRequired": "Select at least one permission",
+      "cidrs": "Allowed source networks (optional, one per line or comma-separated)",
+      "expiresHint": "Leave empty to use the system default lifetime.",
+      "expiresInvalid": "The expiry must be in the future",
+      "submit": "Create"
+    },
+    "danger": {
+      "rotate": {
+        "title": "Rotate token \"{name}\"?",
+        "impact": "A new token is generated and the old one is revoked at once, so scripts using the old token will fail. The new token is shown only once.",
+        "ok": "Rotate token"
+      },
+      "revoke": {
+        "title": "Revoke token \"{name}\"?",
+        "impact": "The token stops working immediately and cannot be restored. Scripts using it will fail.",
+        "ok": "Revoke token"
+      }
+    },
+    "toast": {
+      "revoked": "Token revoked"
+    },
+    "once": {
+      "createdTitle": "Token created",
+      "rotatedTitle": "Token rotated",
+      "description": "The full token is below. Copy it now and store it somewhere safe.",
+      "label": "Full token"
+    }
+  },
+  "settings": {
+    "saved": "Settings saved",
+    "save": "Save",
+    "reset": "Discard changes",
+    "readonly": "You do not have permission to change system settings. This page is read-only.",
+    "basic": {
+      "field": {
+        "general_base_url": "Server public URL",
+        "general_admin_url": "Admin URL",
+        "general_console_url": "Console URL",
+        "general_docs_url": "Docs site URL",
+        "general_status_url": "Status page URL",
+        "general_timezone": "Default time zone",
+        "general_locales": "Available languages",
+        "general_registration_open": "Open tenant self-registration"
+      },
+      "hint": {
+        "general_base_url": "Used by node enrollment tokens and gRPC certificates. Changing it affects node enrollment and requires identity re-verification.",
+        "general_timezone": "An IANA time zone name, for example Asia/Shanghai. Storage and the API always use UTC.",
+        "general_registration_open": "Only effective in commercial mode; changing it requires identity re-verification."
+      },
+      "mode": {
+        "title": "Run mode",
+        "current": "Current run mode:",
+        "desc": "Self-hosted mode hides commercial features; commercial mode opens tenants, billing and more. Switching needs no migration, but it changes the visible features and APIs at once.",
+        "switch": "Switch to {mode}",
+        "dialogTitle": "Switch the run mode to \"{mode}\"?",
+        "confirm": "Switch to {mode}",
+        "switched": "Run mode switched to {mode}",
+        "impact": {
+          "commercial": "After switching to commercial mode, commercial features (tenant self-registration, billing and more) are opened up, and menus and APIs change immediately.",
+          "self_hosted": "After switching to self-hosted mode, commercial features are hidden and their APIs immediately answer \"feature not enabled\"."
+        }
+      }
+    },
+    "brand": {
+      "desc": "Brand settings are shared by Admin and the website. After saving, the top bar reads the new brand name at once.",
+      "mediaNote": "Logo and favicon are media assets, uploaded through the website CMS (P2). Saving keeps the current ones unchanged.",
+      "field": {
+        "name": "Brand name (Chinese)",
+        "name_en": "Brand name (English)",
+        "primary_color": "Primary color (#RRGGBB)",
+        "support_email": "Support email"
+      }
+    },
+    "login": {
+      "desc": "Sign-in and session policy. These are security-sensitive, so saving requires identity re-verification.",
+      "crossSession": "The idle timeout cannot exceed the absolute timeout",
+      "field": {
+        "login_totp_required_for_admin": "Require TOTP for administrators",
+        "login_throttle_window_s": "Sign-in throttle window (seconds)",
+        "login_throttle_account_max": "Max failures per account in the window",
+        "login_throttle_ip_max": "Max failures per IP in the window",
+        "auth_session_idle_ttl_s": "Session idle timeout (seconds)",
+        "auth_session_absolute_ttl_s": "Session absolute timeout (seconds)",
+        "auth_reauth_window_s": "Re-verification validity (seconds)",
+        "auth_mfa_window_s": "Recent-MFA validity (seconds)"
+      },
+      "hint": {
+        "login_totp_required_for_admin": "When on, administrators without TOTP can only enter the enrollment flow.",
+        "auth_reauth_window_s": "After a sensitive action is verified, you are not asked again within this time."
+      }
+    }
+  },
+  "version": {
+    "core": "Core",
+    "server": "Server version",
+    "api": "API version",
+    "build": "Build",
+    "installation": "Installation ID",
+    "migration": "Database migration version",
+    "pending": "Pending migrations",
+    "components": "Installed components",
+    "noComponents": "No components registered yet.",
+    "none": "—",
+    "col": {
+      "component": "Component",
+      "instance": "Instance",
+      "host": "Host",
+      "version": "Version",
+      "status": "Status",
+      "installedAt": "Installed at"
+    },
+    "status": {
+      "installed": "Installed",
+      "upgrading": "Upgrading",
+      "failed": "Failed",
+      "uninstalled": "Uninstalled"
+    }
   }
 }

@@ -37,3 +37,368 @@ body {
   min-height: 44px;
   color: var(--le-color-brand-primary);
 }
+
+/* ---- 1.39 系统管理页的共用样式（全部走令牌） ---- */
+.le-page {
+  display: grid;
+  gap: var(--le-space-4);
+}
+.le-page__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--le-space-3);
+}
+.le-page__title {
+  margin: 0;
+  font-size: var(--le-text-page-title-size);
+  font-weight: var(--le-text-page-title-weight);
+  color: var(--le-color-text-primary);
+}
+.le-page__desc {
+  margin: 0;
+  color: var(--le-color-text-secondary);
+}
+.le-page__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--le-space-2);
+}
+.le-card {
+  padding: var(--le-space-4);
+  background: var(--le-color-bg-surface);
+  border: 1px solid var(--le-color-border-default);
+  border-radius: var(--le-radius-md);
+}
+.le-card__title {
+  margin: 0 0 var(--le-space-3);
+  font-size: var(--le-text-heading-3-size);
+  font-weight: var(--le-text-heading-3-weight);
+  color: var(--le-color-text-primary);
+}
+.le-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--le-space-3);
+}
+.le-field {
+  display: grid;
+  align-content: start;
+  gap: var(--le-space-1);
+  min-width: 160px;
+  flex: 1 1 160px;
+  color: var(--le-color-text-secondary);
+  font-size: var(--le-text-caption-size);
+}
+.le-field input:not([type='checkbox']),
+.le-field select,
+.le-field textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 32px;
+  padding: var(--le-space-1) var(--le-space-2);
+  font: inherit;
+  color: var(--le-color-text-primary);
+  background: var(--le-color-bg-surface);
+  border: 1px solid var(--le-color-border-strong);
+  border-radius: var(--le-radius-sm);
+}
+.le-field input[type='checkbox'],
+.le-check input[type='checkbox'] {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  min-height: 0;
+  margin: 0;
+  accent-color: var(--le-color-brand-primary);
+}
+.le-nowrap {
+  white-space: nowrap;
+}
+.le-field input:focus-visible,
+.le-field select:focus-visible,
+.le-field textarea:focus-visible {
+  outline: 2px solid var(--le-color-brand-primary);
+  outline-offset: 1px;
+}
+.le-field__error {
+  color: var(--le-color-danger);
+}
+.le-table-wrap {
+  overflow-x: auto;
+  background: var(--le-color-bg-surface);
+  border: 1px solid var(--le-color-border-default);
+  border-radius: var(--le-radius-md);
+}
+.le-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--le-text-body-size);
+  color: var(--le-color-text-primary);
+}
+.le-table th,
+.le-table td {
+  padding: var(--le-space-2) var(--le-space-3);
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--le-color-border-default);
+  overflow-wrap: break-word;
+}
+.le-table th {
+  color: var(--le-color-text-secondary);
+  font-size: var(--le-text-caption-size);
+  font-weight: var(--le-text-label-weight);
+  background: var(--le-color-bg-sunken);
+}
+.le-table tr:last-child td {
+  border-bottom: 0;
+}
+.le-table__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--le-space-1);
+}
+.le-table__mono,
+.le-mono {
+  font-family: var(--le-font-mono);
+  font-size: var(--le-text-mono-size);
+}
+@media (max-width: 767px) {
+  /* 手机宽度：表格改为逐行卡片，列名取自 data-label；页面本身不出现横向滚动 */
+  .le-table--stack thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .le-table--stack,
+  .le-table--stack tbody,
+  .le-table--stack tr,
+  .le-table--stack td {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .le-table--stack tr {
+    padding: var(--le-space-2) 0;
+    border-bottom: 1px solid var(--le-color-border-strong);
+  }
+  .le-table--stack td {
+    display: flex;
+    gap: var(--le-space-3);
+    justify-content: space-between;
+    border-bottom: 0;
+    padding: var(--le-space-1) var(--le-space-3);
+  }
+  .le-table--stack td::before {
+    content: attr(data-label);
+    flex: none;
+    max-width: 40%;
+    color: var(--le-color-text-secondary);
+    font-size: var(--le-text-caption-size);
+  }
+  .le-table--stack td > * {
+    min-width: 0;
+    text-align: right;
+  }
+}
+.le-chip {
+  display: inline-block;
+  padding: 0 var(--le-space-2);
+  font-size: var(--le-text-caption-size);
+  line-height: 20px;
+  border-radius: var(--le-radius-full);
+  border: 1px solid currentColor;
+  white-space: nowrap;
+}
+.le-chip--ok {
+  color: var(--le-color-success);
+  background: var(--le-color-success-bg);
+}
+.le-chip--warn {
+  color: var(--le-color-warning);
+  background: var(--le-color-warning-bg);
+}
+.le-chip--danger {
+  color: var(--le-color-danger);
+  background: var(--le-color-danger-bg);
+}
+.le-chip--info {
+  color: var(--le-color-info);
+  background: var(--le-color-info-bg);
+}
+.le-chip--muted {
+  color: var(--le-color-text-secondary);
+  background: var(--le-color-bg-sunken);
+}
+.le-pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--le-space-2);
+  color: var(--le-color-text-secondary);
+  font-size: var(--le-text-caption-size);
+}
+.le-pager__limit {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--le-space-1);
+}
+.le-pager__limit select {
+  min-height: 28px;
+  font: inherit;
+  color: var(--le-color-text-primary);
+  background: var(--le-color-bg-surface);
+  border: 1px solid var(--le-color-border-strong);
+  border-radius: var(--le-radius-sm);
+}
+.le-dialog {
+  display: grid;
+  gap: var(--le-space-3);
+  color: var(--le-color-text-primary);
+}
+.le-dialog p {
+  margin: 0;
+}
+.le-dialog__label {
+  color: var(--le-color-text-secondary);
+  font-size: var(--le-text-caption-size);
+}
+.le-dialog__typed {
+  display: grid;
+  gap: var(--le-space-1);
+}
+.le-dialog__note {
+  color: var(--le-color-text-secondary);
+  font-size: var(--le-text-caption-size);
+}
+.le-dialog__note--warn {
+  padding: var(--le-space-2) var(--le-space-3);
+  color: var(--le-color-warning);
+  background: var(--le-color-warning-bg);
+  border-radius: var(--le-radius-sm);
+}
+.le-dialog__error {
+  display: grid;
+  gap: var(--le-space-1);
+  padding: var(--le-space-2) var(--le-space-3);
+  color: var(--le-color-danger);
+  background: var(--le-color-danger-bg);
+  border-radius: var(--le-radius-sm);
+}
+.le-dialog__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--le-space-2);
+}
+.le-dialog__audit {
+  padding-top: var(--le-space-2);
+  color: var(--le-color-text-secondary);
+  font-size: var(--le-text-caption-size);
+  border-top: 1px solid var(--le-color-border-default);
+}
+.le-secret {
+  display: block;
+  padding: var(--le-space-3);
+  font-family: var(--le-font-mono);
+  font-size: var(--le-text-mono-size);
+  color: var(--le-color-text-primary);
+  background: var(--le-color-bg-sunken);
+  border: 1px solid var(--le-color-border-strong);
+  border-radius: var(--le-radius-sm);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+.le-form-grid {
+  display: grid;
+  align-items: start;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--le-space-3);
+}
+.le-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--le-space-2);
+  min-height: 32px;
+  color: var(--le-color-text-primary);
+}
+.le-notice {
+  margin: 0;
+  padding: var(--le-space-2) var(--le-space-3);
+  color: var(--le-color-info);
+  background: var(--le-color-info-bg);
+  border-radius: var(--le-radius-sm);
+}
+.le-notice--danger {
+  color: var(--le-color-danger);
+  background: var(--le-color-danger-bg);
+}
+.le-kv {
+  display: grid;
+  grid-template-columns: minmax(120px, 200px) 1fr;
+  gap: var(--le-space-2) var(--le-space-4);
+  margin: 0;
+}
+.le-kv dt {
+  color: var(--le-color-text-secondary);
+}
+.le-kv dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 767px) {
+  .le-kv {
+    grid-template-columns: 1fr;
+  }
+  .le-kv dd {
+    margin-bottom: var(--le-space-2);
+  }
+}
+.le-matrix {
+  overflow: auto;
+  max-height: 480px;
+  border: 1px solid var(--le-color-border-default);
+  border-radius: var(--le-radius-md);
+}
+.le-matrix th,
+.le-matrix td {
+  text-align: center;
+  white-space: nowrap;
+}
+.le-matrix th:first-child,
+.le-matrix td:first-child {
+  position: sticky;
+  left: 0;
+  text-align: left;
+  background: var(--le-color-bg-surface);
+}
+.le-matrix input[type='checkbox'] {
+  width: 20px;
+  height: 20px;
+}
+
+@media (max-width: 767px) {
+  /* 手机宽度的触控目标：表格里的操作按钮与分页按钮不小于 44px（UX-23） */
+  .le-table__actions .arco-btn,
+  .le-pager .arco-btn,
+  .le-page__actions .arco-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .le-field input:not([type='checkbox']),
+  .le-field select {
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 767px) {
+  /* 手机宽度：Arco 对话框默认固定 520px 宽，窄屏会超出视口；限制到视口宽度内 */
+  .arco-modal {
+    max-width: calc(100vw - 32px);
+  }
+}

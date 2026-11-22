@@ -14,7 +14,17 @@ test.describe('platform_admin（拥有全部权限）', () => {
     await page.goto(`${fxUrl()}/`);
     await expect(page.getByTestId('admin-shell')).toBeVisible();
     expect(await groups(page)).toEqual(['nodes', 'users', 'ops', 'settings']); // scheduling（模块未交付）、billing（商业模式）整组不渲染
-    expect(await items(page)).toEqual(['fx.maintenance', 'fx.users', 'fx.alias', 'fx.tasks', 'fx.audit', 'fx.rollback', 'fx.dirty', 'fx.roles', 'fx.settings', 'fx.rules']);
+    // 真实页面（Story 1.39，登记在 registry/pages.ts）+ 仍无真实页面的菜单组的夹具（节点维护、任务、回滚、未保存更改、复杂编辑）
+    expect(await items(page)).toEqual([
+      'fx.maintenance',
+      'users.list', 'users.roles', 'users.api-tokens', 'users.login-logs', 'users.audit',
+      'ops.audit', 'fx.tasks', 'fx.rollback', 'fx.dirty',
+      'settings.basic', 'settings.brand', 'settings.login', 'settings.admins', 'settings.roles', 'settings.version', 'fx.rules',
+    ]);
+    // P2 才交付的设置页（邮件/API/系统安全/数据保留/系统日志）不渲染：菜单里没有，直访 404（FR-36）
+    for (const p of ['mail', 'api', 'security', 'retention', 'logs']) {
+      await expect(page.locator(`[data-menu-item="settings.${p}"]`)).toHaveCount(0);
+    }
     // nodelist（nodes 模块未交付）不在 nodes 组里；没有灰显/占位
     await expect(page.locator('[data-menu-item="fx.nodelist"]')).toHaveCount(0);
     await expect(page.locator('[data-testid="side-menu"] [disabled], [data-testid="side-menu"] [aria-disabled="true"]')).toHaveCount(0);
@@ -31,7 +41,7 @@ test.describe('platform_admin（拥有全部权限）', () => {
 
   test('直访：模块未交付 / 商业模式页面 / 未知路径 → 404（不暗示存在）；页面不渲染', async ({ page }) => {
     await apiLogin(page, fxUrl(), env('LE_E2E_ADMIN_EMAIL'), env('LE_E2E_ADMIN_PW'), recoveryCodes()[4]);
-    for (const p of ['/nodes/list', '/scheduling/policies', '/billing/orders', '/zzz']) {
+    for (const p of ['/nodes/list', '/scheduling/policies', '/billing/orders', '/settings/mail', '/settings/security', '/settings/retention', '/zzz']) {
       await page.goto(`${fxUrl()}${p}`);
       await expect(page.getByTestId('not-found-page'), p).toBeVisible();
       await expect(page.getByTestId('fixture-page')).toHaveCount(0);
@@ -47,9 +57,10 @@ test.describe('platform_admin（拥有全部权限）', () => {
     await page.keyboard.press('Control+k');
     await expect(page.getByTestId('search-input')).toBeFocused();
     const rows = page.getByTestId('search-result');
-    await expect(rows).toHaveCount(9); // 10 个菜单页面去掉 1 个别名
+    await expect(rows).toHaveCount(14); // 17 个菜单页面去掉 3 个别名（用户角色、操作审计、管理员管理）
     const texts = (await rows.allInnerTexts()).join('\n');
-    for (const hidden of ['Node list', 'Scheduling', 'Billing', 'alias']) expect(texts).not.toContain(hidden);
+    for (const hidden of ['Node list', 'Scheduling', 'Billing', '用户角色', '操作审计', '管理员管理']) expect(texts).not.toContain(hidden);
+    for (const shown of ['用户列表', '权限角色', '审计日志', '版本信息']) expect(texts).toContain(shown);
     await settled(page);
     await shot(page, 'search-open');
     await page.getByTestId('search-input').fill('rollback');
@@ -72,7 +83,7 @@ test.describe('platform_admin（拥有全部权限）', () => {
     const tab = page.getByTestId('tab');
     const click = (k: string) => page.locator(`[data-menu-item="${k}"]`).click();
     await click('fx.tasks');
-    await click('fx.audit');
+    await click('ops.audit');
     await click('fx.tasks');
     await expect(tab).toHaveCount(3); // 首页 + 任务 + 审计，任务没有重复
     await click('fx.dirty');
@@ -85,7 +96,7 @@ test.describe('platform_admin（拥有全部权限）', () => {
     await page.getByRole('button', { name: '取消' }).click();
     await expect(tab).toHaveCount(4);
     // 切到别的标签再回来：页面保活，输入内容仍在（标签即工作区）
-    await click('fx.audit');
+    await click('ops.audit');
     await click('fx.dirty');
     await expect(page.getByTestId('dirty-input')).toHaveValue('draft');
     // 刷新：标签恢复（只恢复路径，不恢复未保存内容）
@@ -93,7 +104,7 @@ test.describe('platform_admin（拥有全部权限）', () => {
     await expect(tab).toHaveCount(4);
     await expect(page.getByTestId('dirty-input')).toHaveValue('');
     // 关闭审计标签
-    await tab.filter({ hasText: 'Audit log' }).getByTestId('tab-close').click();
+    await tab.filter({ hasText: '审计日志' }).getByTestId('tab-close').click();
     await expect(tab).toHaveCount(3);
     // 退出：再次有未保存更改时先确认，确认后关闭全部标签并回到登录页
     await page.getByTestId('dirty-input').fill('again');
@@ -136,7 +147,13 @@ test.describe('platform_auditor（只读角色）', () => {
     await page.goto(`${fxUrl()}/`);
     await expect(page.getByTestId('admin-shell')).toBeVisible();
     expect(await groups(page)).toEqual(['users', 'ops', 'settings']);
-    expect(await items(page)).toEqual(['fx.users', 'fx.alias', 'fx.tasks', 'fx.audit', 'fx.dirty', 'fx.roles', 'fx.settings', 'fx.rules']);
+    // 只读审计员拥有全部 :read 权限，没有 token:manage（API Token 页）与任何写权限；节点维护/回滚（node:manage、config:rollback）不可见
+    expect(await items(page)).toEqual([
+      'users.list', 'users.roles', 'users.login-logs', 'users.audit',
+      'ops.audit', 'fx.tasks', 'fx.dirty',
+      'settings.basic', 'settings.brand', 'settings.login', 'settings.admins', 'settings.roles', 'settings.version', 'fx.rules',
+    ]);
+    await expect(page.locator('[data-menu-item="users.api-tokens"]')).toHaveCount(0);
     await expect(page.locator('[data-menu-item="fx.rollback"], [data-menu-item="fx.maintenance"]')).toHaveCount(0);
     await expect(page.locator('[data-menu-group="nodes"]')).toHaveCount(0);
     // 搜索同样不索引无权限页面
@@ -157,6 +174,8 @@ test.describe('platform_auditor（只读角色）', () => {
     await expect(page.getByTestId('forbidden-page')).toContainText('联系管理员');
     await expect(page.getByTestId('fixture-page')).toHaveCount(0);
     await shot(page, 'forbidden-page');
+    await page.goto(`${fxUrl()}/users/api-tokens`); // 真实页面：auth 模块已交付，但缺 token:manage → 403（不是 404）
+    await expect(page.getByTestId('forbidden-need')).toContainText('token:manage');
     await page.goto(`${fxUrl()}/nodes/maintenance`); // system 模块已交付，但缺 node:manage → 403（不是 404）
     await expect(page.getByTestId('forbidden-need')).toContainText('node:manage');
     await expect(page.getByTestId('tab').filter({ hasText: 'Trigger rollback' })).toHaveCount(0);
@@ -167,10 +186,20 @@ test.describe('platform_auditor（只读角色）', () => {
     await expect(page.getByTestId('fixture-page')).toHaveAttribute('data-page', 'fx.tasks');
   });
 
-  test('别名入口（UX-3）：用户管理下的「审计日志」别名与规范页面共用同一页面组件', async ({ page }) => {
+  test('别名入口（UX-3）：三个别名与各自的规范页面共用同一页面组件；搜索只索引规范页面', async ({ page }) => {
     await apiLogin(page, fxUrl(), env('LE_E2E_AUDITOR_EMAIL'), env('LE_E2E_AUDITOR_PW'));
     await page.goto(`${fxUrl()}/users/audit`);
-    await expect(page.getByTestId('fixture-page')).toHaveAttribute('data-page', 'fx.alias');
-    await expect(page.locator('[data-menu-group="users"] [data-menu-item="fx.alias"]')).toBeVisible();
+    await expect(page.getByTestId('audit-page')).toHaveAttribute('data-preset', 'user'); // 别名：预置「用户操作」筛选
+    await expect(page.locator('[data-menu-group="users"] [data-menu-item="users.audit"]')).toBeVisible();
+    await page.goto(`${fxUrl()}/ops/audit`);
+    await expect(page.getByTestId('audit-page')).toHaveAttribute('data-preset', ''); // 规范页面：不预置
+    await page.goto(`${fxUrl()}/users/roles`);
+    await expect(page.getByTestId('roles-page')).toBeVisible();
+    await page.goto(`${fxUrl()}/settings/admins`);
+    await expect(page.getByTestId('users-page')).toBeVisible();
+    await page.keyboard.press('Control+k');
+    await page.getByTestId('search-input').fill('审计');
+    await expect(page.getByTestId('search-result')).toHaveCount(1); // 只有规范页面「审计日志」，别名「操作审计」不重复索引
+    await expect(page.getByTestId('search-result')).toContainText('审计日志');
   });
 });

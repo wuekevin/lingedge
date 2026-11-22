@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { apiError, fakeFetch } from '../testing/fakeApi';
 import { createApiClient } from './client';
-import { ApiError, CODE_NETWORK } from './errors';
+import { ApiError, CODE_NETWORK, CODE_REAUTH_CANCELED } from './errors';
 import { errorText } from './messages';
 
 function setup(routes: Parameters<typeof fakeFetch>[0], over: Partial<Parameters<typeof createApiClient>[0]> = {}) {
@@ -80,5 +80,52 @@ describe('API 客户端', () => {
     expect(errorText(t, te, new ApiError({ status: 401, code: 'auth.invalid_credentials' }))).toBe('bad creds');
     expect(errorText(t, te, new ApiError({ status: 500, code: 'weird.code', message: 'SECRET INTERNALS' }))).toBe('server down');
     expect(errorText(t, te, new Error('x'))).toBe('unknown');
+  });
+});
+
+describe('API 客户端：L4 再认证与幂等键', () => {
+  const reauthNeeded = () => apiError(403, 'auth.reauth_required');
+  it('403 auth.reauth_required：调用 reauth 钩子，通过后重试原请求一次（同一请求体、同一幂等键）', async () => {
+    let n = 0;
+    const reauth = vi.fn(async () => true);
+    const { client, calls } = setup({ 'PUT /sensitive': () => (++n === 1 ? reauthNeeded() : { body: { ok: true } }) }, { reauth });
+    await expect(client.put('/sensitive', { body: { x: 1 }, idempotencyKey: 'K-1' })).resolves.toEqual({ ok: true });
+    expect(reauth).toHaveBeenCalledTimes(1);
+    expect(calls).toHaveLength(2);
+    expect(calls[1]!.body).toEqual({ x: 1 });
+    expect(calls[1]!.headers['idempotency-key']).toBe('K-1');
+  });
+  it('用户取消再认证：不重试，抛 client.reauth_cancelled（保留原 Request ID）', async () => {
+    const { client, calls } = setup({ 'PUT /sensitive': reauthNeeded() }, { reauth: async () => false });
+    await expect(client.put('/sensitive')).rejects.toMatchObject({ code: CODE_REAUTH_CANCELED, status: 403 });
+    expect(calls).toHaveLength(1);
+  });
+  it('重试后仍 403 auth.reauth_required：如实抛出，不再弹框（只重试一次）', async () => {
+    const reauth = vi.fn(async () => true);
+    const { client, calls } = setup({ 'PUT /sensitive': reauthNeeded() }, { reauth });
+    await expect(client.put('/sensitive')).rejects.toMatchObject({ code: 'auth.reauth_required' });
+    expect(reauth).toHaveBeenCalledTimes(1);
+    expect(calls).toHaveLength(2);
+  });
+  it('auth:false 的请求（登录、再认证本身）不触发再认证流程；没有钩子时原样报错', async () => {
+    const reauth = vi.fn(async () => true);
+    const a = setup({ 'POST /auth/reauth': reauthNeeded() }, { reauth });
+    await expect(a.client.post('/auth/reauth', { auth: false })).rejects.toMatchObject({ code: 'auth.reauth_required' });
+    expect(reauth).not.toHaveBeenCalled();
+    const b = setup({ 'PUT /sensitive': reauthNeeded() });
+    await expect(b.client.put('/sensitive')).rejects.toMatchObject({ code: 'auth.reauth_required' });
+  });
+  it('其他 403（权限不足、CSRF 之外）不触发再认证', async () => {
+    const reauth = vi.fn(async () => true);
+    const { client } = setup({ 'PUT /x': apiError(403, 'auth.forbidden') }, { reauth });
+    await expect(client.put('/x')).rejects.toMatchObject({ code: 'auth.forbidden' });
+    expect(reauth).not.toHaveBeenCalled();
+  });
+  it('错误码文案：再认证相关错误码都有本地化词条（不显示服务端原文）', () => {
+    const msgs: Record<string, string> = { 'errors.code.auth.reauth_required': 'R', 'errors.code.client.reauth_cancelled': 'C' };
+    const t = (k: string) => msgs[k] ?? `generic:${k}`;
+    const te = (k: string) => k in msgs;
+    expect(errorText(t, te, new ApiError({ status: 403, code: 'auth.reauth_required', message: 'SERVER TEXT' }))).toBe('R');
+    expect(errorText(t, te, new ApiError({ status: 403, code: CODE_REAUTH_CANCELED }))).toBe('C');
   });
 });

@@ -56,6 +56,23 @@ test('进出场动画未结束时 settled() 会等待（浮层 opacity 为 0 时
   expect(await done).toBe('done');
 });
 
+test('settled()：无限循环动画（加载中的旋转图标）不阻塞审计；有限时长的动画仍会被等待', async ({ page: p }) => {
+  const { settled } = await import('./helpers');
+  await p.setContent(
+    '<!doctype html><html><head><meta charset="utf-8"><style>@keyframes spin { to { transform: rotate(360deg); } } @keyframes fade { from { opacity: 0; } to { opacity: 1; } } #s { animation: spin 1s linear infinite; } #f { animation: fade 900ms linear 1; }</style></head><body><div id="s">spinner</div></body></html>',
+  );
+  await settled(p); // 只有无限动画：立即放行
+  await p.evaluate(() => {
+    const f = document.createElement('div');
+    f.id = 'f';
+    f.textContent = 'fading';
+    document.body.appendChild(f);
+  });
+  const t0 = Date.now();
+  await settled(p); // 有限动画在跑：必须等它结束
+  expect(Date.now() - t0).toBeGreaterThan(500);
+});
+
 test('TOTP 生成：RFC 6238 附录 B 的 SHA-1 测试向量（密钥 "12345678901234567890"，T=59 → 6 位 287082）', () => {
   const b32 = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';
   expect(totpCode(b32, 59_000)).toBe('287082');

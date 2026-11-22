@@ -49,8 +49,41 @@ describe('已交付页面注册表', () => {
     }
   });
 
-  it('Story 1.38 只交付外壳：生产清单为空（业务页面由 1.39 起登记）', () => {
-    expect(productionPages).toEqual([]);
+  // Story 1.38 交付外壳时这里断言「清单为空」；Story 1.39 起业务页面登记进来，该断言按预期被替换为下面对 1.39 页面集合的精确对账。
+  it('Story 1.39：生产清单恰好是 ia.md §1.11/§1.15/§1.17 的 M1 页面（不多不少），键与路径一一对应', () => {
+    expect(productionPages.map((p) => `${p.group}:${p.key}:${p.path}`).sort()).toEqual(
+      [
+        'ops:ops.audit:/ops/audit',
+        'settings:settings.admins:/settings/admins',
+        'settings:settings.basic:/settings/basic',
+        'settings:settings.brand:/settings/brand',
+        'settings:settings.login:/settings/login',
+        'settings:settings.roles:/settings/roles',
+        'settings:settings.version:/settings/version',
+        'users:users.api-tokens:/users/api-tokens',
+        'users:users.audit:/users/audit',
+        'users:users.list:/users/list',
+        'users:users.login-logs:/users/login-logs',
+        'users:users.roles:/users/roles',
+      ].sort(),
+    );
+  });
+
+  it('FR-36：邮件/API/系统安全/数据保留/系统日志（P2）不登记 = 不渲染；设置菜单只有 M1 的六页', () => {
+    const settings = productionPages.filter((p) => p.group === 'settings').map((p) => p.key.replace('settings.', ''));
+    expect(settings.sort()).toEqual(['admins', 'basic', 'brand', 'login', 'roles', 'version']);
+    for (const p of productionPages) expect(p.path).not.toMatch(/mail|api-settings|security|retention|syslog|system-log/);
+  });
+
+  it('UX-3：别名与规范页面共用同一个组件（不复制页面），规范页面本身不是别名，搜索不重复索引别名', () => {
+    const by = new Map(productionPages.map((p) => [p.key, p]));
+    const aliases = productionPages.filter((p) => p.aliasOf);
+    expect(aliases.map((p) => `${p.key}->${p.aliasOf}`).sort()).toEqual(['settings.admins->users.list', 'users.audit->ops.audit', 'users.roles->settings.roles']);
+    for (const a of aliases) {
+      const canonical = by.get(a.aliasOf!)!;
+      expect(canonical.aliasOf, `${a.key} 的规范页面不能再是别名`).toBeUndefined();
+      expect(a.component, `${a.key} 与 ${canonical.key} 必须共用同一个组件加载器`).toBe(canonical.component);
+    }
   });
 
   it('e2e 夹具页面使用的权限点都是 OpenAPI 里真实存在的（夹具不发明权限）', () => {

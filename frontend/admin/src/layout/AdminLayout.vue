@@ -2,12 +2,15 @@
 import { computed, defineComponent, h, inject, onBeforeUnmount, onMounted, ref, watch, type Component } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
+import { useAdminApi } from '../api/context';
 import { useViewport } from '../composables/useViewport';
 import { buildMenu, buildSearchIndex, evaluatePage } from '../registry/visibility';
 import { ROUTE } from '../router/routes';
+import { useBrandStore } from '../stores/brand';
 import { useSessionStore } from '../stores/session';
 import { MAX_TABS, useTabsStore } from '../stores/tabs';
 import ActingBanner from './ActingBanner.vue';
+import ReauthDialog from './ReauthDialog.vue';
 import GlobalSearch from './GlobalSearch.vue';
 import { REGISTRY_KEY } from './keys';
 import MobileNotice from './MobileNotice.vue';
@@ -24,6 +27,10 @@ const session = useSessionStore();
 const tabs = useTabsStore();
 const registry = inject(REGISTRY_KEY);
 const viewport = useViewport();
+const brand = useBrandStore();
+const adminApi = useAdminApi();
+// 品牌名：有 setting:read 才读取（FR-36：Admin 读到的就是品牌设置里的值）；否则顶栏退回内置词条。
+if (session.me?.permissions.includes('setting:read')) void brand.load(adminApi);
 
 const groups = computed(() => (session.access && registry ? buildMenu(registry.pages, session.access) : []));
 const searchEntries = computed(() => (session.access && registry ? buildSearchIndex(registry.pages, session.access) : []));
@@ -104,6 +111,7 @@ const logoutConfirm = ref(false);
 async function doLogout(): Promise<void> {
   logoutConfirm.value = false;
   await session.logout();
+  brand.clear();
   tabs.closeAll();
   await router.replace({ name: ROUTE.login });
 }
@@ -156,6 +164,7 @@ function goBack(): void {
       </div>
     </div>
     <GlobalSearch v-model:open="searchOpen" :entries="searchEntries" />
+    <ReauthDialog />
     <a-modal v-model:visible="logoutConfirm" unmount-on-close :title="t('account.logout')" :ok-text="t('account.logout')" :cancel-text="t('common.cancel')" @ok="doLogout">
       <span data-testid="logout-confirm">{{ t('account.logoutConfirm') }}</span>
     </a-modal>

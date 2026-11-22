@@ -56,7 +56,7 @@ export async function mountAdmin(o: MountOptions = {}) {
     unmount() {
       handle.app.unmount();
       el.remove();
-      document.body.querySelectorAll('.arco-modal-container, .arco-drawer-container, .arco-trigger-popup').forEach((n) => n.remove());
+      document.body.querySelectorAll('.arco-modal-container, .arco-drawer-container, .arco-trigger-popup, .arco-message-list').forEach((n) => n.remove());
     },
   };
 }

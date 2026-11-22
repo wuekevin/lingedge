@@ -1,10 +1,12 @@
-import { ApiError, CODE_BAD_RESPONSE, CODE_NETWORK, type ApiErrorDetail } from './errors';
+import { ApiError, CODE_BAD_RESPONSE, CODE_NETWORK, CODE_REAUTH_CANCELED, CODE_REAUTH_REQUIRED, type ApiErrorDetail } from './errors';
 
 // Admin 的 API 客户端（ADR-014 §2：会话/API 客户端只放 admin，不进 shared）。
 // - 同源相对路径 /api/v1（Nginx 反代；开发时由 Vite 代理）；Cookie 会话 `le_admin_sid` 是 HttpOnly，由浏览器自动携带（credentials: 'include'）。
 // - 写请求（非 GET/HEAD/OPTIONS）自动携带 X-CSRF-Token；遇到 403 auth.csrf_invalid 时刷新令牌并重试一次。
 // - 代租户（actingAs）只在调用方明确要求时才附带 X-Tenant-ID（M1 为默认租户，D-13）：平台级 operation 不应带它。
 // - 401（会话失效）统一通知会话层；登录相关请求（auth:false）不触发。
+// - 403 auth.reauth_required（L4 再认证窗口外，IMP-12、EXPERIENCE.md L4）：交给 deps.reauth 弹出验证框（POST /auth/reauth 由服务端校验口令/TOTP，前端不伪造），
+//   成功后自动重试原请求一次；用户取消 → CODE_REAUTH_CANCELED。
 
 export const API_BASE = '/api/v1';
 
@@ -14,8 +16,10 @@ export interface RequestOptions {
   /** 以默认租户代管：附带 X-Tenant-ID（须有 tenant:impersonate，服务端判定）。 */
   actingAs?: boolean;
   signal?: AbortSignal;
-  /** false：登录/第二步等未认证请求，401 不当作会话过期处理。缺省 true。 */
+  /** false：登录/第二步等未认证请求，401 不当作会话过期处理，也不触发再认证流程。缺省 true。 */
   auth?: boolean;
+  /** 创建类请求的幂等键（Idempotency-Key，≤128 字符）。 */
+  idempotencyKey?: string;
 }
 
 export interface ApiClient {
@@ -35,6 +39,8 @@ export interface ClientDeps {
   actingTenantUid: () => string | null;
   locale: () => string;
   onUnauthorized: () => void;
+  /** 需要再认证时调用：弹出验证框；返回 true = 已再认证（客户端重试原请求），false = 用户取消。 */
+  reauth?: () => Promise<boolean>;
 }
 
 interface ErrorBody {
@@ -73,6 +79,7 @@ export function createApiClient(deps: ClientDeps): ApiClient {
       const csrf = deps.csrf();
       if (csrf) headers['X-CSRF-Token'] = csrf;
     }
+    if (opts.idempotencyKey) headers['Idempotency-Key'] = opts.idempotencyKey;
     if (opts.actingAs) {
       const uid = deps.actingTenantUid();
       if (uid) headers['X-Tenant-ID'] = uid;
@@ -123,6 +130,12 @@ export function createApiClient(deps: ClientDeps): ApiClient {
         deps.setCsrf(t.value.csrf_token);
         r = await once<T>(method, path, opts);
       }
+    }
+    // L4 再认证：窗口外的敏感操作返回 403 auth.reauth_required；验证通过后原请求只重试一次（再失败就如实报错，不循环）。
+    if ('error' in r && r.error.status === 403 && r.error.code === CODE_REAUTH_REQUIRED && opts.auth !== false && deps.reauth) {
+      const original = r.error;
+      if (await deps.reauth()) r = await once<T>(method, path, opts);
+      else throw new ApiError({ status: 403, code: CODE_REAUTH_CANCELED, message: 'reauthentication cancelled', requestId: original.requestId });
     }
     if ('error' in r) {
       if (r.error.status === 401 && opts.auth !== false) deps.onUnauthorized();

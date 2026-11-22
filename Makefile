@@ -301,6 +301,9 @@ frontend-check: frontend-install
 #
 # Story 1.38 起同一目标还覆盖 Admin（真实 server 正常模式 + Chromium：登录/TOTP/恢复码、无权限菜单隐藏、直访 403/404、租户账号被拒、手机宽度、亮/暗对比度）：
 # 需要 Admin 的生产构建（frontend/dist/admin）与 e2e 构建（frontend/dist/admin-e2e，含夹具页面；不是发行物）——由 admin-e2e-build 先行构建。
+#
+# Story 1.39 起同一目标还覆盖 Admin 系统管理页（生产构建 × 真实 server 正常模式 × Chromium）：创建角色→分配→无权限用户验证、API Token 明文一次、L3 运行模式 + L4 再认证（口令 + TOTP）、
+# 审计游标分页与过滤、品牌修改读到新值、版本信息与二进制自报版本/库里迁移号一致、再认证窗口外、手机宽度、亮暗对比度审计（TestBrowserAdminSystem / TestBrowserAdminSystemSettings）。
 e2e: setup-web-check admin-e2e-build
 	LINGEDGE_REQUIRE_MYSQL=1 LINGEDGE_REQUIRE_REDIS=1 LINGEDGE_REQUIRE_BROWSER=1 $(GO) test -count=1 -timeout 45m -v -run 'TestBrowser' ./tests/integration/setup/
 

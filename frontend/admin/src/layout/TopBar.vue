@@ -2,14 +2,17 @@
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { ViewportClass } from '../composables/useViewport';
+import { useBrandStore } from '../stores/brand';
 import { useSessionStore } from '../stores/session';
 import ShellPrefs from './ShellPrefs.vue';
 
 // 顶栏 48px：品牌、全局搜索入口、语言/主题、用户菜单（告警/通知入口随 P2 模块交付，不放占位）。
 const props = defineProps<{ viewport: ViewportClass; collapsed: boolean }>();
 const emit = defineEmits<{ 'toggle-nav': []; 'open-search': []; logout: [] }>();
-const { t } = useI18n();
+const { t, locale } = useI18n();
 const session = useSessionStore();
+const brand = useBrandStore();
+const brandName = computed(() => brand.nameFor(String(locale.value)) || t('topbar.brand'));
 const name = computed(() => session.user?.display_name || session.user?.email || '');
 const initial = computed(() => Array.from(name.value)[0]?.toUpperCase() ?? '');
 const navLabel = computed(() => (props.viewport === 'mobile' ? t('nav.open') : props.collapsed ? t('nav.expand') : t('nav.collapse')));
@@ -20,7 +23,7 @@ const navLabel = computed(() => (props.viewport === 'mobile' ? t('nav.open') : p
     <button type="button" class="le-topbar__btn" :aria-label="navLabel" data-testid="nav-toggle" @click="emit('toggle-nav')">
       <span aria-hidden="true">☰</span>
     </button>
-    <span class="le-topbar__brand">{{ t('topbar.brand') }}</span>
+    <span class="le-topbar__brand" data-testid="top-brand">{{ brandName }}</span>
     <button type="button" class="le-topbar__search" :aria-label="t('search.open')" data-testid="search-open" @click="emit('open-search')">
       <span aria-hidden="true">⌕</span>
       <span class="le-topbar__search-text">{{ t('search.placeholder') }}</span>

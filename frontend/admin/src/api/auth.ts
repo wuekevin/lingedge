@@ -1,5 +1,5 @@
 import type { ApiClient } from './client';
-import type { LoginResponse, Me, Tenant } from './types';
+import type { LoginResponse, Me, ReauthResponse, Tenant } from './types';
 
 // /auth/* 与 /tenants 的薄封装；端点写完整路径（构建隔离检查按路径模板匹配）。
 export function createAuthApi(c: ApiClient) {
@@ -20,6 +20,10 @@ export function createAuthApi(c: ApiClient) {
     },
     changePassword(current: string, next: string): Promise<void> {
       return c.post<void>('/auth/password/change', { auth: false, body: { current_password: current, new_password: next } });
+    },
+    /** 再认证（L4 step-up）：口令（已启用 TOTP 另加 6 位验证码）由服务端校验，成功后会话进入再认证窗口。auth:false —— 口令错误的 401 不应被当作会话过期。 */
+    reauth(secret: string, totpCode?: string): Promise<ReauthResponse> {
+      return c.post<ReauthResponse>('/auth/reauth', { auth: false, body: { password: secret, ...(totpCode ? { totp_code: totpCode } : {}) } });
     },
     /** 默认租户（D-13）：用于代管横幅与 X-Tenant-ID。需要 tenant:read；调用方按权限决定是否调用。 */
     listTenants(): Promise<{ items: Tenant[] }> {
