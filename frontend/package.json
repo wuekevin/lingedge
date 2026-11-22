@@ -13,7 +13,9 @@
     "gen:tokens": "node scripts/gen-tokens.mjs",
     "check:tokens": "node scripts/gen-tokens.mjs --check && node scripts/check-tokens-design.mjs",
     "check:contrast": "node scripts/check-contrast.mjs",
+    "check:arco-contrast": "node scripts/check-arco-contrast.mjs",
     "check:i18n": "node scripts/check-i18n.mjs",
+    "check:setup-codes": "node scripts/check-setup-codes.mjs",
     "gen:types": "node scripts/gen-api-types.mjs",
     "check:types": "node scripts/gen-api-types.mjs --check",
     "lint:guards": "node scripts/lint-guards.mjs",
@@ -30,7 +32,7 @@
     "test:setup": "vitest run --project setup",
     "test:shared": "vitest run --project shared",
     "test:selftest": "vitest run --project scripts",
-    "check": "pnpm run lint && pnpm run check:tokens && pnpm run check:contrast && pnpm run check:i18n && pnpm run check:types && pnpm run typecheck && pnpm run test && pnpm run build && pnpm run check:embed && pnpm run check:isolation && pnpm run check:mock"
+    "check": "pnpm run lint && pnpm run check:tokens && pnpm run check:contrast && pnpm run check:arco-contrast && pnpm run check:i18n && pnpm run check:setup-codes && pnpm run check:types && pnpm run typecheck && pnpm run test && pnpm run build && pnpm run check:embed && pnpm run check:isolation && pnpm run check:mock"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

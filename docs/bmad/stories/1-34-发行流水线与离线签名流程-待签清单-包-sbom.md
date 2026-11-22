@@ -97,8 +97,8 @@ context:
 
 | 项 | 归属 | 依据 |
 |---|---|---|
-| `cmd/lingedge` 链接 `internal/tools/manifest` 后，发行二进制才真正 `go:embed` 内置 `keys.json`；届时守卫对真实 `lingedge` 产物生效（流水线的产物扫描与 `tests/security/releasekeys` 已就绪） | **Story 1.35**（Tools 命令接线、`install server`） | 当前 `cmd/lingedge` 仅 `--version` 脚手架 |
-| `lingedge install server` 消费本流水线的 server 包（`payload/bin/lingedge-server`、`share/config/…`、`Executables`、`ComponentSpec`），以及从发布目录/bundle 真实安装 | **Story 1.35**、1.45（ENV-LNX 验收） | 1.33 把 `ComponentSpec` 实现留给 1.35 |
+| `cmd/lingedge` 链接 `internal/tools/manifest` 后，发行二进制才真正 `go:embed` 内置 `keys.json`；届时守卫对真实 `lingedge` 产物生效（流水线的产物扫描与 `tests/security/releasekeys` 已就绪） | **Story 1.35**（Tools 命令接线、`install server`） | **→ 已澄清（Story 1.35/1.37b）**：链接自 1.33 起已成立（`cmd/lingedge` → `internal/tools/cli` → `internal/tools/manifest`），无需新增接线；1.35 补了对真实 `lingedge` 产物的守卫证明。原「仅 `--version` 脚手架」是 1.34 编写时（早于 1.25/1.33）的过时表述 |
+| `lingedge install server` 消费本流水线的 server 包（`payload/bin/lingedge-server`、`share/config/…`、`Executables`、`ComponentSpec`），以及从发布目录/bundle 真实安装 | **Story 1.35**、1.45（ENV-LNX 验收） | 1.33 把 `ComponentSpec` 实现留给 1.35（**→ 1.35 已做**：生产 `serverSpec`、真实 lingedge-server 联调；真实 systemd/发行源验收仍属 1.45） |
 | 升级路径消费同一套清单/包、Tools 自升级（`tools` 包的原子替换） | **Story 1.43** | epics 1.43 |
 | 前端组件包（`admin-web/console/website/docs/status`）与 npm SBOM/lockfile | **Story 1.36** 及后续前端 Story | 前端 workspace 属 1.36 |
 | node/dns/reporter/openresty 的真实包与「unreleased → available」 | Epic 3（Story 3.22 起）等对应 Story | 对应交付物尚不存在 |

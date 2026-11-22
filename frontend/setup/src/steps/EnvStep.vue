@@ -2,6 +2,7 @@
 import { computed, onMounted, shallowRef } from 'vue';
 import { LeEmpty, LeStateBoundary } from '@lingedge/shared';
 import { useI18n } from 'vue-i18n';
+import { useServerText } from '../api/useServerText';
 import SetupError from '../components/SetupError.vue';
 import StepShell from '../components/StepShell.vue';
 import type { SetupCheckItem } from '../api/types';
@@ -11,6 +12,7 @@ import { useWizard } from '../state/wizard';
 
 const wizard = useWizard();
 const { t, te } = useI18n();
+const st = useServerText();
 const req = useStepRequest(wizard, 'loading');
 const items = shallowRef<SetupCheckItem[]>([]);
 
@@ -62,7 +64,7 @@ onMounted(() => {
           <span class="badge" :class="`badge--${sevOf(it)}`" data-testid="env-severity">{{ t(`env.severity.${sevOf(it)}`) }}</span>
           <div class="check-item__text">
             <strong>{{ labelOf(it) }}</strong>
-            <span class="check-item__msg">{{ it.message }}</span>
+            <span class="check-item__msg" :lang="st.check(it).lang" :data-localized="st.check(it).localized" data-testid="check-msg">{{ st.check(it).text }}</span>
           </div>
         </li>
       </ul>

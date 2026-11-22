@@ -3,6 +3,7 @@ import { computed, reactive, ref, useId } from 'vue';
 import { LeStateBoundary } from '@lingedge/shared';
 import { resolveLocale, type LeLocale } from '@lingedge/shared';
 import { useI18n } from 'vue-i18n';
+import { useServerText } from '../api/useServerText';
 import CopyButton from '../components/CopyButton.vue';
 import QrCode from '../components/QrCode.vue';
 import ResultNote from '../components/ResultNote.vue';
@@ -21,6 +22,7 @@ import { isValidEmail } from '../validation';
 
 const wizard = useWizard();
 const { t, locale } = useI18n();
+const st = useServerText();
 const req = useStepRequest(wizard);
 const meterId = useId();
 
@@ -61,7 +63,7 @@ function wipePasswords() {
 }
 
 function mapFieldErrors() {
-  for (const d of req.error.value?.details ?? []) if (d.field && !errors[d.field]) errors[d.field] = d.reason;
+  for (const d of req.error.value?.details ?? []) if (d.field && !errors[d.field]) errors[d.field] = st.reason(d.reason).text;
 }
 
 async function submit() {
@@ -179,7 +181,7 @@ function finishRecovery() {
       </div>
     </section>
 
-    <ResultNote v-else-if="phase === 'done'" :message="t('admin.done')" :server-message="serverMessage" testid="admin-ok" />
+    <ResultNote v-else-if="phase === 'done'" :message="t('admin.done')" :server-message="serverMessage" step="admin" testid="admin-ok" />
 
     <LeStateBoundary v-if="phase !== 'done' && phase !== 'recovery'" :status="req.status.value" @retry="phase === 'totp' ? confirmTotp() : submit()">
       <template #error>

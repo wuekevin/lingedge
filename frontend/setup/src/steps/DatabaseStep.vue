@@ -2,6 +2,7 @@
 import { computed, reactive, ref } from 'vue';
 import { LeStateBoundary } from '@lingedge/shared';
 import { useI18n } from 'vue-i18n';
+import { useServerText } from '../api/useServerText';
 import ResultNote from '../components/ResultNote.vue';
 import SCheckbox from '../components/SCheckbox.vue';
 import SetupError from '../components/SetupError.vue';
@@ -16,6 +17,7 @@ import { DEFAULT_MIGRATE_USER, FIXED_APP_USER, FIXED_MAINT_USER, isLoopbackHost,
 
 const wizard = useWizard();
 const { t } = useI18n();
+const st = useServerText();
 const req = useStepRequest(wizard);
 
 // 技术性示例值（非用户文案）。
@@ -114,7 +116,7 @@ async function submit() {
   // 服务端校验失败的逐字段原因映射回字段（口令不回显、不保留到下一次渲染之外）。
   if (!r.ok) {
     const e = req.error.value;
-    for (const d of e?.details ?? []) if (d.field && !errors[d.field]) errors[d.field] = d.reason;
+    for (const d of e?.details ?? []) if (d.field && !errors[d.field]) errors[d.field] = st.reason(d.reason).text;
     return;
   }
   message.value = t('db.ok');
@@ -164,7 +166,7 @@ async function submit() {
       <template #empty>
         <p class="result result--empty" data-testid="db-empty">{{ t('db.resultEmpty') }}</p>
       </template>
-      <ResultNote :message="message" :server-message="serverMessage" testid="db-ok" />
+      <ResultNote :message="message" :server-message="serverMessage" step="database" testid="db-ok" />
     </LeStateBoundary>
   </StepShell>
 </template>

@@ -54,7 +54,7 @@ colors:
   # ---------- 数据可视化（ECharts）8 色序列，亮/暗各一套，色盲友好顺序，禁止仅靠颜色区分系列 ----------
   chart-1: '#3B4FD8'
   chart-2: '#0E9384'
-  chart-3: '#D9822B'
+  chart-3: '#D17A1F'                # 在白底对比度 3.22（≥3:1 的非文本要求；Story 1.37b 由 #D9822B 的 2.93 调整，仍待 UD-14 确认）
   chart-4: '#6D4FE0'
   chart-5: '#C11574'
   chart-6: '#0B5CAD'
@@ -194,6 +194,7 @@ LingEdge 的气质是「**可信赖的基础设施**」：冷静、精确、有�
 | 允许（主题层） | 禁止 |
 |---|---|
 | 通过 CSS 变量/主题令牌覆盖主色板（`--primary-1…10`）、语义色、圆角、字体、阴影；亮暗两套用 Arco 的 `arco-theme` 属性切换 | Fork/打补丁修改 Arco 源码；用 `!important` 或深层选择器改组件内部结构 |
+| 暗色主题下，对 Arco 写死 `#fff` 文字色的实心控件（主按钮/状态按钮、选中格、徽标、步骤图标）做**仅 `color`** 的窄覆盖，取 `{colors.on-brand-dark}`（对比度≥4.5:1）；选择器清单在 `tokens.json` 的 `arco`，由 `make frontend-check` 对照 Arco 真实 CSS 校验（Story 1.37b，提议，待 UD-14 确认） | 用该机制改 `color` 以外的属性，或覆盖清单之外的组件 |
 | 在 `frontend/shared` 封装**业务组件**（统一表格、状态胶囊、发布条、代码块、危险确认对话框、权限按钮）并在 Admin/Console 间复用 | 页面内直接拼装「一次性」自定义版本的同类组件 |
 | 使用 Arco Pro 的布局外壳（侧栏/顶栏/多标签）并替换品牌与菜单数据源 | 引入第二套 UI 组件库 |
 | 官网使用 Tailwind，**读取同一份令牌**（`tokens.css` → Tailwind theme extend），不使用 Arco | 官网引入 Arco 或 Admin 引入 Tailwind 原子类做主结构（可用于局部布局辅助，不得覆盖语义色） |

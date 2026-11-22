@@ -102,7 +102,7 @@ const alreadyDone = computed(() => wizard.state.done.init_db && req.status.value
         <span v-else />
       </template>
       <div>
-        <ResultNote :message="note" testid="init-ok" />
+        <ResultNote :message="note" step="init_db" testid="init-ok" />
         <table v-if="migrations.length > 0" class="table" data-testid="init-migrations">
           <caption class="table__caption">{{ t('init.table.caption') }}</caption>
           <thead>

@@ -143,6 +143,6 @@ Ruby 交叉验证需要 OpenSSL ≥ 1.1.1 的 Ruby（macOS 自带 Ruby 2.6/Libre
 ## 11. 已知边界与待办（如实记录）
 
 - **UD-3**：真实签名人、保管介质、轮换/吊销演练周期、公开发行源地址与应急渠道待用户确认；确认前本流程以测试密钥在本机演练通过为准，**不得对外发行**。
-- **产物内置公钥的实际覆盖**：`cmd/lingedge` 目前只有 `--version` 脚手架，尚未链接 `internal/tools/manifest`，发行二进制里还没有 `go:embed` 的 `keys.json`；守卫（`gates release-keys`、产物字节的测试公钥扫描、`tests/security/releasekeys` 的真实 `go build` 扫描）已就绪，随 Tools 命令接线（Story 1.35）对真实 `lingedge` 产物生效。
+- **产物内置公钥的实际覆盖**：`cmd/lingedge` 自 Story 1.33 起已链接 `internal/tools/manifest`（经 `internal/tools/cli` 的安装编排），发行二进制 `go:embed` 内置 `keys.json`；守卫（`gates release-keys`、产物字节的测试公钥扫描、`tests/security/releasekeys` 的真实 `go build` 扫描）对真实 `lingedge` 产物生效（Story 1.35 补了对真实产物的证明）。发行构建仍须由发行流水线在构建前注入真实公钥（缺失即失败，`make build RELEASE=1`）。
 - 在线取包路径（HTTPS 发行源）由 Story 1.28 的 downloader 负责；本流水线用离线 bundle 路径（同一条校验链）验证，并产出可直接发布的目录。
 - 许可证扫描（G-7 子项）尚未选型接入；SBOM 的 npm 部分待前端工程（Story 1.36）出现 lockfile 后纳入。

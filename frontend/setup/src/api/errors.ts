@@ -13,6 +13,8 @@ export interface ApiErrorDetail {
 export class SetupApiError extends Error {
   readonly status: number;
   readonly code: string;
+  /** 服务端原文 message（未知错误码时作为回落展示；已知码走本地词条）。 */
+  readonly serverMessage: string;
   readonly requestId: string;
   readonly details: ApiErrorDetail[];
   readonly retryAfterSeconds: number | null;
@@ -22,6 +24,7 @@ export class SetupApiError extends Error {
     this.name = 'SetupApiError';
     this.status = init.status;
     this.code = init.code;
+    this.serverMessage = init.message;
     this.requestId = init.requestId ?? '';
     this.details = init.details ?? [];
     this.retryAfterSeconds = init.retryAfterSeconds ?? null;

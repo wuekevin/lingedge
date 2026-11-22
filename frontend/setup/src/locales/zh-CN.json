@@ -6,7 +6,8 @@
     "skip": "跳到主要内容",
     "language": "语言",
     "serverNote": "服务端回执",
-    "stepsLabel": "安装步骤"
+    "stepsLabel": "安装步骤",
+    "theme": "主题"
   },
   "lang": {
     "zh-CN": "简体中文",
@@ -340,6 +341,122 @@
         "network_error": "没有收到服务端响应：请确认服务仍在运行、网络或 SSH 隧道仍然连通。",
         "bad_response": "服务端返回了无法识别的响应。"
       }
+    },
+    "code": {
+      "setup": {
+        "token_invalid": "初始化令牌缺失或错误。",
+        "already_installed": "系统已安装，安装向导已关闭。",
+        "insecure_transport": "携带口令的接口需要安全传输（TLS）。",
+        "database_not_empty": "目标数据库不是空库。",
+        "precheck_failed": "预检未通过。",
+        "mode_active": "服务器仍处于安装模式，请先完成安装向导。"
+      },
+      "auth": {
+        "pw_policy": "口令不符合强度策略。",
+        "unauthenticated": "未认证或令牌失效。",
+        "forbidden": "没有权限执行此操作。"
+      },
+      "validation": {
+        "failed": "提交的内容未通过校验。"
+      },
+      "resource": {
+        "conflict": "当前状态不允许此操作。",
+        "not_found": "请求的资源不存在。"
+      },
+      "rate_limit": {
+        "exceeded": "请求过于频繁。"
+      },
+      "internal": {
+        "error": "服务器内部错误。"
+      },
+      "client": {
+        "network_error": "没有收到服务器的响应。",
+        "bad_response": "服务器返回了无法理解的响应。"
+      }
     }
+  },
+  "serverMsg": {
+    "check": {
+      "server_version": "Server 版本 {version}",
+      "system_time_bad": "系统时间异常（{time}）：证书与会话依赖正确的时钟，请先校准时间。",
+      "system_time_ok": "系统时间 {time}（UTC）",
+      "data_dir_bad": "数据目录不可写（{path}）：请确认目录存在且属主为运行用户。",
+      "data_dir_ok": "数据目录可写",
+      "master_key_bad": "主密钥不可读：安装步骤 18 应已生成 /etc/lingedge/server/master.key 并经 systemd LoadCredential 提供（不展示内容）。",
+      "master_key_ok": "主密钥可读（不展示内容）",
+      "migrations_bad": "内嵌迁移集合无效（构建缺陷）。",
+      "migrations_ok": "内嵌迁移 {count} 个",
+      "server_env_bad": "server.env 未配置：正常运行前必须配置（Redis 键空间 le:<env>:…）。",
+      "server_env_ok": "server.env 已配置",
+      "listen_loopback": "向导仅监听回环地址 {addr}（远程访问请用 SSH 隧道）。",
+      "listen_exposed": "向导监听非回环地址 {addr}：携带口令的接口须经 TLS（直接 TLS 或可信反代的 X-Forwarded-Proto: https），否则返回 400 setup.insecure_transport。",
+      "token_bad": "setup token 哈希文件不存在（{path}）：Web 向导的所有写接口将一律 401（由 Tools 生成）；无头路径 setup --from-file 不需要它。",
+      "token_ok": "setup token 已配置"
+    },
+    "step": {
+      "database_ok": "MySQL 预检通过；{accounts} 口令已加密写入运行期凭据文件（迁移口令仅保存在内存）。",
+      "database_setuserid": "管理员无法授予全局 SET_USER_ID，已交由触发器探针判定是否需要。",
+      "database_nomaint": "未配置 maint 账号：分区维护作业将明确跳过并告警。",
+      "redis_ok": "Redis {version} 校验通过（主版本 ≥8）；凭据已加密写入运行期凭据文件。",
+      "init_migrated": "迁移完成：{from} → {to}，本次应用 {count} 个。",
+      "init_uptodate": "数据库已是最新版本 {version}（无待执行迁移）。",
+      "system_ok": "系统基础配置已写入（运行模式 {mode}）。",
+      "keys_ok": "内部身份与密钥已初始化（私有 CA、配置签名密钥、Server gRPC 叶证书、deploy.lineage）；CA 指纹 {fp}。请把主密钥 master.key 与数据库备份分开保管（丢失主密钥将无法解密任何私钥，F-7）。",
+      "complete_ok": "安装已完成。",
+      "complete_lock_failed": "警告：install.lock 写入失败，请检查数据目录权限，重启 Server 时会据数据库记录补写。",
+      "complete_token_delete_failed": "警告：setup token 哈希文件删除失败，请手工删除 {path}。",
+      "complete_token_cleared": "setup token 哈希文件所在目录不可写，已清空其内容使 token 永久失效，请手工删除 {path}。",
+      "complete_closed": "向导接口此后永久返回 410；请以刚创建的管理员登录 Admin。",
+      "complete_migrate_generated": "迁移账号口令由向导自动生成，仅在本响应展示一次，不会被保存：请立即在 root 侧执行 sudo lingedge-server migrate credential init 保存（预填 host/port/database，只需键入口令）；若来不及保存，之后用 migrate credential reset --admin-user <管理员> 重置。临时数据库管理员账号请自行删除。",
+      "complete_migrate_manual": "升级前请在 root 侧执行 sudo lingedge-server migrate credential init 保存迁移账号口令（或之后用 credential reset）；临时数据库管理员账号请自行删除。"
+    },
+    "reason": {
+      "required": "必填。",
+      "max128": "最多 128 字节，且不得含 NUL 或换行。",
+      "max512": "最多 512 字节，且不得含 NUL 或换行。",
+      "min12": "至少 12 个字符。",
+      "charRange": "长度须为 {min}–{max} 个字符。",
+      "socketExclusive": "与主机/端口互斥：请二选一（主机+端口，或 Unix socket）。",
+      "socketPath": "必须是规范化的绝对路径（最多 100 字节，不含 NUL 或换行）。",
+      "host": "必须是主机名或 IP（或改用 Unix socket）。",
+      "port": "端口必须在 1–65535 之间。",
+      "dbName": "必须是 MySQL 标识符（字母、数字、_、{'$'}，最多 64 个字符）。",
+      "fixedAccount": "必须是 {name}（迁移把表权限授予这个固定账号名）。",
+      "userName": "必须是 1–32 个字符，仅限字母、数字、_、. 或 -。",
+      "migrateUserDiffers": "必须不同于 app 与 maint 账号。",
+      "tlsSocket": "Unix socket 连接必须关闭 TLS（它不经过网络）。",
+      "tlsRemote": "非回环的数据库主机必须启用 TLS（口令与数据不得明文经过网络）。",
+      "createDbName": "向导只创建名为 lingedge 或 lingedge_* 的专用库（绝不触碰其他库）；已有的空库请关闭「自动创建」。",
+      "adminUserRequired": "开启自动创建时必填。",
+      "redisAddress": "必须是 <主机>:<端口>。",
+      "redisDb": "必须在 0–15 之间。",
+      "totpFlag": "提供验证码时必须同时启用二次验证。",
+      "runMode": "必填（自托管或商业）。",
+      "baseUrlInvalid": "已保存的访问地址不是带主机名或 IP 的有效 URL，请重新提交基础配置。",
+      "baseUrlMissing": "请先提交带访问地址的基础配置：gRPC 叶证书的 SAN 由它派生。",
+      "stepFirst": "请先完成「{step}」步骤。",
+      "previousSteps": "请先完成前面的步骤。",
+      "migrateGone": "向导进程在「数据库」步骤之后重启过，迁移账号口令已不在内存中：请重新提交数据库步骤（填写迁移口令，或用临时管理员凭据重置迁移账号）。",
+      "dbNotEmpty": "数据库 \"{name}\" 已含 {count} 张表；向导绝不覆盖已有数据库（FR-6），请使用空的专用库。",
+      "insecureTransport": "请通过 SSH 隧道访问回环监听，或在 TLS 终止处（直接 TLS，或设置 X-Forwarded-Proto: https 的可信反向代理）访问。",
+      "masterKey": "主密钥不可用：没有 KEK 就无法加密保存口令或私钥。请确认 /etc/lingedge/server/master.key 已由 Tools 生成并可读。",
+      "email": "必须是有效的邮箱地址（最多 255 个字符）。",
+      "locale": "必须是 zh-CN 或 en。",
+      "totpCode": "必须是 6 位数字验证码。",
+      "totpEnabled": "已启用。",
+      "totpNotStarted": "请先开始绑定。",
+      "pwEmailLocal": "不得包含邮箱地址的本地部分。",
+      "pwEmail": "不得与邮箱地址相同。",
+      "pwSameAsCurrent": "不得与当前口令相同。",
+      "pwWeak": "不得包含常见的弱口令片段。",
+      "pwFewUnique": "至少包含 5 个互不相同的字符。",
+      "pwTwoClasses": "至少包含两类字符。",
+      "pwThreeClasses": "小写、大写、数字、符号四类中至少包含三类。"
+    }
+  },
+  "theme": {
+    "auto": "跟随系统",
+    "light": "浅色",
+    "dark": "深色"
   }
 }

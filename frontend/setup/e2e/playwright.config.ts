@@ -15,6 +15,8 @@ export default defineConfig({
   use: {
     baseURL: process.env.LE_E2E_BASE_URL,
     locale: process.env.LE_E2E_LOCALE ?? 'zh-CN',
+    // 模拟系统配色偏好（Story 1.37b）：向导跟随系统 prefers-color-scheme。
+    colorScheme: process.env.LE_E2E_SCHEME === 'dark' ? 'dark' : 'light',
     timezoneId: 'Asia/Shanghai',
     viewport: { width: 1280, height: 1000 },
     trace: 'off',

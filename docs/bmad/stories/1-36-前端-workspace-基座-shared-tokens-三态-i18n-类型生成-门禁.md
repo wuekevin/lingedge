@@ -83,8 +83,8 @@ context:
 | 项 | 处置 | 归属 |
 |---|---|---|
 | 远端 CI 首次实际运行（Node 26.8.2 / pnpm 12.18.0 步骤、`make verify-build` 含前端） | **待环境验证**：仓库无远端，`ci.yml` 已写，首次结果以实际为准 | 随首次推送；汇总于 1.45 |
-| Arco 实心按钮等 `#fff` 文字在暗色主题下对比度 2.81:1（发现 7） | 变量层无法解决；需主题层窄覆盖或调整暗色品牌色 | **1.38 Admin 壳 + UD-14**（本 Story 不擅自改色/覆盖） |
-| light `chart-3` 2.93:1（发现 6） | 已登记例外 | UD-14 视觉复核；图表实现（P4+）时核对 |
+| Arco 实心按钮等 `#fff` 文字在暗色主题下对比度 2.81:1（发现 7） | 变量层无法解决；需主题层窄覆盖或调整暗色品牌色 | **1.38 Admin 壳 + UD-14**（本 Story 不擅自改色/覆盖）；**→ 已由 Story 1.37b 处置**：暗色下对实心控件做仅 `color` 的窄覆盖（tokens.json `arco`，脚本对照 Arco 真实 CSS 校验），[ASSUMPTION] 仍待 UD-14 |
+| light `chart-3` 2.93:1（发现 6） | 已登记例外 | UD-14 视觉复核；图表实现（P4+）时核对；**→ 已由 Story 1.37b 处置**：light `chart-3` 调为 `#D17A1F`（白底 3.22:1），例外清单仅余 `text-disabled`，[ASSUMPTION] 仍待 UD-14 |
 | Nuxt 3.x、官网 Tailwind、官网页面 | 本 Story 仅占位 | **2.1** |
 | 安装向导 SPA（go:embed、其 i18n 词条与页面） | 使用本基座的 shared | **1.37** |
 | Admin 壳、路由表、菜单、会话/API 层（使用 `import type` 的 openapi 类型）、echarts、Arco Pro 壳依赖核对；登记 Admin 路由前缀 | 本基座已提供门禁与约定 | **1.38 / 1.39** |

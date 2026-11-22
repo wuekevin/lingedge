@@ -1,6 +1,6 @@
 // 由 tokens.json 派生三类产物：CSS 变量（tokens.css）、Tailwind preset、Arco 主题映射（arco-theme.css）。
 // 纯函数：输入 tokens 对象，输出 { 文件名: 内容 }，便于测试与漂移检查。
-import { mix, parseHex } from './color.mjs';
+import { contrastRatio, mix, parseHex } from './color.mjs';
 
 const HEADER = '/* 自动生成，请勿手改。来源：frontend/shared/tokens/tokens.json；生成器：frontend/scripts/gen-tokens.mjs（make frontend-check 校验无漂移）。 */\n';
 
@@ -100,9 +100,16 @@ const triplet = (hex) => parseHex(hex).join(',');
 /**
  * 生成 Arco 10 级色阶（确定性，提议值）：
  * 6 级 = 基色；7 级 = 悬停色（缺省为向 towards 混 15%）；1–5 级向“底色”渐变（1 最浅）；8–10 级继续向黑（亮）/白（暗）加深。
+ * 5 级是 Arco 实心控件的悬停底色：其上的文字（solidText，主题的 on-brand）对比度必须 ≥ 4.5:1，
+ * 因此 5 级的底色占比取 [0.2, 0.15, 0.1, 0.05, 0] 中第一个满足对比度的值（Story 1.37b；亮色主题的悬停态在 0.2 时仅 3.9–4.2:1）。
  */
-export function arcoScale(base, hover, ground, towards) {
+export const SOLID_TEXT_MIN = 4.5;
+export function arcoScale(base, hover, ground, towards, solidText) {
   const tints = [0.9, 0.8, 0.6, 0.4, 0.2]; // 1..5：底色占比
+  if (solidText) {
+    const w5 = [0.2, 0.15, 0.1, 0.05, 0].find((w) => contrastRatio(solidText, mix(base, ground, w)) >= SOLID_TEXT_MIN);
+    tints[4] = w5 ?? 0;
+  }
   const seven = hover ?? mix(base, towards, 0.15);
   const deep = [0.2, 0.4, 0.6].map((w) => mix(seven, towards, w));
   return [...tints.map((w) => mix(base, ground, w)), base, seven, ...deep];
@@ -113,7 +120,7 @@ function themeArcoBlock(t, theme) {
   const towards = theme === 'light' ? '#000000' : '#FFFFFF';
   const lines = [];
   const scale = (name, base, hover, ground) => {
-    arcoScale(base, hover, ground, towards).forEach((hex, i) => lines.push(`  --${name}-${i + 1}: ${triplet(hex)};`));
+    arcoScale(base, hover, ground, towards, c['on-brand']).forEach((hex, i) => lines.push(`  --${name}-${i + 1}: ${triplet(hex)};`));
   };
   scale('primary', c['brand-primary'], c['brand-primary-hover'], c['bg-surface']);
   scale('success', c.success, undefined, c['success-bg']);
@@ -145,6 +152,24 @@ function themeArcoBlock(t, theme) {
   return lines;
 }
 
+/**
+ * 暗色主题下 Arco 实心控件的文字色窄覆盖（Story 1.37b）：Arco 把这些规则的文字色写死为 #fff，而暗色调色板 6 级是明亮色。
+ * 只写 color（不用 !important、不改结构）；选择器 = 作用域前缀 + Arco 原选择器，特异性恒高于 Arco 自身（多一个属性选择器与 body 类型选择器）。
+ * 清单来自 tokens.json arco.solidTextOnDark，由 scripts/lib/arco-audit.mjs 对照 Arco 真实 CSS 校验。
+ */
+export function renderSolidTextOverrides(t) {
+  const cfg = t.arco?.solidTextOnDark;
+  if (!cfg || cfg.selectors.length === 0) return [];
+  const scopes = ["body[arco-theme='dark']", ":root[data-theme='dark'] body"];
+  const sels = cfg.selectors.flatMap((sel) => scopes.map((sc) => `${sc} ${sel}`));
+  return [
+    '/* 暗色主题：Arco 实心控件文字色写死为 #fff（对明亮的暗色调色板仅 1.8–3.9:1），窄覆盖为 on-brand 令牌（仅 color；清单与理由见 tokens.json arco）。 */',
+    `${sels.join(',\n')} {`,
+    `  color: var(${colorVar(cfg.token)});`,
+    '}\n',
+  ];
+}
+
 export function renderArcoTheme(t) {
   const out = [HEADER, '/* Arco Design Vue 主题层映射：只覆盖 CSS 变量，不改 Arco 源码、不用 !important（DESIGN.md「Arco 定制边界」）。引入顺序：先 Arco 自带样式，后本文件。 */\n'];
   out.push('body {');
@@ -158,6 +183,7 @@ export function renderArcoTheme(t) {
   out.push(`body[arco-theme='dark'],\n:root[data-theme='dark'] body {`);
   out.push(...themeArcoBlock(t, 'dark'));
   out.push('}\n');
+  out.push(...renderSolidTextOverrides(t));
   return out.join('\n');
 }
 

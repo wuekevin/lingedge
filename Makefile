@@ -257,7 +257,9 @@ frontend-lint: frontend-install
 	$(PNPM) -C $(FRONTEND) run lint
 	$(PNPM) -C $(FRONTEND) run check:tokens
 	$(PNPM) -C $(FRONTEND) run check:contrast
+	$(PNPM) -C $(FRONTEND) run check:arco-contrast
 	$(PNPM) -C $(FRONTEND) run check:i18n
+	$(PNPM) -C $(FRONTEND) run check:setup-codes
 	$(PNPM) -C $(FRONTEND) run typecheck
 
 # shared 的 vitest（三态组件、格式化、i18n）+ 安装向导的 vitest 组件测试（Story 1.37）。

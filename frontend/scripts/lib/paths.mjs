@@ -17,3 +17,6 @@ export function abs(p) {
 /** 安装向导（Story 1.37）：vite 产物目录与 go:embed 目录。 */
 export const SETUP_DIST = path.join(FRONTEND_ROOT, 'dist/setup');
 export const SETUP_EMBED = path.join(REPO_ROOT, 'internal/platform/setup/webdist');
+
+/** Arco 的真实样式（Admin 依赖；Console 同版本）：对比度审计的输入。 */
+export const ARCO_CSS = path.join(FRONTEND_ROOT, 'admin/node_modules/@arco-design/web-vue/dist/arco.css');

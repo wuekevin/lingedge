@@ -7,7 +7,7 @@ body {
   --primary-2: 216,220,247;
   --primary-3: 177,185,239;
   --primary-4: 137,149,232;
-  --primary-5: 98,114,224;
+  --primary-5: 88,105,222;
   --primary-6: 59,79,216;
   --primary-7: 47,66,196;
   --primary-8: 38,53,157;
@@ -17,7 +17,7 @@ body {
   --success-2: 186,220,203;
   --success-3: 141,195,170;
   --success-4: 96,169,137;
-  --success-5: 51,144,104;
+  --success-5: 29,131,88;
   --success-6: 6,118,71;
   --success-7: 5,100,60;
   --success-8: 4,80,48;
@@ -27,7 +27,7 @@ body {
   --warning-2: 239,206,161;
   --warning-3: 225,172,123;
   --warning-4: 210,139,84;
-  --warning-5: 196,105,46;
+  --warning-5: 188,88,27;
   --warning-6: 181,71,8;
   --warning-7: 154,60,7;
   --warning-8: 123,48,6;
@@ -149,4 +149,84 @@ body[arco-theme='dark'],
   --color-border-2: var(--le-color-border-default);
   --color-border-3: var(--le-color-border-strong);
   --color-border-4: var(--le-color-border-strong);
+}
+
+/* 暗色主题：Arco 实心控件文字色写死为 #fff（对明亮的暗色调色板仅 1.8–3.9:1），窄覆盖为 on-brand 令牌（仅 color；清单与理由见 tokens.json arco）。 */
+body[arco-theme='dark'] .arco-back-top-btn,
+:root[data-theme='dark'] body .arco-back-top-btn,
+body[arco-theme='dark'] .arco-badge-number,
+:root[data-theme='dark'] body .arco-badge-number,
+body[arco-theme='dark'] .arco-badge-text,
+:root[data-theme='dark'] body .arco-badge-text,
+body[arco-theme='dark'] .arco-btn-primary,
+:root[data-theme='dark'] body .arco-btn-primary,
+body[arco-theme='dark'] .arco-btn-primary[type='button'],
+:root[data-theme='dark'] body .arco-btn-primary[type='button'],
+body[arco-theme='dark'] .arco-btn-primary[type='submit'],
+:root[data-theme='dark'] body .arco-btn-primary[type='submit'],
+body[arco-theme='dark'] .arco-btn-primary:hover,
+:root[data-theme='dark'] body .arco-btn-primary:hover,
+body[arco-theme='dark'] .arco-btn-primary[type='button']:hover,
+:root[data-theme='dark'] body .arco-btn-primary[type='button']:hover,
+body[arco-theme='dark'] .arco-btn-primary[type='submit']:hover,
+:root[data-theme='dark'] body .arco-btn-primary[type='submit']:hover,
+body[arco-theme='dark'] .arco-btn-primary:active,
+:root[data-theme='dark'] body .arco-btn-primary:active,
+body[arco-theme='dark'] .arco-btn-primary[type='button']:active,
+:root[data-theme='dark'] body .arco-btn-primary[type='button']:active,
+body[arco-theme='dark'] .arco-btn-primary[type='submit']:active,
+:root[data-theme='dark'] body .arco-btn-primary[type='submit']:active,
+body[arco-theme='dark'] .arco-btn-primary.arco-btn-loading,
+:root[data-theme='dark'] body .arco-btn-primary.arco-btn-loading,
+body[arco-theme='dark'] .arco-btn-primary[type='button'].arco-btn-loading,
+:root[data-theme='dark'] body .arco-btn-primary[type='button'].arco-btn-loading,
+body[arco-theme='dark'] .arco-btn-primary[type='submit'].arco-btn-loading,
+:root[data-theme='dark'] body .arco-btn-primary[type='submit'].arco-btn-loading,
+body[arco-theme='dark'] .arco-btn-primary.arco-btn-status-warning,
+:root[data-theme='dark'] body .arco-btn-primary.arco-btn-status-warning,
+body[arco-theme='dark'] .arco-btn-primary.arco-btn-status-warning:hover,
+:root[data-theme='dark'] body .arco-btn-primary.arco-btn-status-warning:hover,
+body[arco-theme='dark'] .arco-btn-primary.arco-btn-status-warning:active,
+:root[data-theme='dark'] body .arco-btn-primary.arco-btn-status-warning:active,
+body[arco-theme='dark'] .arco-btn-primary.arco-btn-status-warning.arco-btn-loading,
+:root[data-theme='dark'] body .arco-btn-primary.arco-btn-status-warning.arco-btn-loading,
+body[arco-theme='dark'] .arco-btn-primary.arco-btn-status-danger,
+:root[data-theme='dark'] body .arco-btn-primary.arco-btn-status-danger,
+body[arco-theme='dark'] .arco-btn-primary.arco-btn-status-danger:hover,
+:root[data-theme='dark'] body .arco-btn-primary.arco-btn-status-danger:hover,
+body[arco-theme='dark'] .arco-btn-primary.arco-btn-status-danger:active,
+:root[data-theme='dark'] body .arco-btn-primary.arco-btn-status-danger:active,
+body[arco-theme='dark'] .arco-btn-primary.arco-btn-status-danger.arco-btn-loading,
+:root[data-theme='dark'] body .arco-btn-primary.arco-btn-status-danger.arco-btn-loading,
+body[arco-theme='dark'] .arco-btn-primary.arco-btn-status-success,
+:root[data-theme='dark'] body .arco-btn-primary.arco-btn-status-success,
+body[arco-theme='dark'] .arco-btn-primary.arco-btn-status-success:hover,
+:root[data-theme='dark'] body .arco-btn-primary.arco-btn-status-success:hover,
+body[arco-theme='dark'] .arco-btn-primary.arco-btn-status-success:active,
+:root[data-theme='dark'] body .arco-btn-primary.arco-btn-status-success:active,
+body[arco-theme='dark'] .arco-btn-primary.arco-btn-status-success.arco-btn-loading,
+:root[data-theme='dark'] body .arco-btn-primary.arco-btn-status-success.arco-btn-loading,
+body[arco-theme='dark'] .arco-calendar-mode-month .arco-calendar-cell-selected .arco-calendar-date-circle,
+:root[data-theme='dark'] body .arco-calendar-mode-month .arco-calendar-cell-selected .arco-calendar-date-circle,
+body[arco-theme='dark'] .arco-calendar-mode-year .arco-calendar-cell-selected .arco-calendar-cell-selected .arco-calendar-date-circle,
+:root[data-theme='dark'] body .arco-calendar-mode-year .arco-calendar-cell-selected .arco-calendar-cell-selected .arco-calendar-date-circle,
+body[arco-theme='dark'] .arco-calendar-panel .arco-calendar-cell-selected .arco-calendar-date-value,
+:root[data-theme='dark'] body .arco-calendar-panel .arco-calendar-cell-selected .arco-calendar-date-value,
+body[arco-theme='dark'] .arco-calendar-cell-range-start .arco-calendar-date-value,
+:root[data-theme='dark'] body .arco-calendar-cell-range-start .arco-calendar-date-value,
+body[arco-theme='dark'] .arco-calendar-cell-range-end .arco-calendar-date-value,
+:root[data-theme='dark'] body .arco-calendar-cell-range-end .arco-calendar-date-value,
+body[arco-theme='dark'] .arco-picker-cell-selected .arco-picker-date-value,
+:root[data-theme='dark'] body .arco-picker-cell-selected .arco-picker-date-value,
+body[arco-theme='dark'] .arco-picker-cell-range-start .arco-picker-date-value,
+:root[data-theme='dark'] body .arco-picker-cell-range-start .arco-picker-date-value,
+body[arco-theme='dark'] .arco-picker-cell-range-end .arco-picker-date-value,
+:root[data-theme='dark'] body .arco-picker-cell-range-end .arco-picker-date-value,
+body[arco-theme='dark'] .arco-menu-dark .arco-menu-collapse-button,
+:root[data-theme='dark'] body .arco-menu-dark .arco-menu-collapse-button,
+body[arco-theme='dark'] .arco-steps-item-process .arco-steps-icon,
+:root[data-theme='dark'] body .arco-steps-item-process .arco-steps-icon,
+body[arco-theme='dark'] .arco-steps-item-error .arco-steps-icon,
+:root[data-theme='dark'] body .arco-steps-item-error .arco-steps-icon {
+  color: var(--le-color-on-brand);
 }

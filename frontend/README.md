@@ -35,7 +35,7 @@ frontend/
 | `make setup-web` / `make setup-web-check` | 安装向导：构建并同步到 `internal/platform/setup/webdist`（go:embed 来源）/ 重新构建并逐字节比对（漂移、缺失即失败；已含在 `make verify-build`） |
 | `make e2e` | 安装向导浏览器端到端（Playwright + 真实 server + 真实 MySQL/Redis；见下文「安装向导」） |
 
-等价的 pnpm 脚本：`check:deps` `lint:guards` `lint:eslint` `check:tokens` `check:contrast` `check:i18n` `check:types` `typecheck` `test` `build` `check:isolation` `check:mock`；生成：`gen:tokens`、`gen:types`。
+等价的 pnpm 脚本：`check:deps` `lint:guards` `lint:eslint` `check:tokens` `check:contrast` `check:arco-contrast` `check:i18n` `check:setup-codes` `check:types` `typecheck` `test` `build` `check:isolation` `check:mock`；生成：`gen:tokens`、`gen:types`。
 
 首次：`pnpm -C frontend install --frozen-lockfile`（Node ≥ 26，pnpm 版本由 `packageManager` 固定；corepack 或 `npm i -g pnpm@12.18.0`）。
 
@@ -108,9 +108,9 @@ frontend/
 - **Tailwind preset**：颜色全部是 `var(--le-…)` 引用（无色值），类名形如 `bg-le-bg-surface`、`text-le-text-primary`、`rounded-le-md`、`font-le-mono`、`text-le-body`、`bg-le-brand`；经真实 tailwindcss 3.4.19 编译验证。
 - **Arco 映射**：只覆盖 Arco 的 CSS 变量（`--primary-1..10` 等三元组、`--color-bg-*`/`--color-text-*`/`--color-border*`/`--border-radius-*`），不改 Arco 源码、无 `!important`；引入顺序：Arco 自带 `arco.css` → `tokens.css` → `arco-theme.css`。色阶 1–5/8–10 由基色与悬停色/底色确定性混合得到（提议值，随 UD-14 复核）。
 - **对比度**（`check:contrast`）：`tokens.json.contrast` 列出文字配对（正文/次级文字 × 四种底色、品牌色、白字 × 品牌/悬停/渐变端点/危险、语义色 × 自身底色与页面底色…），亮/暗各算一遍，**文字 ≥ 4.5:1**，图表序列（非文本）≥ 3:1，共 82 个配对。已知例外各自设下限防止继续恶化：
-  - `text-disabled`（禁用态，DESIGN 已声明；light 3.09:1）。
-  - **新发现**：light 主题 `chart-3`（`#D9822B`）在白底仅 **2.93:1**，低于非文本 3:1。DESIGN 未声明此项；本 Story 不擅自改色，登记为 UD-14 视觉复核项（下限 2.9 防恶化；图表须按 DESIGN 铁律不得仅靠颜色区分系列）。
-  - **新发现（Arco 侧，未在本 Story 修正）**：Arco 2.59 的实心按钮等组件文字色在 `arco.css` 里写死 `#fff`（24 处，不走 CSS 变量），暗色主题下主按钮是 `#7C93FF` 底白字，仅 **2.81:1**（DESIGN 的 `on-brand-dark` 要求深色字，与深色字为 6.62:1）。这是令牌/变量层够不到的问题；真实 Chrome 截图（亮/暗）已确认。处置建议（留给 1.38 Admin 壳与 UD-14）：在主题层对 `body[arco-theme='dark'] .arco-btn-primary` 等少数类做仅改颜色的窄覆盖，或调整暗色品牌色；本 Story 自家的三态组件已按 `on-brand` 取色，不受影响。
+  - `text-disabled`（禁用态，DESIGN 已声明；light 3.09:1；WCAG 1.4.3 明确不要求不可用控件满足对比度）。这是目前**唯一**的例外。
+  - **已处置（Story 1.37b）**：light `chart-3` 原 `#D9822B` 在白底仅 2.93:1，调为 `#D17A1F`（3.22:1，色相不变、明度略降），例外条目删除；仍属 UD-14 提议令牌，待确认。
+  - **已处置（Story 1.37b）**：Arco 2.59 的实心控件文字色在 `arco.css` 里写死 `#fff`（24 条规则、32 个选择器）或 `var(--color-white)`，暗色主题下主按钮是 `#7C93FF` 底白字仅 2.81:1。处置：①暗色下对「暗色白字不合格」的 38 个选择器做**仅 `color`** 的窄覆盖（取 `on-brand` 令牌，不用 `!important`；清单在 `tokens.json` 的 `arco`，生成进 `arco-theme.css`）；②亮色悬停态（Arco 的 5 级）原先白字仅 3.9–4.2:1，色阶函数改为 5 级的底色占比取第一个使白字 ≥4.5:1 的值。`check:arco-contrast` 解析 Arco 真实 CSS，要求覆盖清单「不漏、无死条目」（Arco 升级引入新规则会失败）；`make e2e` 的审计器自测在真实 Chromium 渲染四种实心按钮（亮/暗、含悬停）逐个量对比度，并有「去掉覆盖则失败」的负向对照。禁用态（WCAG 1.4.3 不要求）保持 Arco 原样。**范围外、已登记**：Arco 头像（灰底白字，亮色 `fill-4`）等非调色板底色的白字组件由使用它们的 Story（1.38 起）核对。
 - **UD-14**：主色/字体/圆角是 UX 提议。采纳与否由用户决定；推翻时只改 `tokens.json` 与 `DESIGN.md` frontmatter（两者一致性有脚本校验），然后 `gen:tokens`。
 
 ## 三态组件（FR-30，`@lingedge/shared`）
@@ -132,6 +132,8 @@ frontend/
 - 每个 `locales/` 目录必须同时有 `zh-CN.json` 与 `en.json`，**键集完全一致、占位符 `{name}` 一致、无空值、无未转义的 Vue I18n 特殊字符（`@ | { } $` 字面量写成 `{'@'}`）**；源码里 `t('键')`/`$t('键')` 的静态键必须存在，动态键 `` t(`前缀.${x}`) `` 校验前缀存在（无静态前缀的动态键无法校验，会在输出里计数）。
 - 键命名：小写点分层，如 `state.error.kind.network`；应用词条放各应用自己的 `locales/`。
 
+**向导的服务端消息本地化（Story 1.37b，`pnpm run check:setup-codes`）**：服务端的稳定标识（错误码 `error.code`、环境检查项 `items[].key`、步骤 `step`）是契约，文案是服务端固定语言。前端按稳定标识映射到词条：错误说明 `errors.code.<code>`（错误码里的 `password` 在词条键里一律写成 `pw`，G-6）、检查项/回执/`details[].reason` 的固定句式在 `setup/src/api/servermsg.ts`（动态值——时间、路径、版本、数量——从原文按句式取出，词条在 `serverMsg.*`）。**对不上的一律回落服务端原文并标注其语言（`data-localized="false"`），错误码与 Request ID 的展示不受影响。** 对账脚本从 Go 源码（`internal/platform/setup`、auth 引导路径、`apierr/codes.go`）与 OpenAPI（`/public/setup/*` 声明的错误响应）自动推导可能返回的错误码、检查项与有回执的步骤，缺任一词条/句式即失败；`servermsg.test.ts` 用从 Go 源码抽取的真实文案样本验证每个句式能命中，E2E 在真实 server 下断言英文界面零回落、零中文。
+
 ## OpenAPI 类型生成与契约联动（AC2、AC6）
 
 `pnpm run gen:types`：`docs/api/openapi.yaml` → `shared/src/api-types/openapi.gen.ts`（纯类型；头部记录 openapi.yaml 的 sha256 与生成器版本）。**`make contract-check` 含 `frontend-types-check`：重新生成并逐字节比对，OpenAPI 变动而生成物未同步即失败**。生成物不含任何运行时代码或 API 客户端；每个应用只 `import type` 自己需要的 operation（`@lingedge/shared/api-types`）。
@@ -150,7 +152,7 @@ frontend/
 
 ## 安装向导（Story 1.37，`frontend/setup`）
 
-**是什么**：`/setup` 的 8 步向导（环境检查 → MySQL → Redis → 初始化数据库 → 管理员 → 基础配置 → 密钥 → 完成），Vue 3 + TS，使用 `@lingedge/shared` 的令牌（`tokens.css`）、三态组件（`LeLoading/LeError/LeEmpty/LeStateBoundary`）、i18n 工厂（词条在 `setup/src/locales`，缺键由 `check:i18n` 校验）与由 OpenAPI 生成的类型（`SetupDbConfig` 等，只 `import type`）。**不引入 Arco、路由、状态库**：向导不需要它们，产物只有约 230 KB JS + 19 KB CSS，且避开了 Arco 暗色 `#fff` 文字对比度问题（向导固定亮色主题）。全部 1.36 门禁照常适用（无 `v-html`、无硬编码色值/文案，`setup/**` 的测试与 e2e 同样被扫描）。
+**是什么**：`/setup` 的 8 步向导（环境检查 → MySQL → Redis → 初始化数据库 → 管理员 → 基础配置 → 密钥 → 完成），Vue 3 + TS，使用 `@lingedge/shared` 的令牌（`tokens.css`）、三态组件（`LeLoading/LeError/LeEmpty/LeStateBoundary`）、i18n 工厂（词条在 `setup/src/locales`，缺键由 `check:i18n` 校验）与由 OpenAPI 生成的类型（`SetupDbConfig` 等，只 `import type`）。**不引入 Arco、路由、状态库**：向导不需要它们，产物只有约 230 KB JS + 19 KB CSS（向导主题跟随系统 `prefers-color-scheme`，顶栏可显式选浅色/深色；Story 1.37b）。全部 1.36 门禁照常适用（无 `v-html`、无硬编码色值/文案，`setup/**` 的测试与 e2e 同样被扫描）。
 
 **安全约定（AC4）**：setup token 只保存在 API 客户端的闭包内存里——不写 URL、不写 `sessionStorage/localStorage/cookie`；刷新后需重新输入；地址栏里携带的 `token` 类参数在启动时被丢弃并从历史记录移除（页面提示）；验证失败或完成后立即清除。口令类输入是 `type=password`（不回显）、`autocomplete=new-password`、关闭拼写检查，提交成功后清空；一次性机密（TOTP 密钥/恢复码/迁移口令）只存在于组件状态，离开步骤即销毁。唯一写入 `sessionStorage` 的是非机密草稿（访问地址、界面语言）。构建隔离脚本新增 `setup` 角色：向导产物不得含任何 platform 端点模板、Admin 路由前缀或任一 realm 会话常量（端点以完整路径字面量书写，因为裸的 `"/admin"` 段会被判为 Admin 路由）。
 

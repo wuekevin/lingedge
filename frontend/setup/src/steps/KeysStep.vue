@@ -37,7 +37,7 @@ async function run() {
       <template #empty>
         <span />
       </template>
-      <ResultNote :message="t('keys.ok')" :server-message="serverMessage" testid="keys-ok" />
+      <ResultNote :message="t('keys.ok')" :server-message="serverMessage" step="keys" testid="keys-ok" />
     </LeStateBoundary>
   </StepShell>
 </template>

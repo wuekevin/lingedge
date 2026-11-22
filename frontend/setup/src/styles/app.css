@@ -1,11 +1,8 @@
-/* 安装向导样式：只使用 shared 令牌（--le-*），无色值、无主题分支（向导固定亮色）。 */
+/* 安装向导样式：只使用 shared 令牌（--le-*），无色值、无主题分支；亮/暗由 <html data-theme> 切换令牌值（跟随系统 prefers-color-scheme，theme.ts），color-scheme 由令牌给出。 */
 *,
 *::before,
 *::after {
   box-sizing: border-box;
-}
-html {
-  color-scheme: light;
 }
 body {
   margin: 0;
@@ -123,6 +120,8 @@ code {
 }
 .topbar {
   display: flex;
+  flex-wrap: wrap;
+  gap: var(--le-space-4);
   justify-content: flex-end;
   margin-bottom: var(--le-space-4);
 }
@@ -502,6 +501,11 @@ code {
 }
 .serror__facts dd {
   margin: 0;
+}
+.serror__message {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
 }
 .serror__hint {
   margin: 0;

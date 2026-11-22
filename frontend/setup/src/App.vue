@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, watchEffect } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watchEffect } from 'vue';
 import { resolveLocale, type LeLocale } from '@lingedge/shared';
 import { useI18n } from 'vue-i18n';
 import AdminStep from './steps/AdminStep.vue';
@@ -13,6 +13,7 @@ import RedisStep from './steps/RedisStep.vue';
 import SystemStep from './steps/SystemStep.vue';
 import TokenGate from './steps/TokenGate.vue';
 import { persistLocale } from './i18n';
+import { applyResolvedTheme, initialThemePref, persistThemePref, THEME_PREFS, watchSystemTheme, type ThemePref } from './theme';
 import { STEP_ORDER, type SetupStepKey } from './api/types';
 import { useWizard } from './state/wizard';
 
@@ -46,6 +47,28 @@ function onLocale(e: Event) {
   } catch {
     /* 存储不可用 */
   }
+}
+
+// 主题：默认跟随系统 prefers-color-scheme（系统切换时实时跟随），可在顶栏显式选择浅色/深色（同标签页保留）。
+const themePref = ref<ThemePref>(initialThemePref(safeSession()));
+function safeSession(): Storage | null {
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
+watchEffect(() => {
+  applyResolvedTheme(themePref.value);
+});
+let stopWatch: () => void = () => undefined;
+onMounted(() => {
+  stopWatch = watchSystemTheme(() => applyResolvedTheme(themePref.value));
+});
+onBeforeUnmount(() => stopWatch());
+function onTheme(e: Event) {
+  themePref.value = (e.target as HTMLSelectElement).value as ThemePref;
+  persistThemePref(safeSession(), themePref.value);
 }
 
 const lastIndex = STEP_ORDER.length - 1;
@@ -88,6 +111,12 @@ function reachable(k: SetupStepKey): boolean {
           <span>{{ t('app.language') }}</span>
           <select class="select" data-testid="lang-select" :value="locale" @change="onLocale">
             <option v-for="l in LOCALE_OPTIONS" :key="l" :value="l">{{ t(`lang.${l}`) }}</option>
+          </select>
+        </label>
+        <label class="topbar__lang">
+          <span>{{ t('app.theme') }}</span>
+          <select class="select" data-testid="theme-select" :value="themePref" @change="onTheme">
+            <option v-for="p in THEME_PREFS" :key="p" :value="p">{{ t(`theme.${p}`) }}</option>
           </select>
         </label>
       </header>

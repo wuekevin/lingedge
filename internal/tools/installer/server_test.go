@@ -555,6 +555,101 @@ func TestResetSetupToken(t *testing.T) {
 	_ = time.Second
 }
 
+// Story 1.37b（处置 1.35 [ASSUMPTION] 6）：令牌重置跟随 server.yaml 的 secrets.setup_token_hash_file（管理员可改写）；无法确定位置时失败关闭。
+func TestResetSetupTokenFollowsServerYAML(t *testing.T) {
+	w := prodWorld(t)
+	must(t, doInstall(t, w, "server", nil, func(r *installer.Request) { r.SkipStart = true }))
+	def := filepath.Join(w.Root, "etc/lingedge/server/setup-token.hash")
+	cfg := filepath.Join(w.Root, "etc/lingedge/server/server.yaml")
+	if _, err := os.Stat(cfg); err != nil {
+		t.Fatalf("安装应生成 server.yaml: %v", err)
+	}
+	defBefore, _ := os.ReadFile(def)
+	altDir := filepath.Join(w.Root, "etc/lingedge/alt")
+	if err := os.MkdirAll(altDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	alt := filepath.Join(altDir, "token.hash")
+
+	// 用一份干净的 yaml 覆盖安装器生成的 server.yaml（避免重复键）。
+	write := func(content string) {
+		t.Helper()
+		if err := os.WriteFile(cfg, []byte(content), 0o640); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// 1) 自定义路径：新哈希写到该路径（Result.HashFile 反映它），默认路径原样不动。
+	write("secrets:\n  setup_token_hash_file: /etc/lingedge/alt/token.hash\n")
+	res, err := w.NewInstaller("y1").ResetSetupToken(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.HashFile != "/etc/lingedge/alt/token.hash" || res.Replaced {
+		t.Fatalf("应写到自定义路径且原先不存在: %+v", res)
+	}
+	got, _ := os.ReadFile(alt)
+	if !setuptoken.Verify(res.Token, string(got)) {
+		t.Error("自定义路径里的哈希必须对应新 token")
+	}
+	if now, _ := os.ReadFile(def); string(now) != string(defBefore) {
+		t.Error("默认路径的哈希文件不应被改动（Server 不读它）")
+	}
+	fi, _ := os.Stat(alt)
+	if fi.Mode().Perm() != 0o600 {
+		t.Errorf("自定义路径的哈希文件应为 0600: %v", fi.Mode())
+	}
+
+	// 2) 键为空 / 没有 secrets 段 / server.yaml 不存在 → 缺省路径。
+	for name, content := range map[string]string{"空键": "secrets:\n  setup_token_hash_file: \"\"\n", "无段": "server:\n  env: test\n"} {
+		write(content)
+		r, err := w.NewInstaller("y2" + name).ResetSetupToken(t.Context())
+		if err != nil || r.HashFile != "/etc/lingedge/server/setup-token.hash" {
+			t.Fatalf("%s：应回落缺省路径: %+v %v", name, r, err)
+		}
+	}
+	if err := os.Remove(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if r, err := w.NewInstaller("y3").ResetSetupToken(t.Context()); err != nil || r.HashFile != "/etc/lingedge/server/setup-token.hash" {
+		t.Fatalf("server.yaml 不存在：应回落缺省路径: %+v %v", r, err)
+	}
+
+	// 3) 失败关闭：非规范化/相对路径、无法解析的 yaml → KindPrecondition，且没有任何文件被改动。
+	snap := func() string {
+		b1, _ := os.ReadFile(def)
+		b2, _ := os.ReadFile(alt)
+		return string(b1) + "|" + string(b2)
+	}
+	before := snap()
+	for name, content := range map[string]string{
+		"相对路径":  "secrets:\n  setup_token_hash_file: etc/token.hash\n",
+		"含..":   "secrets:\n  setup_token_hash_file: /etc/lingedge/alt/../alt/token.hash\n",
+		"坏yaml": "secrets: [unclosed\n",
+	} {
+		write(content)
+		if _, err := w.NewInstaller("y4" + name).ResetSetupToken(t.Context()); err == nil || kindOf(t, err) != installer.KindPrecondition {
+			t.Errorf("%s：应失败关闭（KindPrecondition）: %v", name, err)
+		}
+		if snap() != before {
+			t.Errorf("%s：失败时不得改动任何哈希文件", name)
+		}
+	}
+	// 4) server.yaml 不可读（是目录）→ 失败（KindStepFailed），同样不改动。
+	if err := os.Remove(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(cfg, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.NewInstaller("y5").ResetSetupToken(t.Context()); err == nil || kindOf(t, err) != installer.KindStepFailed {
+		t.Errorf("server.yaml 不可读应失败（KindStepFailed）: %v", err)
+	}
+	if snap() != before {
+		t.Error("不可读时不得改动任何哈希文件")
+	}
+}
+
 func sha16(b []byte) string {
 	h := sha256Hex(b)
 	return h[:16]

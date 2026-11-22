@@ -2,6 +2,7 @@
 import { computed, reactive, ref } from 'vue';
 import { LeStateBoundary, resolveLocale, type LeLocale } from '@lingedge/shared';
 import { useI18n } from 'vue-i18n';
+import { useServerText } from '../api/useServerText';
 import ResultNote from '../components/ResultNote.vue';
 import SetupError from '../components/SetupError.vue';
 import SInput from '../components/SInput.vue';
@@ -15,6 +16,7 @@ import { browserTimeZone, isValidBaseUrl, isValidEmail, isValidTimeZone, listTim
 
 const wizard = useWizard();
 const { t, locale } = useI18n();
+const st = useServerText();
 const req = useStepRequest(wizard);
 
 const EXAMPLE_URL = 'https://admin.example.com';
@@ -55,7 +57,7 @@ async function submit() {
   if (Object.keys(brand).length > 0) body.brand = brand;
   const r = await req.run(() => wizard.client.system(body));
   if (!r.ok) {
-    for (const d of req.error.value?.details ?? []) if (d.field && !errors[d.field]) errors[d.field] = d.reason;
+    for (const d of req.error.value?.details ?? []) if (d.field && !errors[d.field]) errors[d.field] = st.reason(d.reason).text;
     return;
   }
   serverMessage.value = r.value.message;
@@ -91,7 +93,7 @@ async function submit() {
       <template #empty>
         <span />
       </template>
-      <ResultNote :message="t('system.done')" :server-message="serverMessage" testid="system-ok" />
+      <ResultNote :message="t('system.done')" :server-message="serverMessage" step="system" testid="system-ok" />
     </LeStateBoundary>
   </StepShell>
 </template>

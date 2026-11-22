@@ -77,6 +77,7 @@ development_status:
   1-35-lingedge-install-server-tools-侧-server-安装-第一批终点: review   # 开发完成、本机门禁见 docs/bmad/stories/1-35-*.md：installer.ProductionSpecs() 登记 server（Start=systemctl；Health=真实 GET /healthz；InitConfig 不返回文件、不开放口令类设置键）+ server.yaml 四个监听随计划端口（换端口一致，矛盾→2，metrics 非回环拒绝）+ 访问信息（ssh -L、非回环风险提示、醒目「主密钥与数据库备份分开保管」含沿用既有 key 的指纹）+ config setup-token --reset（原子替换哈希、旧 token 立即失效、持 server 锁、向导已完成/未安装→3）+ list 显示 server 向导进展（install.lock）；联调 tests/integration/toolsinstall：真实 cli.Execute + 本机构建的真实 lingedge-server 进程 + 临时 mysqld/redis + 真实向导 HTTP 七步（token 被真实 Server 接受/重置后旧 token 401/install.lock/同进程切正常模式/list 初始化/泄漏扫描/无 migrate.yaml），健康失败退出码 10 无残留，4 个端口真实占用→4；联调发现并修复 3 个缺陷（单元 ExecStart 与包布局不一致、--json 下 setup token 被遮蔽、Access.secret 键被脱敏）；真实发行产物内置公钥断言（tools 内置/server 不内置）；变异验证 16/16 检出；等待环境验证：真实 systemd/LoadCredential/ProtectSystem 下 setup-token.hash 清理/migrate credential init（ENV-LNX，1.45）；后续：node 的 ExecStart 路径（Epic 3）、1.41/1.42/1.43
   1-36-前端-workspace-基座-shared-tokens-三态-i18n-类型生成-门禁: review   # 开发完成、本机门禁见 docs/bmad/stories/1-36-*.md：frontend/ pnpm workspace（admin/console/website/shared；pnpm 12.18.0 + Node 26.8.2；精确版本 + 锁文件 + ignoreScripts，实测 pnpm 12 不读 .npmrc 的 ignore-scripts）+ 兼容矩阵（TypeScript 5.9.3 而非 7.0.2）+ shared：设计令牌单一来源 tokens.json → CSS 变量/Tailwind preset/Arco 映射（亮暗、对比度 82 配对、与 DESIGN.md 一致）、三态组件、格式化、i18n（缺键 CI）、openapi 生成类型（漂移失败，联动 contract-check）+ 门禁（全仓禁 v-html/硬编码色值/文案；shared 禁路由/菜单/权限/会话/API 客户端；IMP-14 按 platform 路径模板精确匹配的 Console 构建隔离；mock 入口检查）+ vitest 267（含真实 vite 构建 e2e、真实 pnpm 脚本关闭实测）+ 已并入 make lint/test/gate-selftest/contract-check/verify-build 与 make frontend-check；待办：远端 CI 首跑；后续：1.37、1.38（Arco 暗色 #fff 文字对比度 2.81:1、Admin 路由前缀登记）、2.1（Nuxt/Tailwind）、UD-14（chart-3 light 2.93:1）
   1-37-安装向导-spa-go-embed: review   # 开发完成、本机门禁与真实浏览器 E2E 见 docs/bmad/stories/1-37-*.md：frontend/setup（Vue3+TS，shared 令牌/三态/i18n/生成类型，无 Arco）→ internal/platform/setup/webdist go:embed（产物入库 + make verify-build/setup-web-check 漂移缺失检查）；token 仅内存；8 步 + 三态 + 口令强度/二次确认/不回显 + TOTP 二维码恢复码 + 完成页 Admin URL 与 master.key 强提示；install.lock 后 /setup 410；CC-13（Unix socket 全链路 + initialize 迁移明细）；vitest + Playwright（真实 server/MySQL/Redis/Chromium：全流程 TCP+TOTP+中文 / socket+英文、错 token、非空库、续做 early/late、键盘、对比度）；等待环境验证：ENV-BT 宝塔 socket 可访问性、跨浏览器视觉（1.45）、远端 CI 首跑
+  1-37b-遗留项清理: review   # 1.37 及前序遗留清理（清理型 Story，不属 epics 原编号；本机可做项全部完成并测试，见 docs/bmad/stories/1-37b-遗留项清理.md）：向导服务端消息 i18n（按稳定错误码/检查项/步骤映射 zh-CN/en，未知回落服务端原文；check:setup-codes 对账 Go 源码与 OpenAPI，缺键 CI 失败）、向导暗色主题（跟随系统 + 顶栏切换；Playwright 暗色全流程含渐变侧栏最坏色标审计）、1.36 对比度例外（light chart-3 调为 #D17A1F；Arco 暗色实心控件窄覆盖 + check:arco-contrast 对照 Arco 真实 CSS）、文档过时表述订正、令牌重置跟随 server.yaml 的 secrets.setup_token_hash_file；等待环境验证：setup-token.hash 在 ProtectSystem=strict 下的清理处置（准则已写入 tools-design）、UD-14 视觉确认
   1-38-admin-工程与壳-登录-动态菜单-守卫-多标签-代管横幅: backlog
   1-39-admin-系统管理页-系统设置-用户与角色-api-token-审计: backlog
   1-40-静态前端安装器-admin-web-docs-status-console-website-static: backlog
@@ -549,7 +550,7 @@ sprint_plan:
     status: backlog
     note: "仅占位，待 Sprint 1 的 1.24/1.33/1.34/1.35 完成后再细排；1.36 仅依赖 1.1/1.3，可提前与 Sprint
       1 并行"
-    order: ["1-36-前端-workspace-基座-shared-tokens-三态-i18n-类型生成-门禁", "1-37-安装向导-spa-go-embed",
+    order: ["1-36-前端-workspace-基座-shared-tokens-三态-i18n-类型生成-门禁", "1-37-安装向导-spa-go-embed", "1-37b-遗留项清理",
       "1-38-admin-工程与壳-登录-动态菜单-守卫-多标签-代管横幅", "1-39-admin-系统管理页-系统设置-用户与角色-api-token-审计",
       "1-40-静态前端安装器-admin-web-docs-status-console-website-static", "1-41-backup-restore-uninstall-含主密钥指纹与加密",
       "1-42-doctor-config-service-logs-status-list-完整", "1-43-升级与回滚-update-check-升级编排-迁移决策表-rollback-update-self",
@@ -808,7 +809,7 @@ environment_verification:   # 『等待环境验证』登记（验证人/日期�
     required_env: "本机（Node 26.8.2 / pnpm 12.18.0，公共 npm registry）；远端 CI 与跨浏览器属验收环境"
     condition: "前端基座与全部门禁本机完成并有正/负向自测；远端 CI 首次实际运行与跨浏览器视觉验收在对应环境验证前标「等待环境验证」。"
     done_locally: "make lint security gate-selftest vuln contract-check build verify-build migrate-test race 与 make frontend-check 全绿：见 docs/bmad/stories/1-36-*.md。本机真实：pnpm install --frozen-lockfile（公共 registry）、vue-tsc/vitest 267/ESLint/vite 生产构建、真实 tailwindcss 编译令牌 preset、真实 Chrome headless 亮暗截图、真实 pnpm 脚本关闭实测、对真实 openapi（234 个 platform operation → 141 个精确模板）的隔离检查与真实 vite 构建产物的隔离/mock 检查。"
-    pending: "远端 CI 首跑（ci.yml 含 setup-node 与 pnpm 步骤）；Safari/Firefox/移动端视觉验收（1.45）；Arco 暗色 #fff 文字对比度与 chart-3 light 例外复核（1.38/UD-14）。"
+    pending: "远端 CI 首跑（ci.yml 含 setup-node 与 pnpm 步骤）；Safari/Firefox/移动端视觉验收（1.45）；（Arco 暗色 #fff 文字对比度与 chart-3 light 例外已由 Story 1.37b 处置，仅 UD-14 视觉确认待用户。）"
     verified_by: ""
     verified_on: ""
 
@@ -818,6 +819,14 @@ environment_verification:   # 『等待环境验证』登记（验证人/日期�
     condition: "向导 SPA、go:embed、CC-13 与浏览器 E2E 本机完成；宝塔 MySQL socket 可访问性（ENV-BT）、跨浏览器/移动端视觉验收、远端 CI 首跑在对应环境验证前标「等待环境验证」。"
     done_locally: "make lint security gate-selftest vuln contract-check build verify-build migrate-test race 与 make frontend-check 全绿：见 docs/bmad/stories/1-37-*.md。本机真实：真实 lingedge-server setup mode（内嵌真实 SPA）+ 独立临时 mysqld/redis + 真实 Chromium 的 Playwright 全流程（TCP+TOTP+中文、Unix socket+英文）、错 token/限流、非空库、中断续做 early/late、键盘、对比度审计、CSP 零违规、一次性机密泄漏扫描、完成后 410。"
     pending: "ENV-BT：宝塔 MySQL socket 对 lingedge 用户的可访问性；Safari/Firefox/移动端视觉验收（1.45）；远端 CI 首跑（Playwright 浏览器下载）。"
+    verified_by: ""
+    verified_on: ""
+  1-37b-遗留项清理:
+    status: partial
+    required_env: "ENV-LNX（真实 systemd）；UD-14 视觉确认属用户"
+    condition: "服务端消息 i18n、向导暗色主题、对比度例外处置、文档订正、令牌重置跟随 server.yaml 均本机完成并测试；setup-token.hash 在 ProtectSystem=strict 下的清理处置需真实 systemd 按 tools-design 的判定准则决定；调整后的令牌（chart-3 #D17A1F、Arco 暗色窄覆盖）为 UD-14 提议，待用户确认。"
+    done_locally: "make lint security gate-selftest vuln contract-check build verify-build migrate-test race 与 make frontend-check 全绿：见 docs/bmad/stories/1-37b-遗留项清理.md。本机真实：Playwright（真实 server/MySQL/Redis/Chromium）暗色英文全流程、错 token 暗色英文、非空库英文、Arco 实心按钮亮/暗（含悬停）对比度。"
+    pending: "ENV-LNX：setup-token.hash 清理处置（tools-design §13 判定准则 A/B）；UD-14：chart-3 与 Arco 暗色覆盖的视觉确认。"
     verified_by: ""
     verified_on: ""
 

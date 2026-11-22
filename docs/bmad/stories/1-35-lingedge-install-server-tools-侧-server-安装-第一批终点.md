@@ -82,7 +82,7 @@ context:
 3. **联调用「单元文件语义」启动真实进程**：伪 systemd 不能 fork，故测试按已安装单元的 `ExecStart/LoadCredential` 启动；这验证了单元与包布局、server.yaml、master.key 凭据目录读取、token 哈希互通，**不等于**真实 systemd（User=lingedge、ProtectSystem=strict、真实 LoadCredential 注入）下的行为。
 4. **`config setup-token` 不带 `--reset` 报用法错误（2）**，而不是「显示现有 token」（磁盘上只有哈希，无法找回）。
 5. **token 重置不写 journal**：单文件原子替换，失败即原样保留旧文件，无需撤销；持 server 组件锁以避免与并发 install/update 交错。
-6. **令牌哈希路径固定为默认 `/etc/lingedge/server/setup-token.hash`**：不解析 server.yaml 里可能被管理员改写的 `secrets.setup_token_hash_file`（[ASSUMPTION] 安装器生成的 server.yaml 不改它；管理员手改后重置需自行同步，登记为后续项）。
+6. **令牌哈希路径固定为默认 `/etc/lingedge/server/setup-token.hash`**：不解析 server.yaml 里可能被管理员改写的 `secrets.setup_token_hash_file`（[ASSUMPTION] 安装器生成的 server.yaml 不改它；管理员手改后重置需自行同步，登记为后续项）。**→ 已由 Story 1.37b 取消该假设**：重置现在读取 server.yaml 的该键（缺省回落默认路径；无法确定位置时失败关闭）。
 7. **`list` 的向导进展只看文件系统事实**（`install.lock`），不探测进程/HTTP；非 root 对 0750 数据目录无权进入时报 `unknown`，而不是猜测。
 
 ## [ASSUMPTION]
@@ -100,7 +100,7 @@ context:
 | AC6 ②：`lingedge` 用户可写 `/var/lib/lingedge/server/secrets/`，`master.key` 经真实 `LoadCredential` 解得密文 | 本机仅验证了「凭据目录读取 master.key」这条代码路径 |
 | AC6 ③：`sudo lingedge-server migrate credential init` 写出 root:root 0400 的 `migrate.yaml` 后 `migrate status` 连通 | 需要 root；属 Server 侧命令（1.24），Tools 不参与 |
 | 真实 `ss`/`/proc` 端口占用 | 本机以真实 `net.Listen` 占用 + 注入的监听表验证了决策链，未验证 probe 对真实 Linux `ss` 输出的解析（1.31 的测试夹具已覆盖解析） |
-| `setup-token.hash` 在 `ProtectSystem=strict` 下的清理 | `/etc` 只读 → Server 无法删除/清空哈希文件（见 tools-design 修订记录「已知限制」）；向导路由已 410，token 事实上失效，但文件残留；待真实环境决定改 `ReadWritePaths` 还是由 Tools 清理 |
+| `setup-token.hash` 在 `ProtectSystem=strict` 下的清理 | `/etc` 只读 → Server 无法删除/清空哈希文件（见 tools-design 修订记录「已知限制」）；向导路由已 410，token 事实上失效，但文件残留（卫生问题，非安全问题）；**Story 1.37b 已在 tools-design 写清判定准则与两种处置（A 沙箱 ReadWritePaths / B Tools 清理）及为何本机未预先实现**，待真实环境按准则决定 |
 | 真实发行包与发行源（UD-3） | 联调用测试密钥签名的 bundle；真实发行密钥/公开发行源待用户确认 |
 
 ## 属后续 Story（依据）
@@ -111,6 +111,6 @@ context:
 | `config show/edit/validate server`、`doctor` 对 server 的检查与 `--fix-perms` | 1.42 | epics 1.42 |
 | `uninstall server`/备份 | 1.41 | epics 1.41 |
 | 升级 server（含迁移决策） | 1.43 | epics 1.43 |
-| 令牌重置跟随 `secrets.setup_token_hash_file` 自定义路径 | 1.42（`config` 全家） | 本 Story 的 [ASSUMPTION] 6 |
+| 令牌重置跟随 `secrets.setup_token_hash_file` 自定义路径 | ~~1.42~~ **→ 已由 Story 1.37b 做完**（本机可做，不必等 `config` 全家） | 本 Story 的 [ASSUMPTION] 6 |
 | 向导 SPA、Admin | 1.37 / 1.38 / 1.39 | epics（本 Story 备注：B2 交付） |
 | Epic 1 验收与 ENV-LNX/ENV-BT 真机复验 | 1.45 | epics 1.45 |

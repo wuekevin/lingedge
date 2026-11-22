@@ -67,6 +67,7 @@ export async function stepRedis(page: Page, scenario: string): Promise<void> {
   await T(page, 'redis-submit').click();
   await expect(T(page, 'redis-ok')).toBeVisible();
   await shot(page, `${scenario}-03-redis`);
+  await expectContrast(page, 'redis');
   await T(page, 'nav-next').click();
 }
 

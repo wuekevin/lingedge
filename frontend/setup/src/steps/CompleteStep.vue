@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue';
 import { LeStateBoundary } from '@lingedge/shared';
 import { useI18n } from 'vue-i18n';
+import { useServerText } from '../api/useServerText';
 import CopyButton from '../components/CopyButton.vue';
 import MasterKeyNotice from '../components/MasterKeyNotice.vue';
 import SCheckbox from '../components/SCheckbox.vue';
@@ -24,6 +25,8 @@ const migrateAck = ref(false);
 const manualUrl = ref('');
 const finished = computed(() => wizard.state.finished);
 const serverMessage = ref('');
+const st = useServerText();
+const serverNote = computed(() => st.step('complete', serverMessage.value));
 
 /** Admin URL：基础配置里填写的访问地址；刷新后内存已丢失时让安装者再确认一次（只用于展示链接）。 */
 const adminUrl = computed(() => {
@@ -77,7 +80,7 @@ async function complete() {
           <SInput v-model="manualUrl" name="admin_url_manual" type="url" inputmode="url" :label="t('complete.adminUrl')" hide-marker />
         </template>
         <p>{{ t('complete.adminLogin') }}</p>
-        <p v-if="serverMessage" class="result__server"><span class="result__server-label">{{ t('app.serverNote') }}:</span> <span lang="zh-CN">{{ serverMessage }}</span></p>
+        <p v-if="serverNote" class="result__server"><span class="result__server-label">{{ t('app.serverNote') }}:</span> <span :lang="serverNote?.lang" :data-localized="serverNote?.localized" data-testid="server-message">{{ serverNote?.text }}</span></p>
       </section>
 
       <section v-if="migratePassword" class="notice notice--warn" data-testid="migrate-secret" aria-labelledby="migrate-title">

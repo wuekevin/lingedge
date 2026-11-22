@@ -11,6 +11,8 @@ test('非空库被拒绝（setup.database_not_empty），换空库后成功', as
   await expect(page.getByTestId('error-code')).toHaveText('setup.database_not_empty');
   await expect(page.locator('[data-le-request-id]')).toBeVisible();
   await expect(page.getByTestId('error-hint')).toBeVisible();
+  await expect(page.getByTestId('error-message')).toHaveAttribute('data-localized', 'true'); // 已知错误码走词条，不是服务端原文
+  await expect(page.getByTestId('error-reason').first()).toContainText('already contains'); // 英文界面下的详细原因（真实 server 的 reason 句式）
   await expect(page.getByTestId('db-ok')).toHaveCount(0);
   await expect(page.getByTestId('nav-next')).toBeDisabled(); // 失败不放行
   await shot(page, `${scenario}-01-not-empty`);

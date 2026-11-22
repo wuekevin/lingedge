@@ -281,11 +281,20 @@ func TestBrowserWizardFullSocketEnglish(t *testing.T) {
 	r.assertInstalled(r.readOut(), true)
 }
 
-// 错 token / URL 里的 token / 限流。
+// 暗色主题全流程（Story 1.37b）：Chromium 以 prefers-color-scheme: dark 打开，向导必须跟随系统切到暗色令牌；
+// 每个检查点都做文字对比度 ≥4.5:1 审计（含品牌侧栏渐变的最坏色标）、主题底色核对，英文界面下真实 server 的全部消息必须命中词条（无一处回落到中文原文）。
+func TestBrowserWizardFullDarkEnglish(t *testing.T) {
+	b := needBrowser(t)
+	r := newBrowserRun(t, b, "full-dark-en")
+	r.playwright("e2e/full.spec.ts", "LE_E2E_CONN=tcp", "LE_E2E_TOTP=1", "LE_E2E_LOCALE=en", "LE_E2E_SCHEME=dark")
+	r.assertInstalled(r.readOut(), false)
+}
+
+// 错 token / URL 里的 token / 限流（暗色 + 英文：错误码、Request ID 与词条化说明在暗色下同样可读）。
 func TestBrowserWizardBadToken(t *testing.T) {
 	b := needBrowser(t)
 	r := newBrowserRun(t, b, "bad-token")
-	r.playwright("e2e/token.spec.ts")
+	r.playwright("e2e/token.spec.ts", "LE_E2E_LOCALE=en", "LE_E2E_SCHEME=dark")
 	// 整个过程没有任何写入：无凭据文件、无 install.lock。
 	if _, err := os.Stat(r.w.credFile); err == nil {
 		t.Error("错 token 场景不应写出凭据文件")
@@ -305,7 +314,7 @@ func TestBrowserWizardNonEmptyDatabase(t *testing.T) {
 	r.w.exec("CREATE TABLE `" + ne + "`.precious (id INT PRIMARY KEY, v VARCHAR(20))")
 	r.w.exec("INSERT INTO `" + ne + "`.precious VALUES (1, 'keep-me')")
 	t.Cleanup(func() { _, _ = r.w.adm.Exec("DROP DATABASE IF EXISTS `" + ne + "`") })
-	r.playwright("e2e/nonempty.spec.ts", "LE_E2E_NONEMPTY_DB="+ne)
+	r.playwright("e2e/nonempty.spec.ts", "LE_E2E_NONEMPTY_DB="+ne, "LE_E2E_LOCALE=en")
 	// 向导没有动过非空库：数据原样、没有任何迁移表。
 	var v string
 	if err := r.w.adm.QueryRow("SELECT v FROM `" + ne + "`.precious WHERE id = 1").Scan(&v); err != nil || v != "keep-me" {

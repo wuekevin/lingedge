@@ -2,6 +2,7 @@
 import { computed, reactive, ref } from 'vue';
 import { LeStateBoundary } from '@lingedge/shared';
 import { useI18n } from 'vue-i18n';
+import { useServerText } from '../api/useServerText';
 import ResultNote from '../components/ResultNote.vue';
 import SCheckbox from '../components/SCheckbox.vue';
 import SetupError from '../components/SetupError.vue';
@@ -15,6 +16,7 @@ import { parseHostPort } from '../validation';
 
 const wizard = useWizard();
 const { t } = useI18n();
+const st = useServerText();
 const req = useStepRequest(wizard);
 
 const EXAMPLE_ADDR = '127.0.0.1:6379';
@@ -40,7 +42,7 @@ async function submit() {
   if (form.password !== '') body.password = form.password;
   const r = await req.run(() => wizard.client.redis(body));
   if (!r.ok) {
-    for (const d of req.error.value?.details ?? []) if (d.field && !errors[d.field]) errors[d.field] = d.reason;
+    for (const d of req.error.value?.details ?? []) if (d.field && !errors[d.field]) errors[d.field] = st.reason(d.reason).text;
     return;
   }
   serverMessage.value = r.value.message;
@@ -70,7 +72,7 @@ async function submit() {
       <template #empty>
         <p class="result result--empty" data-testid="redis-empty">{{ t('redis.resultEmpty') }}</p>
       </template>
-      <ResultNote :message="t('redis.ok')" :server-message="serverMessage" testid="redis-ok" />
+      <ResultNote :message="t('redis.ok')" :server-message="serverMessage" step="redis" testid="redis-ok" />
     </LeStateBoundary>
   </StepShell>
 </template>
