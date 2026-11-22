@@ -1,6 +1,15 @@
-<script setup lang="ts"></script>
+<script setup lang="ts">
+import { computed } from 'vue';
+import { useI18n } from 'vue-i18n';
+import enUS from '@arco-design/web-vue/es/locale/lang/en-us';
+import zhCN from '@arco-design/web-vue/es/locale/lang/zh-cn';
+
+const { locale } = useI18n();
+const arcoLocale = computed(() => (locale.value === 'en' ? enUS : zhCN));
+</script>
 
 <template>
-  <!-- 应用壳（登录/动态菜单/守卫）由后续 Story 交付；未交付模块不渲染假页面（FR-31、NFR-1）。 -->
-  <main data-le-shell="pending"></main>
+  <a-config-provider :locale="arcoLocale">
+    <router-view />
+  </a-config-provider>
 </template>

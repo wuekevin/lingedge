@@ -4,12 +4,22 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "dev": "vite",
     "build": "vite build",
-    "typecheck": "vue-tsc --noEmit"
+    "build:e2e": "vite build --mode e2e",
+    "typecheck": "vue-tsc --noEmit",
+    "e2e": "playwright test --config e2e/playwright.config.ts"
   },
   "dependencies": {
     "@arco-design/web-vue": "2.59.0",
     "@lingedge/shared": "workspace:0.1.0",
-    "vue": "3.5.46"
+    "pinia": "3.0.4",
+    "vue": "3.5.46",
+    "vue-i18n": "11.4.23",
+    "vue-router": "4.6.5"
+  },
+  "description": "Admin（管理员后台）独立 Vite 工程（Story 1.38）：登录/动态菜单/守卫/多标签/代管横幅。会话、路由、菜单、权限、API 客户端只放在这里，不进 shared（ADR-014）。",
+  "devDependencies": {
+    "@playwright/test": "1.65.1"
   }
 }

@@ -13,10 +13,11 @@ frontend/
 ├── shared/                 无权限语义的共享包（令牌、三态组件、格式化、i18n、生成类型）
 │   ├── tokens/tokens.json  设计令牌【单一来源】；tokens/generated/ 为生成物（入库、禁手改）
 │   └── src/                components/ format/ i18n/ state/ api-types/（生成）
-├── admin/ console/         互相独立的 Vite 工程（基座探针：只验证 shared 与 Arco 能构建；壳/路由/菜单由 1.38 起交付）
+├── admin/ [Admin 管理员后台]  独立 Vite 工程（Story 1.38）：登录/TOTP、动态菜单、守卫、多标签、搜索壳、代管横幅、主题/中英文/响应式；会话/路由/菜单/权限/API 客户端只在这里（见下文「Admin」）
+├── console/                Console 独立 Vite 工程（基座探针：只验证 shared 与 Arco 能构建；P5 交付）
 ├── setup/                  安装向导 SPA（Story 1.37）：Vue 3 + TS，产物经 go:embed 嵌入 lingedge-server，不依赖 Admin Web；src/（组件/步骤/API/状态）、e2e/（Playwright）
 ├── website/                占位（Nuxt 3 官网，Story 2.1）
-├── isolation/              admin-route-prefixes.json（Admin 路由前缀清单，1.38 起随路由表同步登记）
+├── isolation/              admin-route-prefixes.json（Admin 专属路由前缀清单；新增 Admin 专属前缀须同步登记）
 └── scripts/                全部门禁脚本与其自测（*.test.mjs）
 ```
 
@@ -33,9 +34,9 @@ frontend/
 | `make verify-build` | `frontend`：admin/console 生产构建 + Console/Admin 构建隔离 + mock 入口检查 |
 | `make frontend-check` | 以上全部（也是 `pnpm -C frontend run check`） |
 | `make setup-web` / `make setup-web-check` | 安装向导：构建并同步到 `internal/platform/setup/webdist`（go:embed 来源）/ 重新构建并逐字节比对（漂移、缺失即失败；已含在 `make verify-build`） |
-| `make e2e` | 安装向导浏览器端到端（Playwright + 真实 server + 真实 MySQL/Redis；见下文「安装向导」） |
+| `make e2e` | 浏览器端到端（Playwright + 真实 server + 真实 MySQL/Redis）：安装向导（见「安装向导」）与 Admin（见「Admin」）；Admin 所需的两份构建由 `make admin-e2e-build` 先行构建 |
 
-等价的 pnpm 脚本：`check:deps` `lint:guards` `lint:eslint` `check:tokens` `check:contrast` `check:arco-contrast` `check:i18n` `check:setup-codes` `check:types` `typecheck` `test` `build` `check:isolation` `check:mock`；生成：`gen:tokens`、`gen:types`。
+等价的 pnpm 脚本：`check:deps` `lint:guards` `lint:eslint` `check:tokens` `check:contrast` `check:arco-contrast` `check:i18n` `check:setup-codes` `check:types` `typecheck` `test` `build` `check:isolation` `check:mock`；生成：`gen:tokens`、`gen:types`；测试：`test:shared` `test:setup` `test:admin` `test:selftest`。
 
 首次：`pnpm -C frontend install --frozen-lockfile`（Node ≥ 26，pnpm 版本由 `packageManager` 固定；corepack 或 `npm i -g pnpm@12.18.0`）。
 
@@ -53,7 +54,10 @@ frontend/
 | **typescript** | **5.9.3（有意不取最新 7.0.2）** | npm 最新是 TypeScript 7.0.2，但：`typescript-eslint@8.73.0` peer `typescript >=4.8.4 <6.1.0`；`openapi-typescript@7.13.0` peer `typescript ^5.x`。5.9.3 同时满足二者与 `vue-tsc@3.3.14`（peer `>=5.0.0`）。升级到 6/7 须先等这两个工具放行，并重跑本矩阵 |
 | vue-tsc | 3.3.14 | 与 TS 5.9.3 实测通过（admin/console/shared 三个 `vue-tsc --noEmit`；注入类型错误会被检出） |
 | @arco-design/web-vue | 2.59.0 | peer vue `>=3.1`；admin/console 构建整包引入 + `arco-theme.css` 覆盖变量；`scripts/tokens.test.mjs` 断言我们覆盖的**每个**变量都是 Arco 2.59 自己定义的变量名，且色阶为 Arco 的 `r,g,b` 三元组格式 |
-| Arco Pro（`arco-design-pro-vue`） | 未引入 | 它是脚手架模板而非运行时库；Admin 壳（布局/侧栏/多标签）在 Story 1.38 引入时，其自带依赖逐项对本矩阵核对，不得盲目升级 |
+| Arco Pro（`arco-design-pro-vue`） | 2.7.3（仅作为架构参考，**不作为依赖**） | `npm view` 实测：它只是脚手架 CLI 包（依赖 fs-extra/minimist/prettier，无运行时代码）。Admin 壳（Story 1.38）采用其布局架构——顶栏 + 侧栏菜单 + 多标签栏 + 内容区、路由元信息驱动菜单与守卫——用本矩阵里的精确版本（Arco 2.59.0 + vue-router 4.6.5 + pinia 3.0.4）自行实现；模板自带的 axios/mockjs/echarts/dayjs 等**一律不引入**（axios 另被 shared 的边界规则禁止，图表随 4.x） |
+| vue-router | 4.6.5 | Admin 路由（仅 admin；shared 禁止依赖）。peer `vue ^3.5.0` 满足；**有意不取 5.5.1**（它要求 `vue ^3.5.34 或 ^4`、`vite ^7.3 或 ^8` 且并入文件路由插件，本 Story 不需要，待有收益时再升并重跑矩阵）；`pnpm peers check` 无问题 |
+| pinia | 3.0.4 | Admin 会话/标签状态（仅 admin）。peer `vue ^3.5.11`、`typescript >=4.5.0` 满足；有意不取 4.1.0（peer 要求 `typescript >=5.6` 与 devtools-api 8，非必要不升）；`pnpm peers check` 无问题 |
+| @playwright/test（admin 与 setup 的 devDependency） | 1.65.1 | 与 setup 同版本，共用本机 Chromium（`playwright install chromium`）；仅 e2e 使用 |
 | vue-i18n | 11.4.23 | 基线固定；node `>=22`；`createLeI18n` 在 vitest 中验证回退/缺键行为 |
 | vitest | 5.1.1 | + @vue/test-utils 2.6.0 + happy-dom 21.0.4（组件测试）；`projects` 配置：`shared`（happy-dom）与 `scripts`（node） |
 | eslint / eslint-plugin-vue / typescript-eslint / vue-eslint-parser | 10.15.0 / 10.12.1 / 8.73.0 / 10.4.2 | plugin-vue peer `eslint ^8.57\|\|^9\|\|^10`、ts-eslint peer `eslint ^8.57\|\|^9\|\|^10`；`eslint . --max-warnings 0` 通过 |
@@ -61,7 +65,7 @@ frontend/
 | tailwindcss（仅测试用 devDependency） | 3.4.19 | 用来**真实编译**令牌生成的 Tailwind preset（`scripts/tokens.test.mjs`）；官网依赖的 Tailwind 与 Nuxt 3 版本在 Story 2.1 核对 |
 | postcss | 8.5.33 | tailwind 测试用 |
 | yaml | 2.9.1 | 读 openapi.yaml / DESIGN.md frontmatter / pnpm 锁文件 |
-| 未引入 | pinia、vue-router、echarts、nuxt | 分别属于各应用/图表/官网，随 1.38、4.x、2.1 引入并核对；**shared 禁止依赖 pinia/vue-router** |
+| 未引入 | echarts、nuxt | 分别属于图表（4.x）与官网（2.1），引入时核对；**shared 禁止依赖 pinia/vue-router**（Story 1.38 起 admin 已引入二者） |
 
 ### pnpm 12 的两个实测事实（影响 AC1，已落地）
 
@@ -160,8 +164,32 @@ frontend/
 
 **测试**：`make frontend-test` 含向导的 vitest 组件测试（`setup/src/**/*.test.ts`：API 客户端、状态机、各步骤三态/校验/口令不回显/TOTP 两阶段/完成页提示、键盘与 aria、中英文）；`frontend-gate-selftest` 含嵌入同步与 `setup` 隔离角色的负向用例。**E2E（`make e2e`，ENV-BROWSER）**：`setup/e2e/*.spec.ts` 由 Go 侧 `tests/integration/setup/browser_test.go` 拉起——真实 `lingedge-server`（setup mode，内嵌真实 SPA）+ 独立临时 mysqld/redis（随机口令，G-6），Playwright 驱动真实 Chromium；覆盖全流程（TCP+TOTP+中文、Unix socket+英文）、错 token（含 URL token 与限流）、非空库、中断续做（early：409 要求重新提供迁移凭据；late：从基础配置继续）、键盘可操作、逐页 WCAG 对比度审计（≥4.5:1，含审计器的负向自测）、`localStorage/sessionStorage/cookie/URL` 不含 token、控制台/CSP 零违规、完成后 `/setup` 410，并对页面里展示过的一次性机密做日志/审计/凭据文件泄漏扫描。浏览器环境缺失时这些 Go 测试以「等待环境验证」跳过（`LINGEDGE_REQUIRE_BROWSER=1` 视为失败；`make e2e` 设置它）。首次需要 `pnpm -C frontend/setup exec playwright install chromium`。
 
+## Admin（Story 1.38，`frontend/admin`）
+
+**是什么**：管理员后台的外壳与登录。Vue 3 + TS + Arco 2.59.0 + vue-router + pinia + vue-i18n（共享词条 + `admin/src/locales`）。业务页面（系统设置、用户与角色、API Token、审计…）由 1.39 起接入，**本 Story 不渲染任何业务页面或占位页**。
+
+**已交付页面注册表（FR-31、UX-1）**：`src/registry/pages.ts` 的 `productionPages` 是唯一入口——页面只有登记后才存在于路由表、侧栏和全局搜索，没有登记就不存在（没有「敬请期待」、没有灰显占位）。当前为空（登录/改口令/403/404/首页是外壳自己的系统路由，不在清单里）。登记一个页面：
+
+```ts
+{ key: 'ops.tasks', path: '/ops/tasks', group: 'ops', titleKey: 'menu.page.opsTasks', module: 'tasks',
+  permissions: ['task:read'], component: () => import('./views/TasksView.vue') }
+```
+
+可见性 = **页面已登记 ∧ `module` 在 `/auth/me` 的 `features.modules_delivered` 里 ∧ 具备全部 `permissions` ∧ `runModes` 允许当前运行模式**（`src/registry/visibility.ts`，纯函数，vitest 全覆盖）。一级菜单（17 个，ia.md §1 固定顺序）下可见页面为 0 则整组不渲染。直访：模块未交付/运行模式不符/未登记 → **404**（不暗示存在）；仅权限不足 → **403**（显示所需权限点、联系管理员、返回首页，不渲染页面）。`aliasOf` 表示别名入口（UX-3：共用组件、搜索不重复索引）；`menu: false` 为不进侧栏的详情页；`complexEdit: true` 的页面在手机宽度下自动显示「可用但不保证体验」标注（UX-23）。`registry.test.ts` 对生产清单自动对账：模块必须是后端已交付模块（读 `internal/platform/sysconfig/capability.go`）、权限必须是 OpenAPI 的 `x-permissions`、Admin 专属一级菜单（节点/调度/运维）的路径前缀必须已登记到 `isolation/admin-route-prefixes.json`。
+
+**会话与 API 客户端**（只放 admin，ADR-014 §2）：`src/api/client.ts` 同源 `/api/v1`，Cookie 会话 `le_admin_sid`（HttpOnly，脚本不接触），写请求自动带 `X-CSRF-Token`（403 `auth.csrf_invalid` 时刷新一次重试），仅在调用方明确 `actingAs` 时带 `X-Tenant-ID`，401 统一进入会话过期流程。登录固定 `realm: admin`；TOTP 第二步与恢复码走同一个 `/auth/totp/verify`（6 位数字按 TOTP，否则按恢复码，单次有效）；`must_change_password` 的账号只能到改口令页（服务端同样只放行 getMe/csrf/logout/changePassword）。租户账号在 Admin 入口得到与错口令**逐字相同**的中性提示（服务端 401 `auth.invalid_credentials`），不泄露账号是否存在。令牌、口令、TOTP 码不写任何浏览器存储。身份启动时读取一次（`/auth/me`）：401=匿名，网络/5xx 显示启动失败页而不是误判为已退出。`/auth/me` 的现有字段（`permissions`、`features.modules_delivered`、`features.run_mode`、`realm`、`csrf_token`）已足够驱动菜单，**未新增 OpenAPI/CC-14**。
+
+**外壳**：固定顶栏 48px、其下 32px 的「代管默认租户」横幅（UX-24，不可关闭；有 `tenant:read` 时显示真实的默认租户名，否则退回通用文案）、侧栏（≥lg 展开可折叠 / md 折叠为图标 / 手机抽屉）、多标签栏（同页不重复、最多 12 个并淘汰最久未用的无更改标签、有未保存更改先确认、页面随标签保活、刷新恢复标签但不恢复表单、退出/换身份关闭全部；页面用 `useTabDirty()` 声明未保存更改；手机宽度改为面包屑 + 返回）、全局搜索壳（Ctrl/⌘+K，只索引已交付且可见的页面）、语言与主题（亮/暗/跟随系统，`localStorage` 记忆，**[ASSUMPTION]** EXPERIENCE.md 希望存服务端用户偏好，契约暂无字段）。统一三态：`useAsyncState()` 驱动 shared 的 `LeStateBoundary`；统一表单校验：`useFormRules()`（Arco Form rules，文案全走词条）。
+
+**构建、部署与「不含 mock」**：
+- `vite build` → `frontend/dist/admin`（**生产构建**，纳入 `check:isolation`（不含 `le_console_sid`）与 `check:mock`）；`vite build --mode e2e` → `frontend/dist/admin-e2e`（额外含 `src/mocks/e2e-pages.mock.ts` 的夹具页面，**仅供 Playwright，不是发行物**，不被任何检查当作生产产物）。夹具经 `import.meta.env.MODE === 'e2e'` 保护的动态 `import()` 引入，生产构建里被编译期折叠；`scripts/admin-build.test.mjs` 用真实 vite 构建证明：生产产物不含 `LE_MOCK_ENTRY`/夹具，同一份代码按 e2e 模式构建会被 `check:mock` 检出，往真实 Admin 产物里放入 Console realm 常量会被隔离检查检出。
+- **部署形态（沿用既有约定，没有新增嵌入）**：Admin 是**静态前端，由 Tools 的 `admin-web` 组件（Story 1.40）产出 Nginx 站点片段并托管**（tools-design §11.3：admin-web 无监听端口、需要 Web 服务器托管；与 Server 同源，Nginx 把 `/api/` 反代到 `127.0.0.1:8080` 且**必须保留原始 Host**——CSRF 的 Origin 校验依赖它）。不像安装向导那样 `go:embed`：向导必须在没有 Admin 的 setup mode 下可用，而 Admin 依赖已安装的 Server 与独立主机名（IMP-17）。SPA 需要回退（`try_files $uri /index.html`）。建议响应头与 `admin/e2e/serve.mjs` 的测试服务一致：入口 `no-store`、资源带内容哈希长缓存、CSP `default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`（`style-src 'unsafe-inline'` 仅因 Arco 使用行内样式属性；E2E 在该 CSP 下断言零违规）。**Admin 产物的打包/发行（admin-web 组件包与清单）属 Story 1.40**，本 Story 只保证 `frontend/dist/admin` 是可直接托管的完整静态目录。
+- 开发：`pnpm -C frontend/admin dev`（Vite 代理 `/api` 到 `LE_ADMIN_DEV_API`，缺省 `http://127.0.0.1:8080`；Cookie 为 host-only，必须同源）。
+
+**测试**：`make frontend-test` 含 Admin 的 vitest（`admin/src/**/*.test.ts`：注册表校验与权限/模块对账、可见性/菜单裁剪/搜索索引、守卫、API 客户端、会话、标签、三态、登录页、整个外壳的挂载级测试）；`make e2e` 含 Admin 的 Playwright 场景（`tests/integration/setup/adminweb_browser_test.go` 拉起：真实 `lingedge-server`（先经 setup 向导完成安装并切到正常模式，管理员绑定 TOTP）+ 独立临时 mysqld/redis + 额外账号（只读审计员、租户账号、须改口令的管理员）+ 真实 Chromium；静态服务 `admin/e2e/serve.mjs` 等价于生产 Nginx 形态）：登录/TOTP/恢复码（单次有效）/租户账号被拒/须改口令/Cookie 与 CSRF、空菜单生产外壳、无权限菜单隐藏、直访 403/404、标签与搜索、代管横幅、手机宽度、亮/暗/跟随系统的逐页对比度审计（≥4.5:1，含搜索/确认/账号菜单弹层与手机抽屉；审计前等待浮层进出场动画结束——浮层在 `*-enter-from` 阶段 opacity 为 0，只看 `getAnimations()` 会审到透明元素，已用 `settled()` 修正并在截图中人工核对）；审计器自测见 `admin/e2e/selftest.spec.ts`。夹具页面只是占位内容，**模块与权限来自真实后端**：`fx.*` 页面选用真实已交付模块（tasks/audit/auth/system）与真实权限点，并用「未交付模块」（nodes/scheduler）与「仅商业模式」页面验证 404 路径。
+
 ## 未在本 Story 内的事项
 
 - `website`（Nuxt 3.x、Tailwind、官网页面）：Story 2.1；本 Story 只占位成员并验证 preset。
-- admin/console 的壳、路由、菜单、会话、API 层、echarts 等：Story 1.38 起；Console 在 P5。当前两个应用只是“能构建的基座探针”，不渲染任何假页面。
+- Admin 业务页面（系统设置/用户与角色/API Token/审计）：Story 1.39 起，经注册表接入；Admin 静态产物的 Tools 安装与发行：Story 1.40；Console：P5。echarts 等图表库：4.x。
 - 远端 CI 尚未实际运行（仓库无远端），`ci.yml` 已加入 Node 26.8.2 与 pnpm 12.18.0 步骤，首次运行结果以实际为准。

@@ -1,0 +1,188 @@
+{
+  "app": {
+    "name": "LingEdge 管理后台"
+  },
+  "boot": {
+    "subject": "当前身份"
+  },
+  "skip": "跳到主要内容",
+  "login": {
+    "title": "登录管理后台",
+    "subtitle": "仅限平台管理员。租户账号请使用用户控制台入口。",
+    "email": "邮箱",
+    "emailPlaceholder": "name{'@'}example.com",
+    "pw": "口令",
+    "submit": "登录",
+    "submitting": "正在登录…",
+    "expired": "会话已过期或已被注销，请重新登录。",
+    "totp": {
+      "title": "两步验证",
+      "hint": "请输入验证器应用里的 6 位验证码。",
+      "code": "验证码",
+      "verify": "验证",
+      "verifying": "正在验证…",
+      "useRecovery": "改用恢复码",
+      "useTotp": "改用验证器验证码",
+      "recoveryHint": "输入一枚尚未使用的恢复码（如 xxxx-xxxx-xxxx-xxxx）。每枚恢复码只能使用一次。",
+      "recoveryCode": "恢复码",
+      "back": "返回重新登录",
+      "expired": "验证已超时（5 分钟），请重新登录。"
+    },
+    "error": {
+      "title": "登录失败"
+    }
+  },
+  "changePw": {
+    "title": "请先修改口令",
+    "hint": "这是一个需要先改口令的账号。修改成功后所有会话将失效，请用新口令重新登录。",
+    "current": "当前口令",
+    "next": "新口令",
+    "confirm": "确认新口令",
+    "submit": "修改口令",
+    "done": "口令已修改，请重新登录。",
+    "logout": "退出登录"
+  },
+  "home": {
+    "title": "首页",
+    "welcome": "欢迎，{name}",
+    "runMode": "运行模式",
+    "roles": "角色",
+    "modules": "后端已交付模块",
+    "pages": "可访问的页面",
+    "none": "—",
+    "empty": {
+      "title": "当前没有可访问的页面",
+      "description": "业务页面按「模块已交付、你拥有权限、运行模式允许」显示。如需访问，请联系管理员调整权限。"
+    }
+  },
+  "runMode": {
+    "self_hosted": "自用模式",
+    "commercial": "商业模式"
+  },
+  "forbidden": {
+    "title": "无权限",
+    "description": "你的账号没有访问此页面所需的权限。",
+    "need": "所需权限：{perms}",
+    "contact": "如需访问，请联系管理员。",
+    "back": "返回首页"
+  },
+  "notFound": {
+    "title": "页面不存在",
+    "description": "该页面不存在，或当前不可用。",
+    "back": "返回首页"
+  },
+  "nav": {
+    "menu": "主导航",
+    "open": "打开导航菜单",
+    "close": "关闭导航菜单",
+    "collapse": "折叠侧栏",
+    "expand": "展开侧栏",
+    "home": "首页",
+    "back": "返回",
+    "breadcrumb": "当前位置"
+  },
+  "menu": {
+    "group": {
+      "dashboard": "工作台",
+      "sites": "网站管理",
+      "nodes": "节点管理",
+      "scheduling": "智能调度",
+      "dns": "DNS 管理",
+      "cache": "缓存管理",
+      "security": "安全中心",
+      "l4": "四层代理",
+      "certificates": "SSL 证书",
+      "monitoring": "监控统计",
+      "users": "用户管理",
+      "billing": "产品计费",
+      "notifications": "工单通知",
+      "plugins": "插件中心",
+      "ops": "自动化运维",
+      "website": "官网运营",
+      "settings": "系统设置"
+    }
+  },
+  "topbar": {
+    "brand": "LingEdge"
+  },
+  "search": {
+    "open": "搜索页面（Ctrl+K 或 ⌘K）",
+    "shortcut": "Ctrl K",
+    "title": "全局搜索",
+    "placeholder": "搜索页面…",
+    "hint": "↑↓ 选择，Enter 打开，Esc 关闭",
+    "empty": {
+      "title": "没有可搜索的页面",
+      "description": "搜索只包含你当前可以访问的页面。"
+    },
+    "results": "搜索结果"
+  },
+  "theme": {
+    "label": "主题",
+    "auto": "跟随系统",
+    "light": "亮色",
+    "dark": "暗色"
+  },
+  "lang": {
+    "label": "语言",
+    "zhCN": "中文",
+    "en": "English"
+  },
+  "account": {
+    "menu": "账号菜单",
+    "logout": "退出登录",
+    "logoutConfirm": "退出登录将关闭全部标签页。有未保存的更改会丢失，确定退出吗？"
+  },
+  "banner": {
+    "text": "正在以管理员身份操作租户：{tenant}",
+    "defaultTenant": "默认租户"
+  },
+  "tabs": {
+    "label": "已打开的页面",
+    "close": "关闭标签：{title}",
+    "closeOthers": "关闭其他标签",
+    "closeAll": "关闭全部标签",
+    "unsaved": "有未保存的更改",
+    "confirm": {
+      "title": "关闭有未保存更改的标签？",
+      "body": "「{title}」中有未保存的更改，关闭后将丢失。",
+      "ok": "仍然关闭",
+      "cancel": "取消"
+    }
+  },
+  "mobile": {
+    "complexEdit": "复杂编辑（规则条件、官网装修等）在手机上可用，但不保证体验，建议在桌面端进行。"
+  },
+  "form": {
+    "rule": {
+      "required": "请填写{field}",
+      "email": "{field}格式不正确",
+      "minLength": "{field}至少 {min} 个字符",
+      "maxLength": "{field}不能超过 {max} 个字符",
+      "same": "两次输入的{field}不一致"
+    }
+  },
+  "errors": {
+    "code": {
+      "auth": {
+        "invalid_credentials": "邮箱或口令不正确，或该账号无权访问此入口。",
+        "totp_invalid": "验证码或恢复码不正确（或已使用）。",
+        "unauthenticated": "登录状态无效或已超时，请重新登录。",
+        "forbidden": "你没有执行该操作的权限。",
+        "pw_policy": "新口令不符合强度策略。"
+      },
+      "rate_limit": {
+        "exceeded": "尝试次数过多，请稍后再试。"
+      },
+      "validation": {
+        "failed": "提交的内容未通过校验。"
+      }
+    },
+    "retryAfter": "请在 {seconds} 秒后重试。",
+    "requestId": "请求 ID"
+  },
+  "common": {
+    "cancel": "取消",
+    "close": "关闭"
+  }
+}

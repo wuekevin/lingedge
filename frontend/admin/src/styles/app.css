@@ -1,0 +1,39 @@
+/* Admin 全局样式：只使用 --le-* 令牌（无色值/文案）。引入顺序见 main.ts：arco.css → tokens.css → arco-theme.css → 本文件。 */
+html,
+body {
+  margin: 0;
+  background: var(--le-color-bg-page);
+  color: var(--le-color-text-primary);
+  font-family: var(--le-font-sans);
+  font-size: var(--le-text-body-size);
+  line-height: var(--le-text-body-line-height);
+}
+.le-status-page {
+  display: grid;
+  justify-items: start;
+  gap: var(--le-space-2);
+  max-width: 640px;
+  padding: var(--le-space-8) 0;
+  color: var(--le-color-text-secondary);
+}
+.le-status-page__code {
+  margin: 0;
+  font-size: var(--le-text-display-size);
+  font-weight: var(--le-text-display-weight);
+  line-height: 1;
+  color: var(--le-color-text-primary);
+}
+.le-status-page__title {
+  margin: 0;
+  font-size: var(--le-text-page-title-size);
+  color: var(--le-color-text-primary);
+}
+.le-status-page p {
+  margin: 0;
+}
+.le-btn-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--le-color-brand-primary);
+}

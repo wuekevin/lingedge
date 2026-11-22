@@ -46,7 +46,7 @@ endef
 .PHONY: help build verify-build test race lint fmt vet check-scaffold clean \
         gen-lint arch-check golangci shell-check repo-check gate-selftest vuln verify-gates \
         release-keys-check contract-bin contract-selftest openapi-breaking migrations-check migrations-seal freeze-check perms-check tenantscope-check audit-check contract-check \
-        frontend-install frontend-lint frontend-test frontend-types-check frontend-gate-selftest frontend-check setup-web setup-web-check \
+        frontend-install frontend-lint frontend-test frontend-types-check frontend-gate-selftest frontend-check setup-web setup-web-check admin-e2e-build \
         print-ldflags migrate migrate-test proto proto-check openapi-check frontend e2e edge-test security release release-finalize release-verify release-sign release-sign-test release-test secrets-check
 
 help:
@@ -262,10 +262,11 @@ frontend-lint: frontend-install
 	$(PNPM) -C $(FRONTEND) run check:setup-codes
 	$(PNPM) -C $(FRONTEND) run typecheck
 
-# shared 的 vitest（三态组件、格式化、i18n）+ 安装向导的 vitest 组件测试（Story 1.37）。
+# shared 的 vitest（三态组件、格式化、i18n）+ 安装向导的 vitest 组件测试（Story 1.37）+ Admin 外壳的 vitest（Story 1.38：守卫、菜单裁剪、三态、标签、搜索壳、横幅、登录）。
 frontend-test: frontend-install
 	$(PNPM) -C $(FRONTEND) run test:shared
 	$(PNPM) -C $(FRONTEND) run test:setup
+	$(PNPM) -C $(FRONTEND) run test:admin
 
 # 门禁脚本自身的正向/负向自测（lint 负向用例、依赖锁定、i18n、令牌/对比度、构建隔离、mock、真实 vite 构建 e2e、pnpm 脚本关闭实测）。
 frontend-gate-selftest: frontend-install
@@ -297,8 +298,16 @@ frontend-check: frontend-install
 # （tests/mysqltest、tests/redistest；不触碰本机常驻实例）。场景：全流程（TCP+TOTP+中文 / Unix socket+英文）、错 token（含 URL token 与限流）、非空库、中断续做（early/late）、键盘可操作、
 # 对比度≥4.5:1 审计（含审计器自测）；截图落在 LINGEDGE_E2E_SHOT_DIR（缺省临时目录）。环境缺失时 go 测试会以「等待环境验证」跳过，本目标设置 REQUIRE 使缺失视为失败。
 # 首次需要：pnpm -C frontend install --frozen-lockfile && pnpm -C frontend/setup exec playwright install chromium
-e2e: setup-web-check
-	LINGEDGE_REQUIRE_MYSQL=1 LINGEDGE_REQUIRE_REDIS=1 LINGEDGE_REQUIRE_BROWSER=1 $(GO) test -count=1 -timeout 30m -v -run 'TestBrowser' ./tests/integration/setup/
+#
+# Story 1.38 起同一目标还覆盖 Admin（真实 server 正常模式 + Chromium：登录/TOTP/恢复码、无权限菜单隐藏、直访 403/404、租户账号被拒、手机宽度、亮/暗对比度）：
+# 需要 Admin 的生产构建（frontend/dist/admin）与 e2e 构建（frontend/dist/admin-e2e，含夹具页面；不是发行物）——由 admin-e2e-build 先行构建。
+e2e: setup-web-check admin-e2e-build
+	LINGEDGE_REQUIRE_MYSQL=1 LINGEDGE_REQUIRE_REDIS=1 LINGEDGE_REQUIRE_BROWSER=1 $(GO) test -count=1 -timeout 45m -v -run 'TestBrowser' ./tests/integration/setup/
+
+# Admin E2E 所需的两份构建：生产构建（dist/admin）与 e2e 模式构建（dist/admin-e2e，额外含 src/mocks 的夹具页面，只供 Playwright 使用）。
+admin-e2e-build: frontend-install
+	$(PNPM) --dir $(FRONTEND) --filter @lingedge/admin run build
+	$(PNPM) -C $(FRONTEND) run build:admin-e2e
 
 edge-test:
 	$(call not_implemented,3.22)

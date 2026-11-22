@@ -1,0 +1,188 @@
+{
+  "app": {
+    "name": "LingEdge Admin"
+  },
+  "boot": {
+    "subject": "the current session"
+  },
+  "skip": "Skip to main content",
+  "login": {
+    "title": "Sign in to the admin console",
+    "subtitle": "Platform administrators only. Tenant accounts use the user console.",
+    "email": "Email",
+    "emailPlaceholder": "name{'@'}example.com",
+    "pw": "Password",
+    "submit": "Sign in",
+    "submitting": "Signing in…",
+    "expired": "Your session expired or was revoked. Please sign in again.",
+    "totp": {
+      "title": "Two-step verification",
+      "hint": "Enter the 6-digit code from your authenticator app.",
+      "code": "Verification code",
+      "verify": "Verify",
+      "verifying": "Verifying…",
+      "useRecovery": "Use a recovery code instead",
+      "useTotp": "Use an authenticator code instead",
+      "recoveryHint": "Enter an unused recovery code (like xxxx-xxxx-xxxx-xxxx). Each recovery code works once.",
+      "recoveryCode": "Recovery code",
+      "back": "Back to sign in",
+      "expired": "Verification timed out (5 minutes). Please sign in again."
+    },
+    "error": {
+      "title": "Sign-in failed"
+    }
+  },
+  "changePw": {
+    "title": "Change your password first",
+    "hint": "This account must change its password first. All sessions end after the change; sign in again with the new password.",
+    "current": "Current password",
+    "next": "New password",
+    "confirm": "Confirm new password",
+    "submit": "Change password",
+    "done": "Password changed. Please sign in again.",
+    "logout": "Sign out"
+  },
+  "home": {
+    "title": "Home",
+    "welcome": "Welcome, {name}",
+    "runMode": "Run mode",
+    "roles": "Roles",
+    "modules": "Delivered backend modules",
+    "pages": "Pages you can open",
+    "none": "—",
+    "empty": {
+      "title": "No pages are available to you",
+      "description": "Pages appear only when their module is delivered, you hold the permission and the run mode allows it. Ask an administrator if you need access."
+    }
+  },
+  "runMode": {
+    "self_hosted": "Self-hosted mode",
+    "commercial": "Commercial mode"
+  },
+  "forbidden": {
+    "title": "No permission",
+    "description": "Your account lacks the permission required for this page.",
+    "need": "Required permission: {perms}",
+    "contact": "Contact an administrator if you need access.",
+    "back": "Back to home"
+  },
+  "notFound": {
+    "title": "Page not found",
+    "description": "This page does not exist or is not available.",
+    "back": "Back to home"
+  },
+  "nav": {
+    "menu": "Main navigation",
+    "open": "Open navigation menu",
+    "close": "Close navigation menu",
+    "collapse": "Collapse sidebar",
+    "expand": "Expand sidebar",
+    "home": "Home",
+    "back": "Back",
+    "breadcrumb": "Breadcrumb"
+  },
+  "menu": {
+    "group": {
+      "dashboard": "Dashboard",
+      "sites": "Sites",
+      "nodes": "Nodes",
+      "scheduling": "Scheduling",
+      "dns": "DNS",
+      "cache": "Cache",
+      "security": "Security",
+      "l4": "Layer 4 proxy",
+      "certificates": "SSL certificates",
+      "monitoring": "Monitoring",
+      "users": "Users",
+      "billing": "Billing",
+      "notifications": "Tickets and notifications",
+      "plugins": "Plugins",
+      "ops": "Operations",
+      "website": "Website",
+      "settings": "Settings"
+    }
+  },
+  "topbar": {
+    "brand": "LingEdge"
+  },
+  "search": {
+    "open": "Search pages (Ctrl+K or ⌘K)",
+    "shortcut": "Ctrl K",
+    "title": "Global search",
+    "placeholder": "Search pages…",
+    "hint": "↑↓ to select, Enter to open, Esc to close",
+    "empty": {
+      "title": "Nothing to search yet",
+      "description": "Search only covers pages you can open."
+    },
+    "results": "Search results"
+  },
+  "theme": {
+    "label": "Theme",
+    "auto": "Follow system",
+    "light": "Light",
+    "dark": "Dark"
+  },
+  "lang": {
+    "label": "Language",
+    "zhCN": "中文",
+    "en": "English"
+  },
+  "account": {
+    "menu": "Account menu",
+    "logout": "Sign out",
+    "logoutConfirm": "Signing out closes all tabs. Unsaved changes will be lost. Sign out anyway?"
+  },
+  "banner": {
+    "text": "Acting as administrator for tenant: {tenant}",
+    "defaultTenant": "Default tenant"
+  },
+  "tabs": {
+    "label": "Open pages",
+    "close": "Close tab: {title}",
+    "closeOthers": "Close other tabs",
+    "closeAll": "Close all tabs",
+    "unsaved": "Unsaved changes",
+    "confirm": {
+      "title": "Close a tab with unsaved changes?",
+      "body": "“{title}” has unsaved changes that will be lost.",
+      "ok": "Close anyway",
+      "cancel": "Cancel"
+    }
+  },
+  "mobile": {
+    "complexEdit": "Complex editing (rule conditions, website design, …) works on a phone but the experience is not guaranteed; use a desktop for it."
+  },
+  "form": {
+    "rule": {
+      "required": "{field} is required",
+      "email": "{field} is not a valid email address",
+      "minLength": "{field} must be at least {min} characters",
+      "maxLength": "{field} must be at most {max} characters",
+      "same": "The two {field} values do not match"
+    }
+  },
+  "errors": {
+    "code": {
+      "auth": {
+        "invalid_credentials": "Wrong email or password, or this account cannot use this entry.",
+        "totp_invalid": "The code is wrong, or the recovery code was already used.",
+        "unauthenticated": "Your sign-in is invalid or timed out. Please sign in again.",
+        "forbidden": "You do not have permission to do this.",
+        "pw_policy": "The new password does not meet the strength policy."
+      },
+      "rate_limit": {
+        "exceeded": "Too many attempts. Please try again later."
+      },
+      "validation": {
+        "failed": "The submitted content failed validation."
+      }
+    },
+    "retryAfter": "Try again in {seconds} s.",
+    "requestId": "Request ID"
+  },
+  "common": {
+    "cancel": "Cancel",
+    "close": "Close"
+  }
+}

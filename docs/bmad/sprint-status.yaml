@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 11-16-2026 23:18
-last_updated: 11-22-2026 02:00
+last_updated: 11-22-2026 15:00
 project: LingEdge（凌界云）
 project_key: NOKEY
 tracking_system: file-system
@@ -78,7 +78,7 @@ development_status:
   1-36-前端-workspace-基座-shared-tokens-三态-i18n-类型生成-门禁: review   # 开发完成、本机门禁见 docs/bmad/stories/1-36-*.md：frontend/ pnpm workspace（admin/console/website/shared；pnpm 12.18.0 + Node 26.8.2；精确版本 + 锁文件 + ignoreScripts，实测 pnpm 12 不读 .npmrc 的 ignore-scripts）+ 兼容矩阵（TypeScript 5.9.3 而非 7.0.2）+ shared：设计令牌单一来源 tokens.json → CSS 变量/Tailwind preset/Arco 映射（亮暗、对比度 82 配对、与 DESIGN.md 一致）、三态组件、格式化、i18n（缺键 CI）、openapi 生成类型（漂移失败，联动 contract-check）+ 门禁（全仓禁 v-html/硬编码色值/文案；shared 禁路由/菜单/权限/会话/API 客户端；IMP-14 按 platform 路径模板精确匹配的 Console 构建隔离；mock 入口检查）+ vitest 267（含真实 vite 构建 e2e、真实 pnpm 脚本关闭实测）+ 已并入 make lint/test/gate-selftest/contract-check/verify-build 与 make frontend-check；待办：远端 CI 首跑；后续：1.37、1.38（Arco 暗色 #fff 文字对比度 2.81:1、Admin 路由前缀登记）、2.1（Nuxt/Tailwind）、UD-14（chart-3 light 2.93:1）
   1-37-安装向导-spa-go-embed: review   # 开发完成、本机门禁与真实浏览器 E2E 见 docs/bmad/stories/1-37-*.md：frontend/setup（Vue3+TS，shared 令牌/三态/i18n/生成类型，无 Arco）→ internal/platform/setup/webdist go:embed（产物入库 + make verify-build/setup-web-check 漂移缺失检查）；token 仅内存；8 步 + 三态 + 口令强度/二次确认/不回显 + TOTP 二维码恢复码 + 完成页 Admin URL 与 master.key 强提示；install.lock 后 /setup 410；CC-13（Unix socket 全链路 + initialize 迁移明细）；vitest + Playwright（真实 server/MySQL/Redis/Chromium：全流程 TCP+TOTP+中文 / socket+英文、错 token、非空库、续做 early/late、键盘、对比度）；等待环境验证：ENV-BT 宝塔 socket 可访问性、跨浏览器视觉（1.45）、远端 CI 首跑
   1-37b-遗留项清理: review   # 1.37 及前序遗留清理（清理型 Story，不属 epics 原编号；本机可做项全部完成并测试，见 docs/bmad/stories/1-37b-遗留项清理.md）：向导服务端消息 i18n（按稳定错误码/检查项/步骤映射 zh-CN/en，未知回落服务端原文；check:setup-codes 对账 Go 源码与 OpenAPI，缺键 CI 失败）、向导暗色主题（跟随系统 + 顶栏切换；Playwright 暗色全流程含渐变侧栏最坏色标审计）、1.36 对比度例外（light chart-3 调为 #D17A1F；Arco 暗色实心控件窄覆盖 + check:arco-contrast 对照 Arco 真实 CSS）、文档过时表述订正、令牌重置跟随 server.yaml 的 secrets.setup_token_hash_file；等待环境验证：setup-token.hash 在 ProtectSystem=strict 下的清理处置（准则已写入 tools-design）、UD-14 视觉确认
-  1-38-admin-工程与壳-登录-动态菜单-守卫-多标签-代管横幅: backlog
+  1-38-admin-工程与壳-登录-动态菜单-守卫-多标签-代管横幅: review   # 开发完成、本机门禁与真实浏览器 E2E 见 docs/bmad/stories/1-38-*.md：frontend/admin 独立工程（Vue3+TS+Arco 2.59.0+vue-router 4.6.5+pinia 3.0.4；Arco Pro 实测为脚手架故只采用其布局架构）；登录（口令→TOTP/恢复码，le_admin_sid，自动 X-CSRF-Token，租户账号与错口令逐字相同的中性提示）；「已交付页面注册表」驱动路由/菜单/搜索（模块已交付∧权限∧运行模式；整组为空不渲染、无占位；404 vs 403 分流；对账测试读后端 DeliveredModules 与 OpenAPI 权限）；生产清单当前为空（业务页面属 1.39）；多标签/全局搜索壳/代管默认租户横幅/亮暗跟随系统/中英文/响应式（手机抽屉+面包屑、复杂编辑如实标注）/三态与表单校验；e2e 模式构建带夹具页面仅供 Playwright，生产构建经 check:mock+admin-build 自测证明不含；未改 OpenAPI（/auth/me 已足够，无 CC-14）；vitest 76 + Playwright（真实 server/MySQL/Redis/Chromium）登录/TOTP/恢复码/无权限菜单隐藏/直访 403·404/租户账号被拒/手机宽度/亮暗对比度逐页审计；Admin 产物不嵌入 Server，沿用 Tools admin-web 的 Nginx 托管（1.40）；等待环境验证：真机/Safari 手机端视觉、真实 Nginx+HTTPS 下 Host/CSP/Secure Cookie（1.40/1.45）；后续：1.39 业务页面、1.40 admin-web 安装与发行
   1-39-admin-系统管理页-系统设置-用户与角色-api-token-审计: backlog
   1-40-静态前端安装器-admin-web-docs-status-console-website-static: backlog
   1-41-backup-restore-uninstall-含主密钥指纹与加密: backlog
@@ -827,6 +827,14 @@ environment_verification:   # 『等待环境验证』登记（验证人/日期�
     condition: "服务端消息 i18n、向导暗色主题、对比度例外处置、文档订正、令牌重置跟随 server.yaml 均本机完成并测试；setup-token.hash 在 ProtectSystem=strict 下的清理处置需真实 systemd 按 tools-design 的判定准则决定；调整后的令牌（chart-3 #D17A1F、Arco 暗色窄覆盖）为 UD-14 提议，待用户确认。"
     done_locally: "make lint security gate-selftest vuln contract-check build verify-build migrate-test race 与 make frontend-check 全绿：见 docs/bmad/stories/1-37b-遗留项清理.md。本机真实：Playwright（真实 server/MySQL/Redis/Chromium）暗色英文全流程、错 token 暗色英文、非空库英文、Arco 实心按钮亮/暗（含悬停）对比度。"
     pending: "ENV-LNX：setup-token.hash 清理处置（tools-design §13 判定准则 A/B）；UD-14：chart-3 与 Arco 暗色覆盖的视觉确认。"
+    verified_by: ""
+    verified_on: ""
+  1-38-admin-工程与壳-登录-动态菜单-守卫-多标签-代管横幅:
+    status: partial
+    required_env: "真实手机/多浏览器（Safari/Firefox）；真实 Nginx + HTTPS（1.40/1.45）"
+    condition: "Admin 外壳全部功能代码与测试本机完成并真跑（真实 server + 临时 MySQL/Redis + Chromium，含移动视口与亮暗对比度逐页审计）；仅「真机/Safari/Firefox 的手机端视觉与手势」「真实 Nginx 反代 + HTTPS 下 Host 保留、CSP、Secure Cookie」需真实环境"
+    done_locally: "gofmt -l . 无输出；make lint security gate-selftest vuln contract-check build verify-build migrate-test frontend-check 与 make race 全绿；make e2e 全部 14 个浏览器场景通过（Admin 5 个 Go 场景 = Playwright 33 项，含登录/TOTP/恢复码/租户账号被拒/无权限菜单隐藏/直访 403·404/标签/搜索/横幅/手机宽度/亮暗对比度）；vitest admin 76、变异验证 5/5 检出：见 docs/bmad/stories/1-38-*.md。"
+    pending: "真机/Safari/Firefox 手机端视觉与手势验收（1.45）；真实 Nginx + HTTPS 下的 Host/CSP/Secure Cookie 核对（1.40/1.45）；UD-14 视觉确认沿用。"
     verified_by: ""
     verified_on: ""
 

@@ -9,6 +9,8 @@ coverage.*
 node_modules/
 .pnpm-store/
 frontend/**/dist/
+frontend/**/test-results/
+frontend/**/playwright-report/
 frontend/**/.output/
 frontend/**/.nuxt/
 docs-site/dist/
