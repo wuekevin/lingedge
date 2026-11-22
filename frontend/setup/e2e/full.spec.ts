@@ -19,7 +19,17 @@ test('向导全流程（真实 server setup mode + 真实 MySQL/Redis）', async
 
   // 刷新后需要重新输入 token（token 不在任何存储里）；此时 server 已切到正常模式，/setup 是 410。
   await expect
-    .poll(async () => (await page.request.get('/setup')).status(), { timeout: 60_000, message: '/setup 在 complete 之后应永久 410' })
+    .poll(
+      async () => {
+        // 模式切换瞬间监听会短暂关闭（ECONNREFUSED），视为「尚未就绪」继续轮询。
+        try {
+          return (await page.request.get('/setup')).status();
+        } catch {
+          return 0;
+        }
+      },
+      { timeout: 60_000, message: '/setup 在 complete 之后应永久 410' },
+    )
     .toBe(410);
   const gone = await page.request.get('/setup');
   expect((await gone.json()).error.code).toBe('setup.already_installed');
