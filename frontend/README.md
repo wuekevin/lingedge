@@ -14,6 +14,7 @@ frontend/
 │   ├── tokens/tokens.json  设计令牌【单一来源】；tokens/generated/ 为生成物（入库、禁手改）
 │   └── src/                components/ format/ i18n/ state/ api-types/（生成）
 ├── admin/ console/         互相独立的 Vite 工程（基座探针：只验证 shared 与 Arco 能构建；壳/路由/菜单由 1.38 起交付）
+├── setup/                  安装向导 SPA（Story 1.37）：Vue 3 + TS，产物经 go:embed 嵌入 lingedge-server，不依赖 Admin Web；src/（组件/步骤/API/状态）、e2e/（Playwright）
 ├── website/                占位（Nuxt 3 官网，Story 2.1）
 ├── isolation/              admin-route-prefixes.json（Admin 路由前缀清单，1.38 起随路由表同步登记）
 └── scripts/                全部门禁脚本与其自测（*.test.mjs）
@@ -31,6 +32,8 @@ frontend/
 | `make contract-check` | `frontend-types-check`：OpenAPI 生成类型漂移即失败 |
 | `make verify-build` | `frontend`：admin/console 生产构建 + Console/Admin 构建隔离 + mock 入口检查 |
 | `make frontend-check` | 以上全部（也是 `pnpm -C frontend run check`） |
+| `make setup-web` / `make setup-web-check` | 安装向导：构建并同步到 `internal/platform/setup/webdist`（go:embed 来源）/ 重新构建并逐字节比对（漂移、缺失即失败；已含在 `make verify-build`） |
+| `make e2e` | 安装向导浏览器端到端（Playwright + 真实 server + 真实 MySQL/Redis；见下文「安装向导」） |
 
 等价的 pnpm 脚本：`check:deps` `lint:guards` `lint:eslint` `check:tokens` `check:contrast` `check:i18n` `check:types` `typecheck` `test` `build` `check:isolation` `check:mock`；生成：`gen:tokens`、`gen:types`。
 
@@ -144,6 +147,16 @@ frontend/
 ## mock 检查（NFR-1、ADR-023，`pnpm run check:mock`）
 
 约定：mock 模块放在 `mocks/` 目录或命名 `*.mock.ts`；其入口函数执行时输出含 `LE_MOCK_ENTRY` 的字符串（必须是被执行代码里的字面量——只导出常量会被摇树掉，e2e 已实测）；只能经受 `import.meta.env.MODE` 等编译期条件保护的动态 `import()` 引入。检查：产物里无 mock 文件名/标记（`LE_MOCK_ENTRY`、`mockServiceWorker`、`msw/browser`、`setupWorker(`、`__LE_MOCK__`、`VITE_ENABLE_MOCK/VITE_USE_MOCK`）、sourcemap 不引用 mock 源文件；源码不得静态 import mock 模块；生产相关 `.env*` 不得打开 mock 开关。
+
+## 安装向导（Story 1.37，`frontend/setup`）
+
+**是什么**：`/setup` 的 8 步向导（环境检查 → MySQL → Redis → 初始化数据库 → 管理员 → 基础配置 → 密钥 → 完成），Vue 3 + TS，使用 `@lingedge/shared` 的令牌（`tokens.css`）、三态组件（`LeLoading/LeError/LeEmpty/LeStateBoundary`）、i18n 工厂（词条在 `setup/src/locales`，缺键由 `check:i18n` 校验）与由 OpenAPI 生成的类型（`SetupDbConfig` 等，只 `import type`）。**不引入 Arco、路由、状态库**：向导不需要它们，产物只有约 230 KB JS + 19 KB CSS，且避开了 Arco 暗色 `#fff` 文字对比度问题（向导固定亮色主题）。全部 1.36 门禁照常适用（无 `v-html`、无硬编码色值/文案，`setup/**` 的测试与 e2e 同样被扫描）。
+
+**安全约定（AC4）**：setup token 只保存在 API 客户端的闭包内存里——不写 URL、不写 `sessionStorage/localStorage/cookie`；刷新后需重新输入；地址栏里携带的 `token` 类参数在启动时被丢弃并从历史记录移除（页面提示）；验证失败或完成后立即清除。口令类输入是 `type=password`（不回显）、`autocomplete=new-password`、关闭拼写检查，提交成功后清空；一次性机密（TOTP 密钥/恢复码/迁移口令）只存在于组件状态，离开步骤即销毁。唯一写入 `sessionStorage` 的是非机密草稿（访问地址、界面语言）。构建隔离脚本新增 `setup` 角色：向导产物不得含任何 platform 端点模板、Admin 路由前缀或任一 realm 会话常量（端点以完整路径字面量书写，因为裸的 `"/admin"` 段会被判为 Admin 路由）。
+
+**嵌入（go:embed）与可重现流程**：`make setup-web` = `vite build`（`base=/setup/`、`assetsInlineLimit=0`、无 sourcemap）→ `scripts/sync-setup-embed.mjs` 同步到 `internal/platform/setup/webdist/`，由 `internal/platform/setup/web.go` 以 `//go:embed all:webdist` 嵌入。**产物入库**，并有漂移/缺失检查：`make verify-build`（经 `frontend` 目标）与 `make setup-web-check` 重新构建并与入库内容逐字节比对（缺文件/多文件/内容不同都失败；构建已实测两次哈希一致），Go 侧 `TestEmbeddedWizardIsARealBuild`/`TestVerifyWebRejectsBrokenBuilds` 保证嵌入内容是真实构建且完整（入口存在、引用的资源都在、无内联脚本/mock 标记/sourcemap，缺失时 setup mode 拒绝启动而不是给空白页）。**选择入库而非「只由 make 生成」的理由**：①`go build`/`go test`/发行流水线（`scripts/release`）与 Tools 的安装包构建都不依赖 Node 与前端供应链，Go 工程师不装 Node 也能构建出可用的二进制；②仓库已有同类先例（令牌生成物、OpenAPI 生成类型都入库 + 漂移检查）；③嵌入内容在 PR 里可见可审，且「忘记重新构建」会被门禁拦下而不是悄悄发行过期前端。代价是 `webdist` 会随前端变动产生二进制 diff（体积约 250 KB）。服务端响应头：入口 `no-store`，资源带内容哈希长缓存；CSP `default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self' …`（无 `unsafe-inline/eval`），`X-Frame-Options: DENY`、`Referrer-Policy: no-referrer`。`install.lock` 之后（正常模式）`/setup` 与 `/setup/*` 一律 `410 setup.already_installed`。
+
+**测试**：`make frontend-test` 含向导的 vitest 组件测试（`setup/src/**/*.test.ts`：API 客户端、状态机、各步骤三态/校验/口令不回显/TOTP 两阶段/完成页提示、键盘与 aria、中英文）；`frontend-gate-selftest` 含嵌入同步与 `setup` 隔离角色的负向用例。**E2E（`make e2e`，ENV-BROWSER）**：`setup/e2e/*.spec.ts` 由 Go 侧 `tests/integration/setup/browser_test.go` 拉起——真实 `lingedge-server`（setup mode，内嵌真实 SPA）+ 独立临时 mysqld/redis（随机口令，G-6），Playwright 驱动真实 Chromium；覆盖全流程（TCP+TOTP+中文、Unix socket+英文）、错 token（含 URL token 与限流）、非空库、中断续做（early：409 要求重新提供迁移凭据；late：从基础配置继续）、键盘可操作、逐页 WCAG 对比度审计（≥4.5:1，含审计器的负向自测）、`localStorage/sessionStorage/cookie/URL` 不含 token、控制台/CSP 零违规、完成后 `/setup` 410，并对页面里展示过的一次性机密做日志/审计/凭据文件泄漏扫描。浏览器环境缺失时这些 Go 测试以「等待环境验证」跳过（`LINGEDGE_REQUIRE_BROWSER=1` 视为失败；`make e2e` 设置它）。首次需要 `pnpm -C frontend/setup exec playwright install chromium`。
 
 ## 未在本 Story 内的事项
 

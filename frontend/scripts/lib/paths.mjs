@@ -13,3 +13,7 @@ export const TYPES_OUT = path.join(FRONTEND_ROOT, 'shared/src/api-types/openapi.
 export function abs(p) {
   return path.resolve(p);
 }
+
+/** 安装向导（Story 1.37）：vite 产物目录与 go:embed 目录。 */
+export const SETUP_DIST = path.join(FRONTEND_ROOT, 'dist/setup');
+export const SETUP_EMBED = path.join(REPO_ROOT, 'internal/platform/setup/webdist');

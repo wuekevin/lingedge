@@ -26296,10 +26296,15 @@ components:
       properties:
         host:
           type: string
+          description: MySQL 主机（TCP 连接）。与 socket 互斥；二者必须恰设其一（CC-13）
         port:
           type: integer
           minimum: 1
           maximum: 65535
+          description: MySQL 端口（TCP 连接）。与 socket 互斥；设置 host 时必填（CC-13）
+        socket:
+          type: string
+          description: MySQL Unix 域套接字的绝对路径（如宝塔/发行版自带 MySQL 的 mysql.sock）。设置后不得再设置 host/port；该连接目标同样写入运行期凭据文件，Server 运行期、迁移与维护连接均经此套接字，且无需 TLS（CC-13）
         database:
           type: string
         username:
@@ -26338,8 +26343,6 @@ components:
           writeOnly: true
           description: 预建账号模式下可选；建账号模式下由服务端生成。写入运行期凭据文件（信封加密，ADR-026 §3）
       required:
-      - host
-      - port
       - database
       - username
       - password
@@ -26424,6 +26427,32 @@ components:
           type:
           - string
           - 'null'
+        migrations:
+          type: array
+          description: 仅 setupInitializeDb 返回：本次实际应用的迁移（按版本升序，逐个给出分类与耗时），供向导逐条展示（CC-13）。数据库已是最新时为空数组
+          items:
+            type: object
+            properties:
+              version:
+                type: integer
+                format: int64
+              name:
+                type: string
+              category:
+                type: string
+                enum:
+                - reversible
+                - expand
+                - irreversible
+                description: 迁移分类（ADR-013 §1）
+              duration_ms:
+                type: integer
+                format: int64
+            required:
+            - version
+            - name
+            - category
+            - duration_ms
         one_time_secrets:
           type: object
           readOnly: true

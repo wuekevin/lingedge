@@ -1,2 +1,5 @@
 # 迁移文件按字节哈希登记（migrations/CHECKSUMS）：强制 LF，避免 Windows autocrlf 令哈希误报。
 migrations/** text eol=lf
+
+# 安装向导 SPA 的嵌入产物（Story 1.37）：生成物，不做换行转换（make verify-build 与新构建逐字节比对），diff 中折叠。
+internal/platform/setup/webdist/** -text -diff linguist-generated=true

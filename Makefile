@@ -46,7 +46,7 @@ endef
 .PHONY: help build verify-build test race lint fmt vet check-scaffold clean \
         gen-lint arch-check golangci shell-check repo-check gate-selftest vuln verify-gates \
         release-keys-check contract-bin contract-selftest openapi-breaking migrations-check migrations-seal freeze-check perms-check tenantscope-check audit-check contract-check \
-        frontend-install frontend-lint frontend-test frontend-types-check frontend-gate-selftest frontend-check \
+        frontend-install frontend-lint frontend-test frontend-types-check frontend-gate-selftest frontend-check setup-web setup-web-check \
         print-ldflags migrate migrate-test proto proto-check openapi-check frontend e2e edge-test security release release-finalize release-verify release-sign release-sign-test release-test secrets-check
 
 help:
@@ -54,6 +54,7 @@ help:
 	@echo "辅助: fmt vet check-scaffold clean gen-lint arch-check golangci shell-check gate-selftest vuln verify-gates"
 	@echo "契约(Story 1.3): contract-check（= contract-selftest openapi-check proto-check migrations-check freeze-check perms-check[Story 1.18] tenantscope-check[Story 1.20] audit-check[Story 1.21]）migrations-seal"
 	@echo "迁移(Story 1.6): migrate（MIGRATE_ARGS=plan|up|down|status|recover|lint ...）migrate-test"
+	@echo "安装向导(Story 1.37): setup-web（构建并同步嵌入产物）setup-web-check（漂移/缺失检查）e2e（Playwright 浏览器端到端，需 ENV-BROWSER）"
 	@echo "前端(Story 1.36): frontend-check（= 依赖锁定/ESLint/架构门禁/令牌与对比度/i18n 缺键/类型漂移/vue-tsc/vitest/构建/隔离与 mock 检查）；已并入 lint（frontend-lint）、test（frontend-test）、gate-selftest（frontend-gate-selftest）、contract-check（frontend-types-check）、verify-build（frontend）"
 	@echo "发行(Story 1.34): release → release-finalize → release-verify（两轮离线签名，见 docs/operations/release.md）release-sign（构建离线签名工具）release-sign-test release-test secrets-check"
 	@echo "未实现的目标会输出 NOT_IMPLEMENTED(story X.Y) 并以非零退出。"
@@ -259,26 +260,43 @@ frontend-lint: frontend-install
 	$(PNPM) -C $(FRONTEND) run check:i18n
 	$(PNPM) -C $(FRONTEND) run typecheck
 
-# shared 的 vitest（三态组件、格式化、i18n）。
+# shared 的 vitest（三态组件、格式化、i18n）+ 安装向导的 vitest 组件测试（Story 1.37）。
 frontend-test: frontend-install
 	$(PNPM) -C $(FRONTEND) run test:shared
+	$(PNPM) -C $(FRONTEND) run test:setup
 
 # 门禁脚本自身的正向/负向自测（lint 负向用例、依赖锁定、i18n、令牌/对比度、构建隔离、mock、真实 vite 构建 e2e、pnpm 脚本关闭实测）。
 frontend-gate-selftest: frontend-install
 	$(PNPM) -C $(FRONTEND) run test:selftest
 
-# 前端生产构建（admin、console 各自独立的 Vite 工程）+ Console/Admin 构建隔离检查（IMP-14）+ mock 入口检查（NFR-1）。
+# 前端生产构建（admin、console、setup 各自独立的 Vite 工程）+ 安装向导嵌入产物漂移/缺失检查（Story 1.37）+ 构建隔离检查（IMP-14，含向导不依赖 Admin）+ mock 入口检查（NFR-1）。
 frontend: frontend-install
 	$(PNPM) -C $(FRONTEND) run build
+	$(PNPM) -C $(FRONTEND) run check:embed
 	$(PNPM) -C $(FRONTEND) run check:isolation
 	$(PNPM) -C $(FRONTEND) run check:mock
+
+# 安装向导 SPA（Story 1.37）：构建 frontend/setup 并同步到 internal/platform/setup/webdist（go:embed 的来源，产物入库）。
+# 改了 frontend/setup 或 frontend/shared 之后必须运行并提交 webdist；`make verify-build`（经 frontend 目标）与 `setup-web-check` 会重新构建并逐字节比对，
+# 漂移或缺失即失败；Go 侧 TestEmbeddedWizardIsARealBuild 另外保证嵌入内容是真实构建（不是占位页）。选择“入库 + 漂移检查”的理由见 frontend/README。
+setup-web: frontend-install
+	$(PNPM) -C $(FRONTEND) run build:setup
+	$(PNPM) -C $(FRONTEND) run sync:embed
+
+setup-web-check: frontend-install
+	$(PNPM) -C $(FRONTEND) run build:setup
+	$(PNPM) -C $(FRONTEND) run check:embed
 
 # 前端全部检查一次跑完（等价于上面各目标之和）。
 frontend-check: frontend-install
 	$(PNPM) -C $(FRONTEND) run check
 
-e2e:
-	$(call not_implemented,1.37)
+# 浏览器端到端（Story 1.37，ENV-BROWSER）：Playwright 驱动真实 Chromium，被测对象是真实 lingedge-server（setup mode，内嵌向导 SPA）+ 自拉起的独立临时 mysqld/redis
+# （tests/mysqltest、tests/redistest；不触碰本机常驻实例）。场景：全流程（TCP+TOTP+中文 / Unix socket+英文）、错 token（含 URL token 与限流）、非空库、中断续做（early/late）、键盘可操作、
+# 对比度≥4.5:1 审计（含审计器自测）；截图落在 LINGEDGE_E2E_SHOT_DIR（缺省临时目录）。环境缺失时 go 测试会以「等待环境验证」跳过，本目标设置 REQUIRE 使缺失视为失败。
+# 首次需要：pnpm -C frontend install --frozen-lockfile && pnpm -C frontend/setup exec playwright install chromium
+e2e: setup-web-check
+	LINGEDGE_REQUIRE_MYSQL=1 LINGEDGE_REQUIRE_REDIS=1 LINGEDGE_REQUIRE_BROWSER=1 $(GO) test -count=1 -timeout 30m -v -run 'TestBrowser' ./tests/integration/setup/
 
 edge-test:
 	$(call not_implemented,3.22)

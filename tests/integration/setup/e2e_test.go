@@ -429,11 +429,15 @@ func (w *wiz) normalModeLogin(t *testing.T, totpSecret string) {
 			}
 		}
 	}
-	// 正常模式不再有 /setup 静态页，也不会 503。
-	if rr, err := http.Get("http://" + info.HTTPAddr + "/setup"); err == nil {
+	// 正常模式不再有向导页：/setup 与 /setup/*（含静态资源路径）统一 410 setup.already_installed（Story 1.37、MIN-04），不会 503/404。
+	for _, p := range []string{"/setup", "/setup/", "/setup/assets/index.js"} {
+		rr, err := http.Get("http://" + info.HTTPAddr + p)
+		if err != nil {
+			t.Fatal(err)
+		}
 		_ = rr.Body.Close()
-		if rr.StatusCode != 404 {
-			t.Errorf("正常模式下 /setup 应 404，实际 %d", rr.StatusCode)
+		if rr.StatusCode != 410 {
+			t.Errorf("正常模式下 %s 应 410，实际 %d", p, rr.StatusCode)
 		}
 	}
 }

@@ -127,6 +127,9 @@ func (c connFlags) targetWithFile(environ []string, env map[string]string, fc *F
 			return cfg, fc, err
 		}
 		cfg.Host, cfg.Port, cfg.Name, cfg.TLS = loaded.Database.Host, loaded.Database.Port, loaded.Database.Name, loaded.Database.TLS
+		if loaded.Database.Socket != "" {
+			cfg.Socket, cfg.Host, cfg.Port = loaded.Database.Socket, "", 0
+		}
 	}
 	// migrate.yaml 覆盖 server.yaml，但不覆盖环境变量/命令行的显式值。
 	if fc != nil {
@@ -159,6 +162,9 @@ func (c connFlags) targetWithFile(environ []string, env map[string]string, fc *F
 			}
 			cfg.Port = n
 		}
+		if v := env["LINGEDGE_DATABASE__SOCKET"]; v != "" {
+			cfg.Socket, cfg.Host, cfg.Port = v, "", 0
+		}
 		if v := env["LINGEDGE_DATABASE__NAME"]; v != "" {
 			cfg.Name = v
 		}
@@ -167,7 +173,7 @@ func (c connFlags) targetWithFile(environ []string, env map[string]string, fc *F
 		}
 	}
 	if c.host != "" {
-		cfg.Host = c.host
+		cfg.Host, cfg.Socket = c.host, "" // 显式 --host 覆盖来自 server.yaml/环境的 socket（二者互斥）
 	}
 	if c.port != 0 {
 		cfg.Port = c.port

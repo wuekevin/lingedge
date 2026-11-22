@@ -114,6 +114,7 @@ type dbPlan struct {
 	tgt                         provision.Target
 	host                        string
 	port                        int
+	socket                      string
 	name                        string
 	appUser, maintUser, migUser string
 	appPW, maintPW, migPW       string
@@ -137,7 +138,7 @@ func validPW(field, pw string, strict bool) *apierr.Detail {
 }
 
 func (s *Service) planDatabase(in DatabaseInput) (*dbPlan, error) {
-	p := &dbPlan{host: strings.TrimSpace(in.Host), port: in.Port, name: in.Database, appUser: in.Username, maintUser: in.MaintUsername, migUser: in.MigrateUsername,
+	p := &dbPlan{host: strings.TrimSpace(in.Host), port: in.Port, socket: strings.TrimSpace(in.Socket), name: in.Database, appUser: in.Username, maintUser: in.MaintUsername, migUser: in.MigrateUsername,
 		appPW: in.Password, maintPW: in.MaintPassword, migPW: in.MigratePassword, create: in.CreateIfMissing, adminUser: in.AdminUsername, adminPW: in.AdminPassword}
 	var ds []apierr.Detail
 	bad := func(f, r string) { ds = append(ds, invalidField(f, r)) }
@@ -147,11 +148,20 @@ func (s *Service) planDatabase(in DatabaseInput) (*dbPlan, error) {
 	if p.maintUser == "" {
 		p.maintUser = provision.MaintUser
 	}
-	if p.host == "" || len(p.host) > 255 {
-		bad("host", "must be a host name or IP")
-	}
-	if p.port < 1 || p.port > 65535 {
-		bad("port", "must be between 1 and 65535")
+	switch {
+	case p.socket != "":
+		if p.host != "" || p.port != 0 {
+			bad("socket", "is mutually exclusive with host/port: set either host+port or socket")
+		} else if !provision.ValidSocketPath(p.socket) {
+			bad("socket", "must be a normalized absolute path (at most 100 bytes, no NUL or line breaks)")
+		}
+	default:
+		if p.host == "" || len(p.host) > 255 {
+			bad("host", "must be a host name or IP (or set socket instead)")
+		}
+		if p.port < 1 || p.port > 65535 {
+			bad("port", "must be between 1 and 65535")
+		}
 	}
 	if !provision.ValidDatabaseName(p.name) {
 		bad("database", "must be a MySQL identifier (letters, digits, _, $; at most 64)")
@@ -170,12 +180,16 @@ func (s *Service) planDatabase(in DatabaseInput) (*dbPlan, error) {
 		bad("migrate_username", "must differ from the app and maint accounts")
 	}
 	switch {
+	case in.TLS && p.socket != "":
+		bad("tls", "must be false for a Unix socket connection (it does not cross the network)")
 	case in.TLS:
 		p.tgt.TLS = "true"
+	case p.socket != "":
+		// Unix 套接字不经网络，无需 TLS（in.TLS 对套接字无意义：忽略而非报错会误导，故显式拒绝）。
 	case p.host != "" && !isLocalHost(p.host):
 		bad("tls", "must be true for a non-loopback database host (credentials and data must not cross the network in clear text)")
 	}
-	p.tgt.Host, p.tgt.Port = p.host, p.port
+	p.tgt.Host, p.tgt.Port, p.tgt.Socket = p.host, p.port, p.socket
 	if p.create {
 		// 向导只创建 lingedge_* 专用库与账号，绝不触碰其他库（宝塔场景同样，tools-design §13）；系统库名一律拒绝。
 		if p.name != "lingedge" && !strings.HasPrefix(p.name, "lingedge_") {
@@ -248,7 +262,7 @@ func (s *Service) configureDatabase(ctx, req context.Context, in DatabaseInput) 
 	}
 	path := s.credPath()
 	// 续做（ADR-026 §6）：凭据文件已有同一目标的 database 段 → app/maint 口令读回，不再询问，也不改动。
-	if f, lerr := dbcred.Load(path); lerr == nil && f.Database != nil && f.Database.Host == p.host && f.Database.Port == p.port && f.Database.Name == p.name {
+	if f, lerr := dbcred.Load(path); lerr == nil && f.Database != nil && f.Database.Host == p.host && f.Database.Port == p.port && f.Database.Socket == p.socket && f.Database.Name == p.name {
 		if pw, err := f.AppPassword(ctx, s.o.Box); err == nil {
 			p.appPW, p.resumed = pw.Reveal(), true
 		}
@@ -298,7 +312,7 @@ func (s *Service) configureDatabase(ctx, req context.Context, in DatabaseInput) 
 	if err := s.verifyDatabase(ctx, p); err != nil {
 		return StepResult{}, err
 	}
-	if err := dbcred.WriteDatabase(ctx, path, s.o.Box, dbcred.DatabaseInput{Host: p.host, Port: p.port, Name: p.name, TLS: p.tgt.TLS,
+	if err := dbcred.WriteDatabase(ctx, path, s.o.Box, dbcred.DatabaseInput{Host: p.host, Port: p.port, Socket: p.socket, Name: p.name, TLS: p.tgt.TLS,
 		AppUser: p.appUser, AppPass: config.NewSecret(p.appPW), MaintUser: map[bool]string{true: p.maintUser}[p.maintOn], MaintPass: config.NewSecret(p.maintPW)}); err != nil {
 		return StepResult{}, apierr.Internal(err)
 	}
@@ -309,7 +323,7 @@ func (s *Service) configureDatabase(ctx, req context.Context, in DatabaseInput) 
 	s.mu.Unlock()
 	// 凭据文件的 database 段变了：丢弃旧的 app 池与服务，下次按新凭据重建。
 	s.dropPost()
-	changes := map[string]any{"mode": mode, "host": p.host, "port": p.port, "database": p.name, "migrate_user": p.migUser, "migrate_generated": p.generatedMig,
+	changes := map[string]any{"mode": mode, "host": p.host, "port": p.port, "socket": p.socket, "database": p.name, "migrate_user": p.migUser, "migrate_generated": p.generatedMig,
 		"maint_configured": p.maintOn, "runtime_credentials_written": true, "resumed": p.resumed}
 	if created != nil {
 		changes["accounts_created"] = created
@@ -449,7 +463,7 @@ func (s *Service) verifyDatabase(ctx context.Context, p *dbPlan) error {
 		}
 	}
 	mc.Close()
-	cfg := db.Config{Host: p.host, Port: p.port, Name: p.name, User: p.migUser, Password: config.NewSecret(p.migPW), TLS: p.tgt.TLS}
+	cfg := db.Config{Host: p.host, Port: p.port, Socket: p.socket, Name: p.name, User: p.migUser, Password: config.NewSecret(p.migPW), TLS: p.tgt.TLS}
 	r, closeFn, err := s.window.OpenRunner(ctx, cfg, s.o.Migrations)
 	if err != nil {
 		return precheck("database precheck failed", "无法以迁移账号建立连接池："+scrubErr(err, p))

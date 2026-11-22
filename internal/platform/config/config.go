@@ -81,8 +81,10 @@ type Metrics struct {
 
 // Database 是 MySQL 连接（运行期 app 账号；三类账号的连接池拆分随 Story 1.5 扩展）。
 type Database struct {
-	Host         string `yaml:"host"`
-	Port         int    `yaml:"port"`
+	Host string `yaml:"host"`
+	Port int    `yaml:"port"`
+	// Socket 是 MySQL Unix 域套接字的绝对路径（CC-13）；与 host 互斥（设置时 port 被忽略）。套接字连接无需 TLS。
+	Socket       string `yaml:"socket"`
 	Name         string `yaml:"name"`
 	User         string `yaml:"user"`
 	Password     Secret `yaml:"password"`
@@ -638,7 +640,14 @@ func (c *Config) validateProblems() []Problem {
 	if d.Host != "" && !validHostOrIP(d.Host) {
 		add("database.host", "必须是主机名或 IP")
 	}
-	if d.Port < 1 || d.Port > 65535 {
+	if d.Socket != "" {
+		if d.Host != "" {
+			add("database.socket", "与 database.host 互斥：连接目标只能是 host（+port）或 socket 之一")
+		}
+		if !cleanAbs(d.Socket) || strings.ContainsAny(d.Socket, "\x00\r\n") || len(d.Socket) > 100 {
+			add("database.socket", "必须是规范化的绝对路径（最长 100 字节，Unix 套接字路径长度上限）")
+		}
+	} else if d.Port < 1 || d.Port > 65535 {
 		add("database.port", "必须在 1–65535")
 	}
 	if d.Name != "" && !reDBName.MatchString(d.Name) {
@@ -779,7 +788,7 @@ func (c *Config) runtimeProblems() []Problem {
 		}
 	}
 	req("server.env", c.Server.Env == "")
-	req("database.host", c.Database.Host == "")
+	req("database.host", c.Database.Host == "" && c.Database.Socket == "")
 	req("database.name", c.Database.Name == "")
 	req("database.user", c.Database.User == "")
 	if !c.Database.Password.IsSet() {

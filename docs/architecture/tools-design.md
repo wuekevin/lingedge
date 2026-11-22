@@ -735,12 +735,13 @@ Tools 负责**物化与准备**，Web 向导负责**业务初始化**，边界�
 
 **setup mode 与 setup token**：
 - 无 `install.lock`（`/var/lib/lingedge/server/install.lock`，且无 `system_installations` 完成记录）时，Server 以 setup mode 启动：**仅**提供 `/setup` 向导 UI（`go:embed` 的轻量 SPA，不依赖 Admin Web）与 `/api/v1/public/setup/*` 接口，其余 API 返回 503。
+  **实现（Story 1.37）**：向导 UI 是 `frontend/setup`（Vue 3 + TS）的生产构建，入库于 `internal/platform/setup/webdist` 并经 `//go:embed all:webdist` 嵌入（`make setup-web` 生成，`make verify-build` 比对漂移/缺失；缺失时 setup mode 拒绝启动）；`GET /setup`、`/setup/assets/*` 带严格 CSP 与 `no-store`；`install.lock` 之后 `/setup`、`/setup/*` 与全部 `/public/setup/*` 一样永久 `410 setup.already_installed`（MIN-04）。设计与安全约定见 `frontend/README.md`「安装向导」。
 - Tools 生成 256 位随机 setup token，仅在终端**显示一次**，哈希（SHA-256）写入 `/etc/lingedge/server/setup-token.hash`（lingedge:lingedge 0600）。向导所有写接口要求请求头 `X-Setup-Token`；失败节流（Redis 不可用时本地计数）。**实现（Story 1.24）**：生成与哈希文件创建用共享原语 `pkg/setuptoken`（`Generate`/`Hash`/`WriteHashFile`，Tools 步骤 18 附近调用，Story 1.35 已接线；Server 只读取并校验，`complete` 后删除——无权删除 root 属主目录里的文件时清空内容使其失效）；`status` 也要求 token；哈希路径可经 `secrets.setup_token_hash_file` 覆盖（CC-12）。
 - 向导默认只监听 `127.0.0.1:8080`；远程访问需 SSH 隧道，或用户显式 `--setup-listen 0.0.0.0:8080`（Tools 打印风险提示，且 token 必须通过 TLS 前置反代传输的建议）。防止「安装完成前被他人抢先初始化」。
 
 **向导步骤（基线 §21.1）**：
 1. **环境检查**：Server 版本、系统时间、数据目录可写、`master.key` 可读（不展示内容）。
-2. **MySQL 配置**：host/port/库名/账号/口令；可选「用临时管理员凭据创建专用库与**三类**专用账号」——管理员凭据**仅在内存使用，不落盘不入日志**（两种模式：建账号模式/预建账号模式，§13.1）；在宝塔 MySQL 上同样只创建 `lingedge_*` 专用库与账号，不触碰其他库。
+2. **MySQL 配置**：host/port（或 Unix socket 路径，二者互斥，CC-13；套接字无需 TLS）/库名/账号/口令；可选「用临时管理员凭据创建专用库与**三类**专用账号」——管理员凭据**仅在内存使用，不落盘不入日志**（两种模式：建账号模式/预建账号模式，§13.1）；在宝塔 MySQL 上同样只创建 `lingedge_*` 专用库与账号，不触碰其他库。
    - **版本预检**：`VERSION()` 必须 **≥ 8.0.16**（CHECK 约束自此版本起才强制执行；设计依赖 CHECK，低于此版本拒绝并说明）；另校验 `utf8mb4`、`sql_mode`。
    - **三类账号**（database README §5）：`lingedge_app`（运行期 DML；对 `audit_logs`、`wallet_entries` 仅 `INSERT, SELECT`）；`lingedge_maint`（仅对分区表的表级 `SELECT, ALTER, DROP`，由迁移 SQL 授权，供 Worker 维护分区；不能 DROP 其它表）；`lingedge_migrate`（`ALL ON <db>.* WITH GRANT OPTION` + 全局 `SET_USER_ID`，仅 `migrate`/Tools 使用，不在常规请求路径持有）。**口令落点（AA-7，ADR-026，见下文 §13.1）**：`lingedge_migrate` 向导期只存内存、用后清零、绝不持久化；运行/升级期口令存 `/etc/lingedge/server/migrate.yaml`（root:root 0400，仅 root 运行的 `lingedge-server migrate` 读取，由 root 侧命令 `migrate credential init` 写入，不进入 `server.yaml`，运行用户 `lingedge` 不可读）；`lingedge_app`/`lingedge_maint`（及 Redis）口令经信封加密存 `lingedge` 属主 0600 的 `runtime-credentials.json`。
    - **触发器权限预检**（宝塔 MySQL 常开 binlog）：读取 `@@log_bin` 与 `@@log_bin_trust_function_creators`；若 `log_bin=1` 且 trust=0，用 `lingedge_migrate` 在目标库建/删一个探针触发器；失败（ERROR 1419，已在 MySQL 8.0.46 实测）→ 阻断并给出两种处置：由管理员 `GRANT SET_USER_ID ON *.* TO lingedge_migrate`（推荐），或在 `my.cnf` 设置 `log_bin_trust_function_creators=1`；向导不自行修改 MySQL 全局变量。
@@ -778,7 +779,7 @@ Tools 负责**物化与准备**，Web 向导负责**业务初始化**，边界�
 - **中断续做**：口令不落盘 ⇒ 续做时重新提供；app/maint 若已写入 `runtime-credentials.json` 则读回；migrate 口令未知则重新输入或用临时管理员 `ALTER USER` 重置（`migrate.yaml` 已存在时提示随后 `credential init --force`）。
 - **`--from-file`**（0600、调用者属主，否则退出码 3）：可含 `database.{host,port,name,tls}`、`database.admin.{user,password}`、`database.migrate.password`、`database.app/maint.password`、`redis.*`、管理员初始口令、站点配置，口令字段可用 `*_file` 间接引用；**首次成功解析后**进程清零并 0 覆盖 `unlink`，失败则醒目警告且结果带 `from_file_residual=true`；自动生成的 migrate 口令只在结果输出一次，**不落盘**（不提供写 root 文件的选项）。
 - **完成后清理**：内存口令清零、setup token 哈希删除、`--from-file` 文件已删；仅留 `runtime-credentials.json`（密文）与（操作者执行后的）`migrate.yaml`。向导完成页提示删除临时管理员账号。
-- **宝塔（ENV-BT）**：推荐建账号模式（向导内存使用宝塔 MySQL 管理员口令一次）；面板预建账号常缺 `GRANT OPTION`/`SET_USER_ID`，由既有预检阻断并给指引（具体默认权限与 socket 可访问性待 ENV-BT 验证）。
+- **宝塔（ENV-BT）**：推荐建账号模式（向导内存使用宝塔 MySQL 管理员口令一次）；面板预建账号常缺 `GRANT OPTION`/`SET_USER_ID`，由既有预检阻断并给指引（具体默认权限与 socket 可访问性待 ENV-BT 验证）。**Unix socket（CC-13，Story 1.37）**：向导 `socket` 字段把套接字路径写入运行期凭据文件（`database.socket`，与 host/port 互斥），Server/迁移窗口/`migrate credential`/`db credential rotate` 统一支持；本机已用真实 mysqld 套接字验证，`lingedge` 用户对面板 MySQL 套接字文件的访问权限仍待 ENV-BT。初始化步骤的响应追加 `migrations`（逐个迁移的版本/名称/分类/耗时，CC-13），供向导前端逐条展示。
 - **脱敏**：口令不得出现在日志、错误、访问日志/请求体、审计（只记「账号已创建」「口令已自动生成：是/否」）、`system_installations.state`、`state.json`、命令行；非回环监听且非 TLS 时携带口令的接口拒绝 `400 setup.insecure_transport`；完整规则与测试见 ADR-026 §10。
 
 ## 14. 节点注册 `lingedge node enroll`（FR-12、FR-52）

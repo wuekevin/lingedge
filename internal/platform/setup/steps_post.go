@@ -49,7 +49,7 @@ func (s *Service) initializeDB(ctx, req context.Context) (StepResult, error) {
 		return StepResult{}, apierr.New(apierr.ResourceConflict, "migrate credentials are not available in memory",
 			apierr.Detail{Field: "migrate_password", Reason: "the wizard process restarted since step database: resubmit PUT /public/setup/database with migrate_password, or with create_if_missing and the temporary administrator credentials to reset the migrate account"})
 	}
-	cfg := db.Config{Host: f.Database.Host, Port: f.Database.Port, Name: f.Database.Name, User: user, Password: config.NewSecret(pw), TLS: f.Database.TLS}
+	cfg := db.Config{Host: f.Database.Host, Port: f.Database.Port, Socket: f.Database.Socket, Name: f.Database.Name, User: user, Password: config.NewSecret(pw), TLS: f.Database.TLS}
 	r, closeFn, err := s.window.OpenRunner(ctx, cfg, s.o.Migrations)
 	if err != nil {
 		return StepResult{}, apierr.New(apierr.SetupPrecheckFailed, "cannot connect with the migrate account", apierr.Detail{Reason: strings.ReplaceAll(err.Error(), pw, "***")})
@@ -113,7 +113,13 @@ func (s *Service) initializeDB(ctx, req context.Context) (StepResult, error) {
 	}
 	s.clearPending()
 	s.log.Info("向导：数据库迁移完成", zap.Int64("to_version", res.ToVersion), zap.Int("applied", len(res.Applied)))
-	return s.result(StepInitDB, msg), nil
+	out := s.result(StepInitDB, msg)
+	infos := make([]AppliedMigrationInfo, 0, len(res.Applied))
+	for _, a := range res.Applied {
+		infos = append(infos, AppliedMigrationInfo{Version: a.Version, Name: a.Name, Category: string(a.Class), Millis: a.Millis})
+	}
+	out.Migrations = &infos
+	return out, nil
 }
 
 func (s *Service) heldGenerated() bool {

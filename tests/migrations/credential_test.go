@@ -294,3 +294,33 @@ func TestMigrateNeverUsesRuntimeCredentialsFile(t *testing.T) {
 		}
 	}
 }
+
+// CC-13：credential init|reset 经 Unix socket（--socket）：写出的 migrate.yaml 含 socket（不含 host/port），且可直接驱动 migrate status。
+func TestCredentialInitAndResetOverSocket(t *testing.T) {
+	e := newEnv(t)
+	dir := t.TempDir()
+	out := filepath.Join(dir, "migrate.yaml")
+	sock := e.inst.Socket
+	args := []string{"credential", "init", "--file", out, "--socket", sock, "--database", e.dbName, "--user", e.user}
+	if code, o, errs := mainRun([]string{migrate.EnvDBPass + "=" + e.pw}, args...); code != 0 || strings.Contains(o+errs, e.pw) {
+		t.Fatalf("socket init 应成功且不输出口令: %d %s %s", code, o, errs)
+	}
+	b, _ := os.ReadFile(out)
+	if !strings.Contains(string(b), "socket: "+sock) || strings.Contains(string(b), "host:") || strings.Contains(string(b), "port:") {
+		t.Fatalf("migrate.yaml 应只含 socket 目标: %s", b)
+	}
+	if code, _, errs := mainRun([]string{migrate.EnvMigrateYAML + "=" + out}, "status"); code != 0 {
+		t.Fatalf("写出的文件应可驱动 migrate: %d %s", code, errs)
+	}
+	adm, admPW := mysqltest.RandomName("adm"), mysqltest.RandomSecret(t)
+	e.inst.Exec(t, fmt.Sprintf("CREATE USER '%s'@'%%' IDENTIFIED BY '%s'", adm, admPW))
+	e.inst.Exec(t, fmt.Sprintf("GRANT ALL ON *.* TO '%s'@'%%' WITH GRANT OPTION", adm))
+	e.inst.DropUserOnCleanup(t, adm)
+	rargs := []string{"credential", "reset", "--file", out, "--force", "--admin-user", adm, "--socket", sock, "--database", e.dbName, "--user", e.user}
+	if code, o, errs := mainRun([]string{migrate.EnvAdminPass + "=" + admPW}, rargs...); code != 0 || strings.Contains(o+errs, admPW) {
+		t.Fatalf("socket reset: %d %s %s", code, o, errs)
+	}
+	if code, _, errs := mainRun([]string{migrate.EnvMigrateYAML + "=" + out}, "status"); code != 0 {
+		t.Fatalf("reset 后文件应可使用: %d %s", code, errs)
+	}
+}

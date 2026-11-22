@@ -127,3 +127,25 @@ func TestValidation(t *testing.T) {
 		}
 	}
 }
+
+// CC-13：Unix 套接字目标的校验（互斥、绝对规范路径、无 TLS）与路径判定。
+func TestTargetSocket(t *testing.T) {
+	if err := (Target{Socket: "/var/run/mysqld/mysqld.sock"}).validate(); err != nil {
+		t.Errorf("合法 socket 应通过: %v", err)
+	}
+	for name, tg := range map[string]Target{
+		"与 host 同设": {Host: "127.0.0.1", Socket: "/tmp/m.sock"},
+		"与 port 同设": {Port: 3306, Socket: "/tmp/m.sock"},
+		"相对路径":      {Socket: "m.sock"},
+		"含 ..":      {Socket: "/tmp/../m.sock"},
+		"含换行":       {Socket: "/tmp/m\n.sock"},
+		"启用 TLS":    {Socket: "/tmp/m.sock", TLS: "true"},
+	} {
+		if err := tg.validate(); err == nil {
+			t.Errorf("%s 应被拒绝", name)
+		}
+	}
+	if ValidSocketPath("") || ValidSocketPath("/"+strings.Repeat("a", 120)) {
+		t.Error("空/过长路径应被拒绝")
+	}
+}

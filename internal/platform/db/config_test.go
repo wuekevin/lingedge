@@ -194,3 +194,20 @@ func TestConfigFromMergedDatabase(t *testing.T) {
 		t.Error("未配置 maint 时 ok 应为 false")
 	}
 }
+
+// CC-13：AppConfigFrom/MaintConfigFrom 配置了 socket 时只给 socket（host/port 清空，db.Config 要求互斥）。
+func TestConfigFromSocket(t *testing.T) {
+	d := config.Database{Host: "ignored", Port: 3306, Socket: "/tmp/m.sock", Name: "lingedge", User: "lingedge_app", Password: config.NewSecret("x"),
+		Maint: config.DatabaseMaint{User: "lingedge_maint", Password: config.NewSecret("y")}}
+	app := AppConfigFrom(d)
+	if app.Socket != "/tmp/m.sock" || app.Host != "" || app.Port != 0 {
+		t.Errorf("app: %+v", app)
+	}
+	m, ok := MaintConfigFrom(d)
+	if !ok || m.Socket != "/tmp/m.sock" || m.Host != "" || m.Port != 0 {
+		t.Errorf("maint: %+v", m)
+	}
+	if err := app.Validate(); err != nil {
+		t.Errorf("socket 配置应通过 Validate: %v", err)
+	}
+}

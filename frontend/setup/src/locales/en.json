@@ -1,0 +1,345 @@
+{
+  "app": {
+    "title": "LingEdge · Setup Wizard",
+    "brand": "LingEdge",
+    "tagline": "Intelligent Edge Cloud Platform",
+    "skip": "Skip to main content",
+    "language": "Language",
+    "serverNote": "Server response",
+    "stepsLabel": "Installation steps"
+  },
+  "lang": {
+    "zh-CN": "简体中文",
+    "en": "English"
+  },
+  "steps": {
+    "environment": "Environment check",
+    "database": "MySQL",
+    "redis": "Redis",
+    "init_db": "Initialize database",
+    "admin": "Create administrator",
+    "system": "Basic settings",
+    "keys": "Key initialization",
+    "complete": "Finish"
+  },
+  "nav": {
+    "stepOf": "Step {n} of {total}",
+    "back": "Back",
+    "next": "Next",
+    "done": "Completed",
+    "current": "Current step",
+    "pending": "Not completed",
+    "failed": "Failed"
+  },
+  "common": {
+    "required": "Required",
+    "optional": "Optional",
+    "copy": "Copy",
+    "copied": "Copied",
+    "copyFailed": "Copy failed, please select it manually",
+    "errorCode": "Error code",
+    "reasons": "Details",
+    "yes": "Yes",
+    "no": "No"
+  },
+  "gate": {
+    "title": "Verify the setup token",
+    "intro": "There is no administrator yet, so this wizard is open to anyone who can reach this page. Enter the setup token to prove you can access this server's terminal.",
+    "hint": "The token is shown once in the terminal that ran lingedge install server. If it is lost, root can run lingedge config setup-token --reset to generate a new one.",
+    "label": "Setup token",
+    "submit": "Verify and start",
+    "checking": "Verifying the token…",
+    "memoryOnly": "The token is kept only in this page's memory. It is never written to the address bar, cookies or browser storage, so you must enter it again after a refresh.",
+    "urlTokenIgnored": "A token parameter in the address bar was ignored and removed: the token must never appear in a URL. Enter it below.",
+    "empty": "Enter the setup token",
+    "rateLimited": "Too many attempts. Wait {seconds} seconds and try again."
+  },
+  "installed": {
+    "title": "Installation is complete and the wizard is closed",
+    "body": "This server has already been initialized and every wizard endpoint now returns 410 permanently. Sign in to the admin console instead. The wizard cannot be reopened; see the operations documentation if you really need to reinitialize."
+  },
+  "env": {
+    "title": "Environment check",
+    "description": "Checks the server version, system time, data directory, master key and how the wizard is listening. You cannot continue while a blocking item exists.",
+    "run": "Run checks",
+    "rerun": "Check again",
+    "blocking": "There are blocking items. Fix them as described and check again.",
+    "passed": "The environment check passed.",
+    "passedWithWarnings": "The environment check passed, but there are warnings to review.",
+    "emptyTitle": "No check items returned",
+    "emptyBody": "The server returned no results. Run the checks again.",
+    "severity": {
+      "info": "Passed",
+      "warn": "Warning",
+      "error": "Blocking"
+    },
+    "item": {
+      "server": {
+        "version": "Server version"
+      },
+      "system": {
+        "time": "System time"
+      },
+      "data_dir": {
+        "writable": "Data directory is writable"
+      },
+      "master_key": {
+        "readable": "Master key is readable (contents never shown)"
+      },
+      "migrations": {
+        "embedded": "Embedded migration set"
+      },
+      "server_env": "Environment identifier",
+      "listen": {
+        "loopback": "Wizard listen address"
+      },
+      "setup_token": {
+        "configured": "Setup token"
+      }
+    }
+  },
+  "db": {
+    "title": "MySQL",
+    "description": "Configure and test MySQL (8.0.16 or later, not MariaDB). The target database must be empty; the wizard never overwrites existing data.",
+    "resumeHint": "This step was completed earlier. If the server has restarted since, the migrate account password is no longer in memory and must be submitted again here (it is never written to disk, ADR-026).",
+    "mode": {
+      "label": "Account mode",
+      "create": "Create the database and accounts with a temporary administrator (recommended)",
+      "createHint": "The administrator credentials are used once in memory and zeroed right after the database and the three dedicated accounts are created. They are never written to disk.",
+      "existing": "Use a pre-created database and accounts",
+      "existingHint": "You must already have created an empty database and the three dedicated accounts, and you must provide the migrate account password."
+    },
+    "conn": {
+      "label": "Connection",
+      "tcp": "TCP host and port",
+      "socket": "Unix socket"
+    },
+    "field": {
+      "host": "Host",
+      "port": "Port",
+      "socket": "Unix socket path",
+      "socketHint": "Absolute path of the MySQL socket file. TLS is not needed over a socket.",
+      "database": "Database name",
+      "username": "Application account",
+      "pw": "Application account password",
+      "tls": "Connect with TLS",
+      "tlsHint": "Required for non-loopback hosts.",
+      "adminUsername": "Temporary administrator account",
+      "adminPw": "Temporary administrator password",
+      "migrateUsername": "Migrate account",
+      "migratePw": "Migrate account password",
+      "migratePwCreateHint": "Leave empty to let the server generate one, shown once on the last step.",
+      "migratePwExistingHint": "Required: kept in memory only, used to initialize the database, never written to disk.",
+      "maintUsername": "Maintenance account",
+      "maintPw": "Maintenance account password",
+      "maintPwHint": "Optional; in create mode the server generates one when empty.",
+      "fixedAccounts": "The dedicated account names are fixed by the migrations:",
+      "pwCreateHint": "Leave empty to generate a random password (stored only encrypted in the runtime credentials file, nothing to remember); at least 12 characters if you set one.",
+      "pwExistingHint": "The password of the pre-created lingedge_app account."
+    },
+    "advanced": "Advanced: migrate and maintenance accounts",
+    "submit": "Test connection and save",
+    "resultEmpty": "Nothing submitted yet: fill in the form above and choose Test connection and save.",
+    "ok": "MySQL checks passed and the credentials were encrypted into the runtime credentials file.",
+    "err": {
+      "hostRequired": "Enter the host",
+      "portRange": "The port must be between 1 and 65535",
+      "socketAbsolute": "The socket path must be absolute",
+      "required": "This field is required",
+      "databaseName": "Use only letters, digits, underscores and dollar signs, up to 64 characters"
+    },
+    "tlsRequired": "A non-loopback host requires TLS; tick Connect with TLS"
+  },
+  "redis": {
+    "title": "Redis",
+    "description": "Configure and test Redis (major version 8 or later). The wizard never runs FLUSHDB and never clears existing keys.",
+    "field": {
+      "address": "Address",
+      "addressHint": "Format: host:port",
+      "pw": "Password",
+      "pwHint": "Leave empty if there is none.",
+      "db": "Database number",
+      "tls": "Connect with TLS"
+    },
+    "submit": "Test connection and save",
+    "resultEmpty": "Nothing submitted yet: fill in the form above and choose Test connection and save.",
+    "ok": "Redis checks passed and the credentials were encrypted into the runtime credentials file.",
+    "err": {
+      "addressFormat": "The address must look like host:port",
+      "dbRange": "The database number must be between 0 and 15"
+    }
+  },
+  "init": {
+    "title": "Initialize database",
+    "description": "Runs every migration in-process and writes the seed data. A brand-new empty database has nothing to lose, so irreversible migrations need no extra confirmation.",
+    "run": "Start initialization",
+    "rerun": "Retry initialization",
+    "running": "Running migrations. Do not close this page…",
+    "ok": "Database initialization finished.",
+    "upToDateTitle": "The database is already up to date",
+    "upToDateBody": "There are no pending migrations.",
+    "alreadyDone": "The database was initialized earlier; there is no new migration list this time.",
+    "recovered": "The connection dropped during migration, but the server finished initializing (confirmed by a status query).",
+    "needDbStep": "Go back to the MySQL step and submit again",
+    "table": {
+      "caption": "Applied migrations",
+      "version": "Version",
+      "name": "Name",
+      "class": "Class",
+      "duration": "Duration",
+      "durationMs": "{n} ms"
+    },
+    "class": {
+      "reversible": "Reversible",
+      "expand": "Forward-compatible",
+      "irreversible": "Irreversible"
+    }
+  },
+  "admin": {
+    "title": "Create administrator",
+    "description": "This is the only initial administrator of the platform. Only you set the password; it never appears in any file or log, and there is no default password.",
+    "done": "The administrator was created.",
+    "doneBefore": "This step was completed earlier; the administrator already exists.",
+    "field": {
+      "email": "Email",
+      "displayName": "Display name",
+      "pw": "Password",
+      "confirm": "Confirm password",
+      "locale": "Interface language",
+      "enableTotp": "Enable TOTP two-step verification now (recommended)"
+    },
+    "strength": {
+      "label": "Password strength",
+      "0": "Not entered",
+      "1": "Does not meet the rules",
+      "2": "Acceptable",
+      "3": "Good",
+      "4": "Strong"
+    },
+    "rule": {
+      "title": "Password rules",
+      "length": "12 to 128 characters long",
+      "classes": "At least three character classes (upper case, lower case, digits, symbols); passphrases of 20 characters or more need only two",
+      "distinct": "At least 5 distinct characters",
+      "noEmail": "Does not contain the local part of the email",
+      "server": "The server also rejects common weak password patterns and is the final judge.",
+      "met": "Met",
+      "unmet": "Not met"
+    },
+    "err": {
+      "email": "Enter a valid email address",
+      "name": "Enter a display name",
+      "weak": "The password does not meet the rules; check the list below",
+      "mismatch": "The two passwords do not match"
+    },
+    "submit": "Create administrator",
+    "totp": {
+      "title": "Bind an authenticator",
+      "intro": "Scan the QR code with an authenticator app, or enter the key manually, then enter the 6-digit code the app shows. The key is shown only this once.",
+      "qrLabel": "TOTP enrollment QR code",
+      "manualKey": "Key for manual entry",
+      "uri": "otpauth link",
+      "code": "6-digit code",
+      "confirm": "Confirm and enable",
+      "codeFormat": "The code is 6 digits"
+    },
+    "recovery": {
+      "title": "Recovery codes",
+      "warning": "The recovery codes are shown only this once and only their hashes are stored. Save them to a password manager or offline right now; they are the only way back in if you lose the authenticator.",
+      "ack": "I have saved the recovery codes safely"
+    }
+  },
+  "system": {
+    "title": "Basic settings",
+    "description": "Site name, public access URL, run mode, time zone and default language. You can change them later in system settings.",
+    "done": "The basic settings were saved.",
+    "field": {
+      "runMode": "Run mode",
+      "selfHosted": "Self-hosted",
+      "commercial": "Commercial",
+      "runModeHint": "Commercial mode enables plans and billing features (P5); you can change it later in system settings.",
+      "brandName": "Platform name",
+      "brandNameEn": "Platform name (English)",
+      "supportEmail": "Support email",
+      "baseUrl": "Access URL",
+      "baseUrlHint": "The public address of the admin console, including the scheme, for example https plus your domain.",
+      "locale": "Default language",
+      "timezone": "Time zone",
+      "timezoneHint": "An IANA time zone name. Storage and the API always use UTC."
+    },
+    "err": {
+      "baseUrl": "Enter a full address starting with http:// or https://",
+      "timezone": "Enter a valid IANA time zone name",
+      "email": "Enter a valid email address"
+    },
+    "submit": "Save settings"
+  },
+  "keys": {
+    "title": "Key initialization",
+    "description": "Generates the internal identity and signing keys: the private node CA, the config signing key and the Server gRPC certificate, all stored encrypted with master.key.",
+    "run": "Initialize keys",
+    "rerun": "Run again (idempotent)",
+    "ok": "The internal identity and signing keys are initialized."
+  },
+  "masterKey": {
+    "title": "Important: keep master.key apart from database backups",
+    "body": "master.key is the master key that encrypts every secret (passwords, private keys, tokens). Keeping it next to a database backup is like leaving the key in the lock, and if you lose it every ciphertext in the database becomes permanently unreadable. Back up master.key to a different medium or location right now.",
+    "ack": "I understand that master.key must be kept apart from database backups, and I have arranged a separate backup"
+  },
+  "complete": {
+    "title": "Finish installation",
+    "description": "Review the reminders below, then finish. This writes install.lock, closes the wizard permanently and invalidates the setup token immediately.",
+    "submit": "Finish installation",
+    "doneTitle": "Installation complete",
+    "doneBody": "install.lock was written, the setup wizard is closed and the setup token is invalid.",
+    "adminUrl": "Admin console URL",
+    "adminUrlMissing": "The access URL you entered earlier is no longer on this page. Enter the access URL you set in the basic settings:",
+    "adminUrlOpen": "Open the admin console",
+    "adminLogin": "Sign in with the administrator email and password you just created.",
+    "migrate": {
+      "title": "Migrate account password (shown only once)",
+      "body": "The migrate password was generated by the server and is not stored. Copy it now and run the command below as root on the server to save it; if you miss it, you can reset it later with credential reset.",
+      "command": "Command that saves the migrate credentials",
+      "ack": "I have saved the migrate password"
+    },
+    "next": {
+      "title": "Suggested next steps",
+      "tempAdmin": "Delete the temporary database administrator account used to create the database (if any).",
+      "credential": "Save the migrate credentials as root on the server; upgrades need them.",
+      "backup": "Back up master.key separately and keep it apart from database backups.",
+      "node": "Register the first node, then create the first site."
+    }
+  },
+  "errors": {
+    "title": "The operation failed",
+    "hint": {
+      "setup": {
+        "token_invalid": "The setup token is missing or wrong. Check the token shown in the terminal; repeated failures are rate limited.",
+        "already_installed": "Installation is complete and the wizard is permanently closed.",
+        "insecure_transport": "This endpoint carries credentials and needs a secure transport: use an SSH tunnel to the loopback address, or go through a TLS reverse proxy.",
+        "database_not_empty": "The target database is not empty. Choose an empty database or clean it first; the wizard never overwrites existing data.",
+        "precheck_failed": "A precheck failed: follow the detailed reasons below and try again.",
+        "mode_active": "The server is still in setup mode."
+      },
+      "auth": {
+        "pw_policy": "The password does not meet the strength rules; check the password rules list."
+      },
+      "validation": {
+        "failed": "The submitted content failed validation; check the marked fields."
+      },
+      "resource": {
+        "conflict": "This action is not allowed in the current state, or an earlier step is not complete. Follow the reasons below."
+      },
+      "rate_limit": {
+        "exceeded": "Too many requests. Try again later."
+      },
+      "internal": {
+        "error": "Internal server error. Use the Request ID to find it in the server log."
+      },
+      "client": {
+        "network_error": "No response from the server: check that the service is still running and that the network or SSH tunnel is still up.",
+        "bad_response": "The server returned a response that could not be understood."
+      }
+    }
+  }
+}

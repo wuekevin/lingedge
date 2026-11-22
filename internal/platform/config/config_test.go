@@ -827,3 +827,30 @@ func TestRuntimeCredentialsFileAndDatabaseTLSKeys(t *testing.T) {
 		t.Errorf("缺省应为空: %v", err)
 	}
 }
+
+// CC-13：database.socket 与 host 互斥、必须是规范化绝对路径；仅配置 socket 即满足运行期的连接目标要求；环境变量可覆盖。
+func TestDatabaseSocket(t *testing.T) {
+	const sockYAML = "server:\n  env: test\nredis:\n  addr: 127.0.0.1:6379\ndatabase:\n  socket: /var/run/mysqld/mysqld.sock\n  name: lingedge_test\n  user: lingedge_app\n"
+	cfg, err := Parse([]byte(sockYAML), Options{Environ: []string{kv("LINGEDGE_DATABASE__PASSWORD", "rt-pass-1")}, RequireRuntime: true})
+	if err != nil {
+		t.Fatalf("仅 socket 应满足运行期连接目标: %v", err)
+	}
+	if cfg.Database.Socket != "/var/run/mysqld/mysqld.sock" || cfg.Database.Host != "" {
+		t.Errorf("socket 未解析: %+v", cfg.Database)
+	}
+	env := mustParse(t, "server:\n  env: test\n", "LINGEDGE_DATABASE__SOCKET=/tmp/x.sock")
+	if env.Database.Socket != "/tmp/x.sock" {
+		t.Errorf("环境变量应能设置 socket: %q", env.Database.Socket)
+	}
+	for name, y := range map[string]string{
+		"与 host 同设": "database:\n  host: 127.0.0.1\n  socket: /tmp/x.sock\n",
+		"相对路径":      "database:\n  socket: x.sock\n",
+		"含 ..":      "database:\n  socket: /tmp/../x.sock\n",
+		"过长":        "database:\n  socket: /" + strings.Repeat("a", 120) + "\n",
+	} {
+		_, err := Parse([]byte(y), Options{Environ: []string{}})
+		if !hasProblem(problems(t, err), "database.socket", "") {
+			t.Errorf("%s 应报 database.socket: %v", name, err)
+		}
+	}
+}

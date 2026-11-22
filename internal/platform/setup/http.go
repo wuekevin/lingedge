@@ -1,7 +1,6 @@
 package setup
 
 import (
-	_ "embed"
 	"errors"
 	"net/http"
 	"net/netip"
@@ -16,9 +15,6 @@ import (
 	"github.com/wuekevin/lingedge/internal/platform/httpx"
 	"github.com/wuekevin/lingedge/internal/platform/uid"
 )
-
-//go:embed static/setup.html
-var pageHTML []byte
 
 // 路由元数据（与 openapi.yaml 的 /public/setup/* 一一对应；x-public: true、x-permissions: []、x-tenant-scope: public、x-phase: M1）。
 var (
@@ -99,16 +95,6 @@ func (s *Service) Register(r *httpx.Router) error {
 }
 
 var errHandled = errors.New("handled")
-
-// RegisterPage 注册内嵌的 /setup 静态页（仅 setup mode）。
-func (s *Service) RegisterPage(r *httpx.Router) error {
-	return r.HandlePage("/setup", func(c *gin.Context) {
-		c.Header("Cache-Control", "no-store")
-		c.Header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
-		c.Header("X-Content-Type-Options", "nosniff")
-		c.Data(http.StatusOK, "text/html; charset=utf-8", pageHTML)
-	})
-}
 
 // guarded 是所有向导接口的前置链（顺序即规格）：已安装 → 410；来源限流 → 429；X-Setup-Token（缺少/错误 → 401 并节流；已被节流 → 429）；
 // 携带口令的接口在「非回环监听且非 TLS」时 → 400 setup.insecure_transport；最后才解析请求体。

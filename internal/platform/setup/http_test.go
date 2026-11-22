@@ -10,7 +10,7 @@ import (
 	"github.com/wuekevin/lingedge/internal/platform/uid"
 )
 
-// 正常模式（已安装）：全部向导 operation 永久 410 setup.already_installed（MIN-04），带不带 token 一样，不泄漏任何信息；/setup 页不存在。
+// 正常模式（已安装）：全部向导 operation 永久 410 setup.already_installed（MIN-04），带不带 token 一样，不泄漏任何信息。
 func TestInstalledModeReturns410ForEveryOperation(t *testing.T) {
 	svc, err := New(Options{Installed: true})
 	if err != nil {
@@ -43,11 +43,6 @@ func TestInstalledModeReturns410ForEveryOperation(t *testing.T) {
 			}
 		}
 	}
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, httptest.NewRequest("GET", "/setup", nil))
-	if w.Code != http.StatusNotFound {
-		t.Errorf("正常模式没有 /setup 页: %d", w.Code)
-	}
 }
 
 // 路由元数据：全部公开、无权限、public scope、M1；写 operation 声明审计（getSetupStatus 不审计），与 openapi 的一致性由 make openapi-check 校验。
@@ -63,24 +58,4 @@ func TestMetasShape(t *testing.T) {
 			t.Errorf("%s 校验: %v", m.OperationID, p)
 		}
 	}
-}
-
-func TestStaticPagePlaceholderHasNoSecretsOrScripts(t *testing.T) {
-	if len(pageHTML) == 0 {
-		t.Fatal("内嵌页为空")
-	}
-	for _, bad := range []string{"<script", "onclick", "http://", "https://"} {
-		if contains(string(pageHTML), bad) {
-			t.Errorf("占位页不应含 %q", bad)
-		}
-	}
-}
-
-func contains(s, sub string) bool {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
 }

@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -51,11 +52,25 @@ var (
 type Target struct {
 	Host string
 	Port int
+	// Socket 非空时走 Unix 域套接字（与 Host/Port 互斥，CC-13）；套接字连接无需 TLS。
+	Socket string
 	// TLS：""（仅回环）、true、false、skip-verify、preferred。
 	TLS string
 }
 
 func (t Target) validate() error {
+	if t.Socket != "" {
+		if t.Host != "" || t.Port != 0 {
+			return errors.New("provision: socket 与 host/port 只能设置其一")
+		}
+		if !ValidSocketPath(t.Socket) {
+			return errors.New("provision: socket 必须是规范化的绝对路径（无 NUL/换行，最长 100 字节）")
+		}
+		if t.TLS != "" && t.TLS != "false" {
+			return errors.New("provision: Unix 套接字连接不使用 TLS（tls 须留空或 false）")
+		}
+		return nil
+	}
 	if t.Host == "" || (net.ParseIP(t.Host) == nil && !reHost.MatchString(t.Host)) {
 		return errors.New("provision: host 必须是主机名或 IP")
 	}
@@ -71,6 +86,11 @@ func (t Target) validate() error {
 		return errors.New("provision: 非回环主机必须显式设置 tls（口令与数据不得在网络上明文传输；确需明文请显式设为 false）")
 	}
 	return nil
+}
+
+// ValidSocketPath 报告 p 是否是可接受的 MySQL Unix 套接字路径：规范化绝对路径、无 NUL/换行、长度 ≤100（sun_path 上限约 104–108）。
+func ValidSocketPath(p string) bool {
+	return p != "" && len(p) <= 100 && filepath.IsAbs(p) && filepath.Clean(p) == p && !strings.ContainsAny(p, "\x00\r\n")
 }
 
 func isLoopback(h string) bool {
@@ -135,7 +155,11 @@ func Open(ctx context.Context, t Target, user string, pw config.Secret, database
 	}
 	c := mysql.NewConfig()
 	c.User, c.Passwd, c.DBName = user, pw.Reveal(), database
-	c.Net, c.Addr = "tcp", net.JoinHostPort(t.Host, strconv.Itoa(t.Port))
+	if t.Socket != "" {
+		c.Net, c.Addr = "unix", t.Socket
+	} else {
+		c.Net, c.Addr = "tcp", net.JoinHostPort(t.Host, strconv.Itoa(t.Port))
+	}
 	c.Collation = "utf8mb4_0900_ai_ci"
 	c.Timeout, c.ReadTimeout, c.WriteTimeout = 10*time.Second, 120*time.Second, 120*time.Second
 	c.MultiStatements, c.InterpolateParams = false, false

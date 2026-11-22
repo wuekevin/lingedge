@@ -401,3 +401,62 @@ func TestWriteRefusesWithoutMasterKey(t *testing.T) {
 		t.Error("缺少必填字段应拒绝")
 	}
 }
+
+// CC-13：socket 目标的往返、与 host/port 互斥、Merge 成组取用与 sameTarget 判定（口令不发往不同目标）。
+func TestSocketTarget(t *testing.T) {
+	box := newBox(t, "k1:"+key(t)+"\n")
+	path := filepath.Join(t.TempDir(), "data", "secrets", "runtime-credentials.json")
+	ctx := context.Background()
+	app := "app-" + rnd(t)
+	in := dbcred.DatabaseInput{Socket: "/var/run/mysqld/mysqld.sock", Name: "lingedge", AppUser: "lingedge_app", AppPass: config.NewSecret(app)}
+	bad := in
+	bad.Host, bad.Port = "127.0.0.1", 3306
+	if err := dbcred.WriteDatabase(ctx, path, box, bad); err == nil {
+		t.Error("socket 与 host/port 同设应拒绝")
+	}
+	rel := in
+	rel.Socket = "mysql.sock"
+	if err := dbcred.WriteDatabase(ctx, path, box, rel); err == nil {
+		t.Error("相对路径应拒绝")
+	}
+	if err := dbcred.WriteDatabase(ctx, path, box, in); err != nil {
+		t.Fatal(err)
+	}
+	f, err := dbcred.Load(path)
+	if err != nil || f.Database.Socket != in.Socket || f.Database.Host != "" || f.Database.Port != 0 {
+		t.Fatalf("往返: %v %+v", err, f.Database)
+	}
+	if raw, _ := os.ReadFile(path); strings.Contains(string(raw), app) || strings.Contains(string(raw), `"host"`) {
+		t.Error("文件不应含明文口令或空 host 字段")
+	}
+	newCfg := func() *config.Config {
+		c := config.Defaults()
+		c.Server.DataDir = filepath.Dir(filepath.Dir(path))
+		return &c
+	}
+	c := newCfg()
+	if _, err := dbcred.Merge(ctx, c, box, dbcred.MergeOptions{}); err != nil || c.Database.Socket != in.Socket || c.Database.Host != "" || c.Database.Port != 0 || c.Database.Password.Reveal() != app {
+		t.Fatalf("缺省应整组取自文件: %v %+v", err, c.Database)
+	}
+	// 显式给了另一个 socket 目标：文件里的口令不发往它。
+	c = newCfg()
+	c.Database.Socket, c.Database.Name, c.Database.User = "/tmp/other.sock", "lingedge", "lingedge_app"
+	if _, err := dbcred.Merge(ctx, c, box, dbcred.MergeOptions{}); err != nil || c.Database.Password.IsSet() {
+		t.Errorf("不同 socket 目标不得取用文件口令: %v", err)
+	}
+	// 显式给了 TCP 目标：同样不取。
+	c = newCfg()
+	c.Database.Host, c.Database.Name, c.Database.User = "127.0.0.1", "lingedge", "lingedge_app"
+	if _, err := dbcred.Merge(ctx, c, box, dbcred.MergeOptions{}); err != nil || c.Database.Password.IsSet() {
+		t.Errorf("TCP 目标不得取用 socket 文件口令: %v", err)
+	}
+	// 文件里 socket 与 host 并存 → 拒绝加载。
+	raw, _ := os.ReadFile(path)
+	tampered := strings.Replace(string(raw), `"socket"`, `"host": "127.0.0.1", "socket"`, 1)
+	if err := os.WriteFile(path, []byte(tampered), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dbcred.Load(path); err == nil {
+		t.Error("socket 与 host 并存应拒绝加载")
+	}
+}

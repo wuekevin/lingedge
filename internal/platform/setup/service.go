@@ -465,7 +465,7 @@ func (s *Service) ensurePost(ctx context.Context) (*post, error) {
 	if err != nil {
 		return nil, err
 	}
-	app, err := db.OpenApp(ctx, db.Config{Host: f.Database.Host, Port: f.Database.Port, Name: f.Database.Name, User: f.Database.App.User, Password: pw, TLS: f.Database.TLS})
+	app, err := db.OpenApp(ctx, db.Config{Host: f.Database.Host, Port: f.Database.Port, Socket: f.Database.Socket, Name: f.Database.Name, User: f.Database.App.User, Password: pw, TLS: f.Database.TLS})
 	if err != nil {
 		return nil, err
 	}

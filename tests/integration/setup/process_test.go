@@ -232,8 +232,10 @@ func TestRealProcessSetupModeLifecycle(t *testing.T) {
 	if code, _ := httpStatus(t, "GET", p.url+"/api/v1/public/setup/status", nil, "X-Setup-Token", w.token); code != 410 {
 		t.Errorf("正常模式下向导路由应 410: %d", code)
 	}
-	if code, _ := httpStatus(t, "GET", p.url+"/setup", nil); code != 404 {
-		t.Errorf("正常模式下 /setup 应 404: %d", code)
+	if code, m := httpStatus(t, "GET", p.url+"/setup", nil); code != 410 {
+		t.Errorf("正常模式下 /setup 应 410（setup.already_installed，Story 1.37 / MIN-04）: %d", code)
+	} else if e, _ := m["error"].(map[string]any); e == nil || e["code"] != "setup.already_installed" {
+		t.Errorf("/setup 的 410 应带稳定错误码 setup.already_installed: %v", m)
 	}
 	if code, _ := httpStatus(t, "GET", p.url+"/healthz/ready", nil); code != 200 {
 		t.Errorf("正常模式 /healthz/ready 应 200: %d", code)

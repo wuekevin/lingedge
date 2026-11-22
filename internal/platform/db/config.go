@@ -81,7 +81,22 @@ func PoolDefaults(r Role) PoolLimits {
 // AppConfigFrom 由**合并后**的服务端配置（server.yaml 的 database 节 + 显式口令通道 + 运行期凭据文件，见 dbcred.Merge）生成 app 池配置。
 // 调用方必须先经 dbcred.Merge（server.Run 与各子命令共用同一合并入口）；本函数只做字段映射。migrate 凭据不在此处（ADR-026）。
 func AppConfigFrom(d config.Database) Config {
-	return Config{Host: d.Host, Port: d.Port, Name: d.Name, User: d.User, Password: d.Password, TLS: d.TLS}
+	return Config{Host: hostOf(d), Port: portOf(d), Socket: d.Socket, Name: d.Name, User: d.User, Password: d.Password, TLS: d.TLS}
+}
+
+// hostOf/portOf：配置了 socket 时连接目标只有 socket（host/port 清空，db.Config 要求互斥）。
+func hostOf(d config.Database) string {
+	if d.Socket != "" {
+		return ""
+	}
+	return d.Host
+}
+
+func portOf(d config.Database) int {
+	if d.Socket != "" {
+		return 0
+	}
+	return d.Port
 }
 
 // MaintConfigFrom 由合并后的服务端配置生成 maint 池配置；维护账号未配置（用户名或口令缺失）时 ok=false。
@@ -90,7 +105,7 @@ func MaintConfigFrom(d config.Database) (cfg Config, ok bool) {
 	if !d.Maint.Configured() {
 		return Config{}, false
 	}
-	return Config{Host: d.Host, Port: d.Port, Name: d.Name, User: d.Maint.User, Password: d.Maint.Password, TLS: d.TLS}, true
+	return Config{Host: hostOf(d), Port: portOf(d), Socket: d.Socket, Name: d.Name, User: d.Maint.User, Password: d.Maint.Password, TLS: d.TLS}, true
 }
 
 var (

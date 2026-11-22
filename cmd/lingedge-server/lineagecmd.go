@@ -114,7 +114,7 @@ func lineageMain(args []string, stdout, stderr io.Writer, environ []string) int 
 
 // requireDatabase 检查 database 节的必需项（lineage/迁移类命令不需要 Redis 与 server.env）。
 func requireDatabase(c *config.Config) error {
-	if c.Database.Host == "" || c.Database.Name == "" || c.Database.User == "" || !c.Database.Password.IsSet() {
+	if (c.Database.Host == "" && c.Database.Socket == "") || c.Database.Name == "" || c.Database.User == "" || !c.Database.Password.IsSet() {
 		return errors.New("缺少数据库连接配置：需要 database.host/name/user 与口令（运行期凭据文件、环境变量 LINGEDGE_DATABASE__PASSWORD 或 database.password_file）")
 	}
 	return nil

@@ -39,6 +39,7 @@ func dbMain(args []string, stdout, stderr io.Writer, environ []string) int {
 	cfgPath := fl.String("config", "", "server.yaml 路径（root 运行时须属主 root）")
 	host := fl.String("host", "", "数据库主机")
 	port := fl.Int("port", 0, "数据库端口")
+	socket := fl.String("socket", "", "MySQL Unix 套接字路径（与 --host/--port 互斥）")
 	tls := fl.String("tls", "", "TLS 模式")
 	role := fl.String("role", "", "app 或 maint")
 	admin := fl.String("admin-user", "", "数据库管理员用户名")
@@ -81,8 +82,17 @@ func dbMain(args []string, stdout, stderr io.Writer, environ []string) int {
 	}
 	// 连接目标：命令行 ＞ root 属主 server.yaml；绝不取自运行期凭据文件。
 	tgt := provision.Target{Host: cfg.Database.Host, Port: cfg.Database.Port, TLS: cfg.Database.TLS}
+	if cfg.Database.Socket != "" {
+		tgt = provision.Target{Socket: cfg.Database.Socket}
+	}
+	if *socket != "" {
+		tgt = provision.Target{Socket: *socket}
+	}
 	if *host != "" {
-		tgt.Host = *host
+		tgt.Host, tgt.Socket = *host, ""
+		if tgt.Port == 0 {
+			tgt.Port = 3306
+		}
 	}
 	if *port != 0 {
 		tgt.Port = *port
@@ -90,8 +100,8 @@ func dbMain(args []string, stdout, stderr io.Writer, environ []string) int {
 	if *tls != "" {
 		tgt.TLS = *tls
 	}
-	if tgt.Host == "" {
-		_, _ = fmt.Fprintln(stderr, "db credential rotate: 缺少连接目标：需要 --host（或 --config 指向含 database.host 的 root 属主 server.yaml）")
+	if tgt.Host == "" && tgt.Socket == "" {
+		_, _ = fmt.Fprintln(stderr, "db credential rotate: 缺少连接目标：需要 --host 或 --socket（或 --config 指向含 database.host/socket 的 root 属主 server.yaml）")
 		return 1
 	}
 	apw, err := migrate.AdminSecret(env, stderr)

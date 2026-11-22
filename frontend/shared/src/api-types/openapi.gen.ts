@@ -2,7 +2,7 @@
 // 自动生成，请勿手改。来源：docs/api/openapi.yaml；生成器：frontend/scripts/gen-api-types.mjs（openapi-typescript 7.13.0）。
 // 仅含类型，不含任何运行时代码、API 客户端或端点调用（ADR-014 §2）。每个应用只 import 自己需要的 operation。
 // make contract-check 重新生成并比对：openapi.yaml 变动而本文件未同步即失败（漂移）。
-// openapi.yaml sha256: 054e894c9ac57f74319f171e2552e9c9e9bc9707177ddf6158c9ff669b374caf
+// openapi.yaml sha256: f756d1ad5d42c317621f0f6e5fa47d75b99c9203f784b2f5370bc3913d5a9662
 
 export type paths = {
     "/acme/accounts": {
@@ -8617,7 +8617,8 @@ export type components = {
             /** @description 若提供有建库权限的凭据，可建立专用库与用户；不得覆盖已有库（FR-6）。为 true 时须同时提供 admin_username/admin_password（ADR-026） */
             create_if_missing?: boolean;
             database: string;
-            host: string;
+            /** @description MySQL 主机（TCP 连接）。与 socket 互斥；二者必须恰设其一（CC-13） */
+            host?: string;
             /**
              * Format: password
              * @description 预建账号模式下可选；建账号模式下由服务端生成。写入运行期凭据文件（信封加密，ADR-026 §3）
@@ -8637,7 +8638,10 @@ export type components = {
              * @description 运行期应用账号（lingedge_app）的口令（建账号模式下为将创建账号的口令）。向导成功后以信封加密写入运行期凭据文件（lingedge:lingedge 0600，ADR-026 §3），不进日志
              */
             password: string;
-            port: number;
+            /** @description MySQL 端口（TCP 连接）。与 socket 互斥；设置 host 时必填（CC-13） */
+            port?: number;
+            /** @description MySQL Unix 域套接字的绝对路径（如宝塔/发行版自带 MySQL 的 mysql.sock）。设置后不得再设置 host/port；该连接目标同样写入运行期凭据文件，Server 运行期、迁移与维护连接均经此套接字，且无需 TLS（CC-13） */
+            socket?: string;
             tls?: boolean;
             username: string;
         };
@@ -8664,6 +8668,19 @@ export type components = {
         };
         SetupStepResult: {
             message?: string;
+            /** @description 仅 setupInitializeDb 返回：本次实际应用的迁移（按版本升序，逐个给出分类与耗时），供向导逐条展示（CC-13）。数据库已是最新时为空数组 */
+            migrations?: {
+                /**
+                 * @description 迁移分类（ADR-013 §1）
+                 * @enum {string}
+                 */
+                category: "reversible" | "expand" | "irreversible";
+                /** Format: int64 */
+                duration_ms: number;
+                name: string;
+                /** Format: int64 */
+                version: number;
+            }[];
             next?: string | null;
             ok: boolean;
             /** @description 仅返回一次的机密：setupComplete 在迁移口令由服务端自动生成时返回 migrate_password（Cache-Control no-store；不入日志/审计；响应后服务端清零，ADR-026 §5）；setupCreateAdmin 在绑定 TOTP 时返回 totp_secret/totp_otpauth_uri/recovery_codes（CC-12） */

@@ -1,5 +1,5 @@
-// 用法：node scripts/check-isolation.mjs [--console <dir>] [--admin <dir>] [--openapi <file>]
-// 缺省检查 frontend/dist/console 与 frontend/dist/admin。任一违规 → 退出码 1；目录缺失 → 退出码 2（不空转通过）。
+// 用法：node scripts/check-isolation.mjs [--console <dir>] [--admin <dir>] [--setup <dir>] [--openapi <file>]
+// 缺省检查 frontend/dist/console、frontend/dist/admin 与 frontend/dist/setup（安装向导）。任一违规 → 退出码 1；目录缺失 → 退出码 2（不空转通过）。
 import fs from 'node:fs';
 import path from 'node:path';
 import { checkIsolation } from './lib/isolation.mjs';
@@ -12,6 +12,7 @@ const arg = (name, dflt) => {
 };
 const consoleDir = arg('--console', path.join(FRONTEND_ROOT, 'dist/console'));
 const adminDir = arg('--admin', path.join(FRONTEND_ROOT, 'dist/admin'));
+const setupDir = arg('--setup', path.join(FRONTEND_ROOT, 'dist/setup'));
 const openapi = arg('--openapi', OPENAPI_YAML);
 
 const manifest = platformManifest(loadOpenapi(openapi));
@@ -23,13 +24,13 @@ if (manifest.shared.length > 0) {
 
 let failed = false;
 try {
-  for (const [role, dir] of [['console', consoleDir], ['admin', adminDir]]) {
+  for (const [role, dir] of [['console', consoleDir], ['admin', adminDir], ['setup', setupDir]]) {
     const r = checkIsolation({ distDir: dir, role, manifest, adminPrefixes });
     if (r.violations.length > 0) {
       failed = true;
       for (const v of r.violations) console.error(`${role} 产物 ${v.file}:${v.line}：含 ${v.what}，命中 ${JSON.stringify(v.match)}`);
     }
-    console.log(`${role} 产物隔离检查${r.violations.length > 0 ? '失败' : '通过'}：扫描 ${r.scannedFiles} 个文件${role === 'console' ? `，${r.templates} 个路径模板` : ''}`);
+    console.log(`${role} 产物隔离检查${r.violations.length > 0 ? '失败' : '通过'}：扫描 ${r.scannedFiles} 个文件${role === 'console' || role === 'setup' ? `，${r.templates} 个路径模板` : ''}`);
   }
 } catch (e) {
   console.error(String(e.message ?? e));

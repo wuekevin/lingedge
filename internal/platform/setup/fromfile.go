@@ -41,6 +41,7 @@ type FromFile struct {
 	Database struct {
 		Host    string      `yaml:"host"`
 		Port    int         `yaml:"port"`
+		Socket  string      `yaml:"socket"`
 		Name    string      `yaml:"name"`
 		TLS     bool        `yaml:"tls"`
 		Admin   fileAccount `yaml:"admin"`
@@ -191,7 +192,7 @@ func (s *Service) RunHeadless(ctx context.Context, ff *FromFile, residual bool) 
 		res.Steps = append(res.Steps, HeadlessStep{Step: StepEnvironment, Message: "环境检查通过"})
 	}
 	d := ff.Database
-	in := DatabaseInput{Host: d.Host, Port: d.Port, Database: d.Name, Username: firstNonEmpty(d.App.User, "lingedge_app"), TLS: d.TLS,
+	in := DatabaseInput{Host: d.Host, Port: d.Port, Socket: d.Socket, Database: d.Name, Username: firstNonEmpty(d.App.User, "lingedge_app"), TLS: d.TLS,
 		MigrateUsername: d.Migrate.User, MaintUsername: firstNonEmpty(d.Maint.User, ""), CreateIfMissing: d.Admin.User != "", AdminUsername: d.Admin.User, AdminPassword: d.Admin.Value}
 	var err error
 	if in.Password, err = genOr(d.App.Value); err != nil && in.CreateIfMissing {

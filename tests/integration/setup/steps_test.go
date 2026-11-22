@@ -28,9 +28,9 @@ func TestSetupModeRouteSurface(t *testing.T) {
 		return res, sb.String()
 	}
 	res, body := get("GET", "/setup")
-	if res.StatusCode != 200 || !strings.Contains(res.Header.Get("Content-Type"), "text/html") || !strings.Contains(body, "setup mode") ||
+	if res.StatusCode != 200 || !strings.Contains(res.Header.Get("Content-Type"), "text/html") || !strings.Contains(body, `<div id="app">`) ||
 		!strings.Contains(res.Header.Get("Cache-Control"), "no-store") || !strings.Contains(res.Header.Get("Content-Security-Policy"), "default-src 'none'") {
-		t.Errorf("/setup 应返回内嵌占位页（no-store、严格 CSP）: %d %v", res.StatusCode, res.Header)
+		t.Errorf("/setup 应返回内嵌的向导 SPA 入口（no-store、严格 CSP；Story 1.37）: %d %v", res.StatusCode, res.Header)
 	}
 	if res, _ = get("GET", "/healthz"); res.StatusCode != 200 {
 		t.Errorf("/healthz 存活探针应 200: %d", res.StatusCode)

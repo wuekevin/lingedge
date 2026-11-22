@@ -20,13 +20,17 @@
     "lint:eslint": "eslint . --max-warnings 0",
     "lint": "pnpm run check:deps && pnpm run lint:guards && pnpm run lint:eslint",
     "typecheck": "pnpm -r --workspace-concurrency=1 run typecheck",
-    "build": "pnpm --filter @lingedge/admin run build && pnpm --filter @lingedge/console run build",
+    "build": "pnpm --filter @lingedge/admin run build && pnpm --filter @lingedge/console run build && pnpm --filter @lingedge/setup run build",
+    "build:setup": "pnpm --filter @lingedge/setup run build",
+    "sync:embed": "node scripts/sync-setup-embed.mjs",
+    "check:embed": "node scripts/sync-setup-embed.mjs --check",
     "check:isolation": "node scripts/check-isolation.mjs",
     "check:mock": "node scripts/check-mock.mjs",
     "test": "vitest run",
+    "test:setup": "vitest run --project setup",
     "test:shared": "vitest run --project shared",
     "test:selftest": "vitest run --project scripts",
-    "check": "pnpm run lint && pnpm run check:tokens && pnpm run check:contrast && pnpm run check:i18n && pnpm run check:types && pnpm run typecheck && pnpm run test && pnpm run build && pnpm run check:isolation && pnpm run check:mock"
+    "check": "pnpm run lint && pnpm run check:tokens && pnpm run check:contrast && pnpm run check:i18n && pnpm run check:types && pnpm run typecheck && pnpm run test && pnpm run build && pnpm run check:embed && pnpm run check:isolation && pnpm run check:mock"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

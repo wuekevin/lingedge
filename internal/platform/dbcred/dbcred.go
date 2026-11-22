@@ -68,12 +68,14 @@ type Account struct {
 
 // Database 是 database 段。
 type Database struct {
-	Host  string   `json:"host"`
-	Port  int      `json:"port"`
-	Name  string   `json:"name"`
-	TLS   string   `json:"tls,omitempty"`
-	App   Account  `json:"app"`
-	Maint *Account `json:"maint,omitempty"`
+	Host string `json:"host,omitempty"`
+	Port int    `json:"port,omitempty"`
+	// Socket 是 MySQL Unix 域套接字路径（CC-13）；与 host/port 互斥。
+	Socket string   `json:"socket,omitempty"`
+	Name   string   `json:"name"`
+	TLS    string   `json:"tls,omitempty"`
+	App    Account  `json:"app"`
+	Maint  *Account `json:"maint,omitempty"`
 }
 
 // Redis 是 redis 段。
@@ -140,6 +142,14 @@ func Load(path string) (*File, error) {
 	}
 	if out.V != FileVersion {
 		return nil, invalid("未知版本 %d", out.V)
+	}
+	if d := out.Database; d != nil {
+		if d.Socket != "" && (d.Host != "" || d.Port != 0) {
+			return nil, invalid("database.socket 与 host/port 互斥")
+		}
+		if d.Socket != "" && !validSocket(d.Socket) {
+			return nil, invalid("database.socket 不是规范化的绝对路径")
+		}
 	}
 	return &out, nil
 }
@@ -221,6 +231,7 @@ func seal(ctx context.Context, box *secretbox.Box, pw config.Secret, rc secretbo
 type DatabaseInput struct {
 	Host      string
 	Port      int
+	Socket    string // 与 Host/Port 互斥（CC-13）
 	Name      string
 	TLS       string
 	AppUser   string
@@ -231,7 +242,14 @@ type DatabaseInput struct {
 
 // WriteDatabase 写（或替换）database 段，保留已有 redis 段。
 func WriteDatabase(ctx context.Context, path string, box *secretbox.Box, in DatabaseInput) error {
-	if in.Host == "" || in.Port < 1 || in.Name == "" || in.AppUser == "" || !in.AppPass.IsSet() {
+	if in.Name == "" || in.AppUser == "" || !in.AppPass.IsSet() {
+		return errors.New("dbcred: database 段缺少必填字段")
+	}
+	if in.Socket != "" {
+		if in.Host != "" || in.Port != 0 || !validSocket(in.Socket) {
+			return errors.New("dbcred: database.socket 与 host/port 互斥，且必须是规范化的绝对路径")
+		}
+	} else if in.Host == "" || in.Port < 1 {
 		return errors.New("dbcred: database 段缺少必填字段")
 	}
 	cur, err := loadForUpdate(path)
@@ -242,7 +260,7 @@ func WriteDatabase(ctx context.Context, path string, box *secretbox.Box, in Data
 	if err != nil {
 		return err
 	}
-	sec := &Database{Host: in.Host, Port: in.Port, Name: in.Name, TLS: in.TLS, App: Account{User: in.AppUser, PasswordEnc: appEnc}}
+	sec := &Database{Host: in.Host, Port: in.Port, Socket: in.Socket, Name: in.Name, TLS: in.TLS, App: Account{User: in.AppUser, PasswordEnc: appEnc}}
 	if in.MaintUser != "" && in.MaintPass.IsSet() {
 		mEnc, err := seal(ctx, box, in.MaintPass, ctxFor(colMaint, in.MaintUser))
 		if err != nil {
@@ -362,7 +380,7 @@ type Merged struct {
 func Merge(ctx context.Context, cfg *config.Config, box *secretbox.Box, o MergeOptions) (Merged, error) {
 	var m Merged
 	d := &cfg.Database
-	needDB := d.Host == "" || d.Name == "" || d.User == "" || !d.Password.IsSet()
+	needDB := (d.Host == "" && d.Socket == "") || d.Name == "" || d.User == "" || !d.Password.IsSet()
 	needMaint := o.NeedMaint && !d.Maint.Configured()
 	needRedis := cfg.Redis.Addr == "" || !cfg.Redis.Password.IsSet()
 	if !needDB && !needMaint && !needRedis {
@@ -376,15 +394,21 @@ func Merge(ctx context.Context, cfg *config.Config, box *secretbox.Box, o MergeO
 		return m, err
 	}
 	if fd := f.Database; fd != nil {
-		if d.Host == "" && d.Name == "" { // 连接目标作为一组取用：不把显式的 host 与文件里的 name 拼成一个从未存在过的目标
-			d.Host, d.Port, d.Name = fd.Host, fd.Port, fd.Name
+		if d.Host == "" && d.Socket == "" && d.Name == "" { // 连接目标作为一组取用：不把显式的 host 与文件里的 name 拼成一个从未存在过的目标
+			d.Host, d.Port, d.Socket, d.Name = fd.Host, fd.Port, fd.Socket, fd.Name
+			if fd.Socket != "" {
+				d.Port = 0
+			}
 			if d.TLS == "" {
 				d.TLS = fd.TLS
 			}
 			m.Used = append(m.Used, "database.target")
 		}
 		// 口令只与它所属的连接目标配套使用：显式给出了另一个目标（host/port/name 与文件不同）时，不把文件里的口令发往那个目标。
-		sameTarget := d.Host == fd.Host && d.Port == fd.Port && d.Name == fd.Name
+		sameTarget := d.Socket == fd.Socket && d.Name == fd.Name
+		if fd.Socket == "" { // TCP 目标：socket 为空已比较；再比 host/port
+			sameTarget = sameTarget && d.Host == fd.Host && d.Port == fd.Port
+		}
 		if needDB && !d.Password.IsSet() && sameTarget {
 			if d.User == "" || d.User == fd.App.User {
 				pw, err := f.AppPassword(ctx, box)
@@ -511,4 +535,9 @@ func HasEncryptedPlaintext(raw []byte, needles ...string) bool {
 		}
 	}
 	return false
+}
+
+// validSocket 报告 p 是否是可接受的 Unix 套接字路径（规范化绝对路径、无 NUL/换行、长度 ≤100）。
+func validSocket(p string) bool {
+	return p != "" && len(p) <= 100 && filepath.IsAbs(p) && filepath.Clean(p) == p && !strings.ContainsAny(p, "\x00\r\n")
 }

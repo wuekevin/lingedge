@@ -1,0 +1,345 @@
+{
+  "app": {
+    "title": "凌界云 · 安装向导",
+    "brand": "LingEdge 凌界云",
+    "tagline": "Intelligent Edge Cloud Platform",
+    "skip": "跳到主要内容",
+    "language": "语言",
+    "serverNote": "服务端回执",
+    "stepsLabel": "安装步骤"
+  },
+  "lang": {
+    "zh-CN": "简体中文",
+    "en": "English"
+  },
+  "steps": {
+    "environment": "环境检查",
+    "database": "MySQL",
+    "redis": "Redis",
+    "init_db": "初始化数据库",
+    "admin": "创建管理员",
+    "system": "基础配置",
+    "keys": "密钥初始化",
+    "complete": "完成"
+  },
+  "nav": {
+    "stepOf": "第 {n} 步，共 {total} 步",
+    "back": "上一步",
+    "next": "下一步",
+    "done": "已完成",
+    "current": "当前步骤",
+    "pending": "未完成",
+    "failed": "失败"
+  },
+  "common": {
+    "required": "必填",
+    "optional": "可选",
+    "copy": "复制",
+    "copied": "已复制",
+    "copyFailed": "复制失败，请手动选择",
+    "errorCode": "错误码",
+    "reasons": "详细原因",
+    "yes": "是",
+    "no": "否"
+  },
+  "gate": {
+    "title": "验证初始化令牌",
+    "intro": "此时尚无管理员，向导对能访问本页的人是敞开的。请输入初始化令牌，证明你能访问这台服务器的终端。",
+    "hint": "令牌在运行 lingedge install server 的终端中一次性显示；遗失时由 root 执行 lingedge config setup-token --reset 重新生成。",
+    "label": "初始化令牌",
+    "submit": "验证并开始",
+    "checking": "正在验证令牌…",
+    "memoryOnly": "令牌只保存在本页面的内存中，不写入地址栏、Cookie 或浏览器存储；刷新页面后需要重新输入。",
+    "urlTokenIgnored": "地址栏里携带的令牌参数已被忽略并移除：令牌不得出现在 URL 中，请在下方输入。",
+    "empty": "请输入初始化令牌",
+    "rateLimited": "尝试过于频繁，请等待 {seconds} 秒后再试。"
+  },
+  "installed": {
+    "title": "安装已完成，向导已关闭",
+    "body": "此服务器已经完成初始化，安装向导的所有接口永久返回 410。请直接登录管理后台。如需重新初始化，请参阅运维文档，向导不会重新开启。"
+  },
+  "env": {
+    "title": "环境检查",
+    "description": "检查服务器版本、系统时间、数据目录、主密钥与向导监听方式。存在阻断项时无法继续。",
+    "run": "开始检查",
+    "rerun": "重新检查",
+    "blocking": "存在阻断项，请按提示处理后重新检查。",
+    "passed": "环境检查通过。",
+    "passedWithWarnings": "环境检查通过，但有需要留意的警告。",
+    "emptyTitle": "没有返回任何检查项",
+    "emptyBody": "服务端没有返回检查结果，请重新检查。",
+    "severity": {
+      "info": "通过",
+      "warn": "警告",
+      "error": "阻断"
+    },
+    "item": {
+      "server": {
+        "version": "服务器版本"
+      },
+      "system": {
+        "time": "系统时间"
+      },
+      "data_dir": {
+        "writable": "数据目录可写"
+      },
+      "master_key": {
+        "readable": "主密钥可读（不展示内容）"
+      },
+      "migrations": {
+        "embedded": "内嵌迁移集合"
+      },
+      "server_env": "运行环境标识",
+      "listen": {
+        "loopback": "向导监听地址"
+      },
+      "setup_token": {
+        "configured": "初始化令牌"
+      }
+    }
+  },
+  "db": {
+    "title": "MySQL",
+    "description": "配置并测试 MySQL（需 8.0.16 及以上、非 MariaDB）。目标库必须为空，向导不会覆盖已有数据。",
+    "resumeHint": "此步骤此前已完成。如果服务端在此之后重启过，迁移账号口令已不在内存中，需要在这里重新提交一次（口令不落盘，ADR-026）。",
+    "mode": {
+      "label": "账号模式",
+      "create": "用临时管理员创建专用库与账号（推荐）",
+      "createHint": "管理员凭据只在内存中使用一次，建好库与三类专用账号后立即清零，不落盘。",
+      "existing": "使用已预建的库与账号",
+      "existingHint": "需要你已创建好空库与三类专用账号，并提供迁移账号口令。"
+    },
+    "conn": {
+      "label": "连接方式",
+      "tcp": "TCP 主机与端口",
+      "socket": "Unix socket"
+    },
+    "field": {
+      "host": "主机",
+      "port": "端口",
+      "socket": "Unix socket 路径",
+      "socketHint": "MySQL 套接字文件的绝对路径；使用套接字时无需 TLS。",
+      "database": "库名",
+      "username": "应用账号",
+      "pw": "应用账号口令",
+      "tls": "使用 TLS 连接",
+      "tlsHint": "非回环主机必须开启。",
+      "adminUsername": "临时管理员账号",
+      "adminPw": "临时管理员口令",
+      "migrateUsername": "迁移账号",
+      "migratePw": "迁移账号口令",
+      "migratePwCreateHint": "留空则由服务端生成，并在最后一步一次性显示。",
+      "migratePwExistingHint": "必填：仅存于内存，用于初始化数据库，绝不落盘。",
+      "maintUsername": "维护账号",
+      "maintPw": "维护账号口令",
+      "maintPwHint": "可选；留空则建账号模式由服务端生成。",
+      "fixedAccounts": "专用账号名由迁移固定为：",
+      "pwCreateHint": "留空则自动生成随机口令（只加密保存在运行期凭据文件中，无需记忆）；自行设置时至少 12 位。",
+      "pwExistingHint": "已预建的 lingedge_app 账号的口令。"
+    },
+    "advanced": "高级：迁移与维护账号",
+    "submit": "测试连接并保存",
+    "resultEmpty": "尚未提交：填写上方信息并点击“测试连接并保存”。",
+    "ok": "MySQL 校验通过，凭据已加密写入运行期凭据文件。",
+    "err": {
+      "hostRequired": "请填写主机",
+      "portRange": "端口必须在 1 到 65535 之间",
+      "socketAbsolute": "套接字路径必须是绝对路径",
+      "required": "此项必填",
+      "databaseName": "库名只能包含字母、数字、下划线与美元符，最长 64 位"
+    },
+    "tlsRequired": "非回环主机必须使用 TLS 连接，请勾选“使用 TLS 连接”"
+  },
+  "redis": {
+    "title": "Redis",
+    "description": "配置并测试 Redis（主版本需 ≥8）。向导不会执行 FLUSHDB，也不会清空任何已有键。",
+    "field": {
+      "address": "地址",
+      "addressHint": "格式：主机:端口",
+      "pw": "口令",
+      "pwHint": "无口令时留空。",
+      "db": "数据库编号",
+      "tls": "使用 TLS 连接"
+    },
+    "submit": "测试连接并保存",
+    "resultEmpty": "尚未提交：填写上方信息并点击“测试连接并保存”。",
+    "ok": "Redis 校验通过，凭据已加密写入运行期凭据文件。",
+    "err": {
+      "addressFormat": "地址格式应为 主机:端口",
+      "dbRange": "数据库编号必须在 0 到 15 之间"
+    }
+  },
+  "init": {
+    "title": "初始化数据库",
+    "description": "在进程内执行全部迁移并写入种子数据。全新空库没有可丢失的数据，不可逆迁移无需额外确认。",
+    "run": "开始初始化",
+    "rerun": "重试初始化",
+    "running": "正在执行迁移，请勿关闭页面…",
+    "ok": "数据库初始化完成。",
+    "upToDateTitle": "数据库已是最新版本",
+    "upToDateBody": "没有待执行的迁移。",
+    "alreadyDone": "数据库此前已初始化完成；本次没有新的迁移明细。",
+    "recovered": "连接在迁移过程中中断，但服务端已完成初始化（已通过状态查询确认）。",
+    "needDbStep": "返回 MySQL 步骤重新提交",
+    "table": {
+      "caption": "已应用的迁移",
+      "version": "版本",
+      "name": "名称",
+      "class": "分类",
+      "duration": "耗时",
+      "durationMs": "{n} 毫秒"
+    },
+    "class": {
+      "reversible": "可逆",
+      "expand": "前向兼容",
+      "irreversible": "不可逆"
+    }
+  },
+  "admin": {
+    "title": "创建管理员",
+    "description": "这是此平台唯一的初始管理员。口令只由你设定，不会出现在任何文件或日志中，系统不存在默认口令。",
+    "done": "管理员已创建。",
+    "doneBefore": "此步骤此前已完成，管理员已存在。",
+    "field": {
+      "email": "邮箱",
+      "displayName": "显示名称",
+      "pw": "口令",
+      "confirm": "确认口令",
+      "locale": "界面语言",
+      "enableTotp": "现在启用 TOTP 两步验证（推荐）"
+    },
+    "strength": {
+      "label": "口令强度",
+      "0": "未输入",
+      "1": "不满足要求",
+      "2": "合格",
+      "3": "良好",
+      "4": "强"
+    },
+    "rule": {
+      "title": "口令规则",
+      "length": "长度 12 到 128 个字符",
+      "classes": "至少三类字符（大写、小写、数字、符号）；20 字符以上的口令短语至少两类",
+      "distinct": "至少 5 个不同字符",
+      "noEmail": "不包含邮箱本地部分",
+      "server": "服务端还会拒绝常见弱口令片段，以服务端校验为准。",
+      "met": "已满足",
+      "unmet": "未满足"
+    },
+    "err": {
+      "email": "请输入有效的邮箱地址",
+      "name": "请输入显示名称",
+      "weak": "口令不满足规则，请对照下方清单",
+      "mismatch": "两次输入的口令不一致"
+    },
+    "submit": "创建管理员",
+    "totp": {
+      "title": "绑定验证器",
+      "intro": "用验证器应用扫描二维码，或手动输入密钥，然后输入应用显示的 6 位验证码。密钥只显示这一次。",
+      "qrLabel": "TOTP 绑定二维码",
+      "manualKey": "手动输入密钥",
+      "uri": "otpauth 链接",
+      "code": "6 位验证码",
+      "confirm": "确认启用",
+      "codeFormat": "验证码是 6 位数字"
+    },
+    "recovery": {
+      "title": "恢复码",
+      "warning": "恢复码只显示这一次，库内只保存哈希。请立即保存到密码管理器或离线位置；验证器丢失时只能用它们找回账号。",
+      "ack": "我已安全保存恢复码"
+    }
+  },
+  "system": {
+    "title": "基础配置",
+    "description": "站点名称、对外访问地址、运行模式、时区与缺省语言。之后可在系统设置中修改。",
+    "done": "基础配置已保存。",
+    "field": {
+      "runMode": "运行模式",
+      "selfHosted": "自用",
+      "commercial": "商业",
+      "runModeHint": "商业模式会启用套餐与计费等功能（P5）；之后可在系统设置中更改。",
+      "brandName": "平台名称",
+      "brandNameEn": "平台英文名称",
+      "supportEmail": "支持邮箱",
+      "baseUrl": "访问地址",
+      "baseUrlHint": "管理后台的公开地址，包含协议，例如 https 加域名。",
+      "locale": "缺省语言",
+      "timezone": "时区",
+      "timezoneHint": "IANA 时区名；存储与接口仍一律使用 UTC。"
+    },
+    "err": {
+      "baseUrl": "请输入以 http:// 或 https:// 开头的完整地址",
+      "timezone": "请输入有效的 IANA 时区名",
+      "email": "请输入有效的邮箱地址"
+    },
+    "submit": "保存配置"
+  },
+  "keys": {
+    "title": "密钥初始化",
+    "description": "生成内部身份与签名密钥：节点私有 CA、配置签名密钥与 Server gRPC 证书，均由 master.key 加密保存。",
+    "run": "初始化密钥",
+    "rerun": "重新执行（幂等）",
+    "ok": "内部身份与签名密钥已初始化。"
+  },
+  "masterKey": {
+    "title": "重要：master.key 须与数据库备份分开保管",
+    "body": "master.key 是加密所有机密（口令、私钥、令牌）的主密钥。把它和数据库备份放在一起，等于把锁和钥匙放在一起；丢失它，数据库中的全部密文将永远无法解密。请现在就把 master.key 单独备份到不同的介质或位置。",
+    "ack": "我已了解：master.key 须与数据库备份分开保管，并已安排单独备份"
+  },
+  "complete": {
+    "title": "完成安装",
+    "description": "核对下面的提醒，然后完成安装。完成后会写入 install.lock，向导永久关闭，setup token 立即作废。",
+    "submit": "完成安装",
+    "doneTitle": "安装已完成",
+    "doneBody": "已写入 install.lock，初始化向导已关闭，setup token 已作废。",
+    "adminUrl": "管理后台地址",
+    "adminUrlMissing": "此前填写的访问地址已不在本页面中，请在此输入你在基础配置中设置的访问地址：",
+    "adminUrlOpen": "进入管理后台",
+    "adminLogin": "请使用刚创建的管理员邮箱与口令登录。",
+    "migrate": {
+      "title": "迁移账号口令（仅显示这一次）",
+      "body": "迁移口令由服务端自动生成，不会被保存。请立即复制，并在服务器上以 root 执行下面的命令保存；来不及保存时，之后可用 credential reset 重置。",
+      "command": "保存迁移凭据的命令",
+      "ack": "我已保存迁移口令"
+    },
+    "next": {
+      "title": "后续建议",
+      "tempAdmin": "删除建库时使用的临时数据库管理员账号（如有）。",
+      "credential": "在服务器上以 root 保存迁移凭据，升级时需要。",
+      "backup": "把 master.key 单独备份，并与数据库备份分开保管。",
+      "node": "注册第一个节点，然后创建第一个站点。"
+    }
+  },
+  "errors": {
+    "title": "操作失败",
+    "hint": {
+      "setup": {
+        "token_invalid": "初始化令牌缺失或错误。请核对终端显示的令牌；反复错误会触发限流。",
+        "already_installed": "安装已完成，向导永久关闭。",
+        "insecure_transport": "携带口令的接口要求安全传输：请通过 SSH 隧道访问回环地址，或在 TLS 反向代理之后访问。",
+        "database_not_empty": "目标库不是空库。请换一个空库，或清理该库后重试；向导不会覆盖已有数据。",
+        "precheck_failed": "预检未通过：请按下方详细原因处理后重试。",
+        "mode_active": "服务器仍处于安装模式。"
+      },
+      "auth": {
+        "pw_policy": "口令不符合强度规则，请对照口令规则清单修改。"
+      },
+      "validation": {
+        "failed": "提交的内容未通过校验，请检查标出的字段。"
+      },
+      "resource": {
+        "conflict": "当前状态不允许此操作，或前置步骤尚未完成。请按下方原因处理。"
+      },
+      "rate_limit": {
+        "exceeded": "请求过于频繁，请稍后再试。"
+      },
+      "internal": {
+        "error": "服务端内部错误。请带上 Request ID 查看服务端日志。"
+      },
+      "client": {
+        "network_error": "没有收到服务端响应：请确认服务仍在运行、网络或 SSH 隧道仍然连通。",
+        "bad_response": "服务端返回了无法识别的响应。"
+      }
+    }
+  }
+}

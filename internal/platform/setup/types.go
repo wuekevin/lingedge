@@ -69,12 +69,23 @@ type StepResult struct {
 	Message string          `json:"message,omitempty"`
 	Next    *string         `json:"next"`
 	Secrets *OneTimeSecrets `json:"one_time_secrets,omitempty"`
+	// Migrations 仅 initialize 返回（CC-13）：本次实际应用的迁移明细；已是最新时为空数组（指针保证 `migrations` 键总是出现）。
+	Migrations *[]AppliedMigrationInfo `json:"migrations,omitempty"`
+}
+
+// AppliedMigrationInfo 是 openapi SetupStepResult.migrations 的一项。
+type AppliedMigrationInfo struct {
+	Version  int64  `json:"version"`
+	Name     string `json:"name"`
+	Category string `json:"category"`
+	Millis   int64  `json:"duration_ms"`
 }
 
 // DatabaseInput 是 openapi SetupDbConfig（含 CC-11 的加法字段）。
 type DatabaseInput struct {
 	Host            string `json:"host"`
 	Port            int    `json:"port"`
+	Socket          string `json:"socket"`
 	Database        string `json:"database"`
 	Username        string `json:"username"`
 	Password        string `json:"password"`

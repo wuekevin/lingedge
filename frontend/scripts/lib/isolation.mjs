@@ -54,7 +54,7 @@ function lineCol(text, index) {
 }
 
 /**
- * @param {{distDir:string, role:'console'|'admin', manifest:{platformOnly:Array<{template:string,operations:string[]}>}, adminPrefixes:string[]}} args
+ * @param {{distDir:string, role:'console'|'admin'|'setup', manifest:{platformOnly:Array<{template:string,operations:string[]}>}, adminPrefixes:string[]}} args
  * @returns {{violations:Array<{file:string,line:number,what:string,match:string}>, scannedFiles:number, templates:number}}
  */
 export function checkIsolation({ distDir, role, manifest, adminPrefixes }) {
@@ -67,6 +67,11 @@ export function checkIsolation({ distDir, role, manifest, adminPrefixes }) {
     for (const t of manifest.platformOnly) rules.push({ what: `platform 端点 ${t.template}（${t.operations.join(', ')}）`, re: templateRegex(t.template, t.excludes ?? []) });
     for (const p of adminPrefixes) rules.push({ what: `Admin 路由前缀 ${p}`, re: prefixRegex(p) });
     rules.push({ what: `Admin realm 常量 ${REALM.admin}`, re: new RegExp(esc(REALM.admin), 'g') });
+  } else if (role === 'setup') {
+    // 安装向导（Story 1.37）不依赖 Admin Web：产物里不得有任何 platform 端点模板、Admin 路由前缀或任一 realm 会话常量（向导没有会话，只有 setup token）。
+    for (const t of manifest.platformOnly) rules.push({ what: `platform 端点 ${t.template}（${t.operations.join(', ')}）`, re: templateRegex(t.template, t.excludes ?? []) });
+    for (const p of adminPrefixes) rules.push({ what: `Admin 路由前缀 ${p}`, re: prefixRegex(p) });
+    for (const c of Object.values(REALM)) rules.push({ what: `realm 会话常量 ${c}`, re: new RegExp(esc(c), 'g') });
   } else {
     rules.push({ what: `Console realm 常量 ${REALM.console}`, re: new RegExp(esc(REALM.console), 'g') });
   }
@@ -79,5 +84,5 @@ export function checkIsolation({ distDir, role, manifest, adminPrefixes }) {
       }
     }
   }
-  return { violations, scannedFiles: files.length, templates: role === 'console' ? manifest.platformOnly.length : 0 };
+  return { violations, scannedFiles: files.length, templates: role === 'console' || role === 'setup' ? manifest.platformOnly.length : 0 };
 }

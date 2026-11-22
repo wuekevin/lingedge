@@ -290,7 +290,7 @@ func TestNoDockerArtifacts(t *testing.T) {
 func TestMakefileTargets(t *testing.T) {
 	root := repoRoot(t)
 	notImplemented := map[string]string{
-		"e2e": "1.37", "edge-test": "3.22",
+		"edge-test": "3.22",
 	}
 	// security 自 Story 1.2 起为真实目标（运行静态门禁，不再是占位）；其余新增门禁目标同理。
 	implemented := []string{"build", "verify-build", "test", "race", "lint", "security", "gen-lint", "arch-check", "golangci", "shell-check", "gate-selftest", "vuln", "verify-gates",
@@ -301,7 +301,9 @@ func TestMakefileTargets(t *testing.T) {
 		// Story 1.34 起为真实目标（发行流水线与离线签名流程；make release 不再是 NOT_IMPLEMENTED）。
 		"release", "release-finalize", "release-verify", "release-sign", "release-sign-test", "release-test", "secrets-check",
 		// Story 1.36 起为真实目标（前端 workspace 基座；make frontend 不再是 NOT_IMPLEMENTED）。
-		"frontend", "frontend-install", "frontend-lint", "frontend-test", "frontend-types-check", "frontend-gate-selftest", "frontend-check"}
+		"frontend", "frontend-install", "frontend-lint", "frontend-test", "frontend-types-check", "frontend-gate-selftest", "frontend-check",
+		// Story 1.37 起为真实目标（安装向导的嵌入构建/漂移检查与浏览器端到端；make e2e 不再是 NOT_IMPLEMENTED）。
+		"setup-web", "setup-web-check", "e2e"}
 
 	for _, tgt := range implemented {
 		cmd := exec.Command("make", "-n", "--no-print-directory", tgt)
@@ -345,10 +347,14 @@ func TestMakefileWiresGates(t *testing.T) {
 		"security":      {"scripts/gates testdouble", "scripts/gates passwords", "scripts/gates brand", "scripts/gates shell", "scripts/gates secrets"},
 		"gate-selftest": {"./scripts/gates/...", "GOLANGCI_LINT=", "./tests/gates/...", "release-sign-test", "run test:selftest"},
 		// Story 1.36：前端 vitest 并入 test；生产构建后的 Console 隔离与 mock 检查并入 verify-build（不得放宽）。
-		"test":           {"go test ./...", "run test:shared"},
-		"verify-build":   {"scripts/verify-build.sh", "run build", "run check:isolation", "run check:mock"},
-		"frontend":       {"install --frozen-lockfile", "run build", "run check:isolation", "run check:mock"},
-		"frontend-check": {"install --frozen-lockfile", "run check"},
+		// Story 1.37：向导组件测试并入 test；嵌入产物漂移/缺失检查并入 verify-build 与 frontend（任一项消失即失败，不得放宽）。
+		"test":            {"go test ./...", "run test:shared", "run test:setup"},
+		"verify-build":    {"scripts/verify-build.sh", "run build", "run check:embed", "run check:isolation", "run check:mock"},
+		"frontend":        {"install --frozen-lockfile", "run build", "run check:embed", "run check:isolation", "run check:mock"},
+		"frontend-check":  {"install --frozen-lockfile", "run check"},
+		"setup-web":       {"install --frozen-lockfile", "run build:setup", "run sync:embed"},
+		"setup-web-check": {"install --frozen-lockfile", "run build:setup", "run check:embed"},
+		"e2e":             {"run build:setup", "run check:embed", "LINGEDGE_REQUIRE_MYSQL=1", "LINGEDGE_REQUIRE_REDIS=1", "LINGEDGE_REQUIRE_BROWSER=1", "-run 'TestBrowser'", "./tests/integration/setup/"},
 		// Story 1.34：make release 必须先过内置发行公钥守卫（RELEASE=1 → release-keys -require），再进入流水线；不得绕过。
 		"release":      {"release-keys-check", "RELEASE=1", "scripts/release build", "-version"},
 		"verify-gates": {"golangci-lint", "scripts/gates testdouble", "./tests/gates/..."},

@@ -210,10 +210,10 @@ func credentialMain(args []string, stdout, stderr io.Writer, environ []string, e
 	if err != nil {
 		return fail(err)
 	}
-	if cfg.Host == "" || cfg.Name == "" {
-		return fail(errors.New("缺少连接目标：需要 --host/--database（或 --config 指向 root 属主的 server.yaml）"))
+	if (cfg.Host == "" && cfg.Socket == "") || cfg.Name == "" {
+		return fail(errors.New("缺少连接目标：需要 --host/--socket 与 --database（或 --config 指向 root 属主的 server.yaml）"))
 	}
-	if cfg.Port == 0 {
+	if cfg.Socket == "" && cfg.Port == 0 {
 		cfg.Port = 3306
 	}
 	user := cfg.User
@@ -245,7 +245,7 @@ func credentialMain(args []string, stdout, stderr io.Writer, environ []string, e
 			return fail(err)
 		}
 		pw = config.NewSecret(gen)
-		conn, err := provision.Open(ctx, provision.Target{Host: cfg.Host, Port: cfg.Port, TLS: cfg.TLS}, au, apw, "")
+		conn, err := provision.Open(ctx, provision.Target{Host: cfg.Host, Port: cfg.Port, Socket: cfg.Socket, TLS: cfg.TLS}, au, apw, "")
 		if err != nil {
 			return fail(err)
 		}
@@ -259,7 +259,7 @@ func credentialMain(args []string, stdout, stderr io.Writer, environ []string, e
 			return fail(fmt.Errorf("口令已重置，但新口令的连接/预检失败，凭据文件未写入: %w", err))
 		}
 	}
-	if err := writeMigrateYAML(target, FileCreds{Host: cfg.Host, Port: cfg.Port, Database: cfg.Name, User: user, Password: pw, TLS: cfg.TLS}, *force || sub == "reset"); err != nil {
+	if err := writeMigrateYAML(target, FileCreds{Host: cfg.Host, Port: cfg.Port, Socket: cfg.Socket, Database: cfg.Name, User: user, Password: pw, TLS: cfg.TLS}, *force || sub == "reset"); err != nil {
 		return fail(err)
 	}
 	_, _ = fmt.Fprintf(stdout, "已写入 %s（lingedge_migrate 凭据，0400）。口令未输出。\n", target)
@@ -329,14 +329,15 @@ func GeneratePassword() (string, error) {
 // writeMigrateYAML 原子写入 0400 凭据文件：同目录临时文件 + fsync；不覆盖时用 link（目标已存在则失败），覆盖时 rename。
 func writeMigrateYAML(path string, fc FileCreds, overwrite bool) error {
 	type out struct {
-		Host     string `yaml:"host"`
+		Host     string `yaml:"host,omitempty"`
 		Port     int    `yaml:"port,omitempty"`
+		Socket   string `yaml:"socket,omitempty"`
 		Database string `yaml:"database"`
 		User     string `yaml:"user"`
 		Password string `yaml:"password"`
 		TLS      string `yaml:"tls,omitempty"`
 	}
-	b, err := yaml.Marshal(out{Host: fc.Host, Port: fc.Port, Database: fc.Database, User: fc.User, Password: fc.Password.Reveal(), TLS: fc.TLS})
+	b, err := yaml.Marshal(out{Host: fc.Host, Port: fc.Port, Socket: fc.Socket, Database: fc.Database, User: fc.User, Password: fc.Password.Reveal(), TLS: fc.TLS})
 	if err != nil {
 		return err
 	}

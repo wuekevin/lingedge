@@ -1,8 +1,9 @@
-# ADR-014：四个工作区包。admin / console 是互相独立的 Vite 工程，仅共享无权限语义的 shared。
+# ADR-014：五个工作区包。admin / console / setup 是互相独立的 Vite 工程（setup = 安装向导，Story 1.37，产物经 go:embed 嵌入 lingedge-server），仅共享无权限语义的 shared。
 packages:
   - admin
   - console
   - website
+  - setup
   - shared
 
 # 关闭所有生命周期脚本（依赖的 preinstall/install/postinstall 与工作区自身脚本）。

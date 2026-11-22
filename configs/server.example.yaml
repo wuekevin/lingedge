@@ -49,6 +49,9 @@ database:
   # 口令：见文件头说明（password_file 或 LINGEDGE_DATABASE__PASSWORD；缺省由安装向导写入的运行期凭据文件提供）。
   # TLS 模式（可选；非回环主机必须显式设置）：true | false | skip-verify | preferred；缺省由运行期凭据文件提供。
   # tls: preferred
+  # Unix 套接字（CC-13，可选）：与 host 互斥（设置 socket 时删去 host/port；套接字不经网络，无需 tls）。绝对路径、最长 100 字节；
+  # 缺省由安装向导写入的运行期凭据文件提供。环境变量 LINGEDGE_DATABASE__SOCKET。
+  # socket: /var/run/mysqld/mysqld.sock
   # 维护账号（可选，Story 1.15）：Scheduler 的 partition.maintain 用它对分区表做 REORGANIZE PARTITION（滚动预建未来分区，database/README §5.1）。
   # 不配置则该作业明确跳过并持续告警（audit_logs 等将写入 pmax 兜底分区，不影响写入但分区不再滚动）。
   # 口令同样只能经环境变量 LINGEDGE_DATABASE__MAINT__PASSWORD 或 maint 下的口令文件键显式提供；缺省由安装向导写入的运行期凭据文件提供（见文件头说明）。

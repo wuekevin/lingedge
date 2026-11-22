@@ -190,10 +190,10 @@ func (a *Assembly) Register(r *httpx.Router, deps server.Deps) error {
 		auditRepo, rec, withTx = a.Audit.Repo(), a.Audit, deps.DB.WithTx
 	}
 	// 安装向导路由（Story 1.24）：正常模式（已安装）与清单导出都注册——每个 operation 返回 410 setup.already_installed（MIN-04），setup mode 由
-	// server.RunSetup 另行装配（只含这些路由、/setup 页与 /healthz，其余 503）。
+	// server.RunSetup 另行装配（只含这些路由、/setup 页与 /healthz，其余 503）。正常模式下 /setup 与 /setup/* 同样永久 410（Story 1.37）。
 	wiz, err := setup.New(setup.Options{Installed: true})
 	if err != nil {
 		return err
 	}
-	return errors.Join(m.Register(r), t.Register(r), taskapi.Register(r, deps.Tasks, rec, withTx), auditapi.Register(r, auditRepo), sys.Register(r), keys.Register(r), wiz.Register(r))
+	return errors.Join(m.Register(r), t.Register(r), taskapi.Register(r, deps.Tasks, rec, withTx), auditapi.Register(r, auditRepo), sys.Register(r), keys.Register(r), wiz.Register(r), wiz.RegisterGonePages(r))
 }
