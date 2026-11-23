@@ -50,7 +50,8 @@ func (in *Installer) Unfinished(ctx context.Context) ([]registry.TxInfo, error) 
 
 func (in *Installer) newUndoer() UndoApplier {
 	svc := &service.Undoer{Root: in.d.Root, Prov: in.prov, Sys: in.sys}
-	var u UndoApplier = &Undoer{Root: in.d.Root, Reg: in.d.Reg, Svc: svc}
+	var u UndoApplier = &Undoer{Root: in.d.Root, Reg: in.d.Reg, Svc: svc, Web: in.webRunnerOrNil(),
+		Notice: func(code, msg string) { in.ev.emit(Event{Type: EventWarning, Code: code, Message: msg}) }}
 	if in.d.WrapUndoer != nil {
 		u = in.d.WrapUndoer(u)
 	}

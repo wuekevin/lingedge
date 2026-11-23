@@ -6,7 +6,9 @@ import "github.com/wuekevin/lingedge/internal/tools/manifest"
 //
 // 本表是「哪些组件在本发行里真的有包」的唯一事实来源，状态必须如实：
 //   - available：本仓库当前能构建出真实包（server、tools）；
-//   - unreleased：对应交付物尚不存在（node/dns/reporter 的 cmd 目前只有 --version 脚手架，前端属 Story 1.36，OpenResty 发行包属 Epic 3 的 OpenResty Story）。
+//   - unreleased：对应交付物尚不存在（node/dns/reporter 的 cmd 目前只有 --version 脚手架，OpenResty 发行包属 Epic 3 的 OpenResty Story）；
+//     静态前端（admin-web/console/docs/status/website）的交付物是前端生产构建目录，经 -frontend-dist <组件>=<目录> 提供时才变为 available（Story 1.40，见 frontend.go），
+//     没有提供的保持 unreleased（docs/status 目前没有任何构建产物源，console 是基座探针，website 属 Epic 2——不发布空壳包）。
 //     清单里如实写 "unreleased"，Tools 以退出码 7 回答，**不得为了让清单「好看」而发布空壳包**；
 //   - builtin：scheduler/worker 内置于 server。
 //

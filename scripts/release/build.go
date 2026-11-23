@@ -41,9 +41,11 @@ type buildOpts struct {
 	platforms         []string
 	repro, fresh      bool
 	allowDirty        bool
+	lockSHA           string // frontend/pnpm-lock.yaml 的 SHA256（仅提供 -frontend-dist 时）
 	minUpgradeFrom    string
 	openrestyVersion  string
 	openrestyTrees    treeFlags
+	frontendDirs      treeFlags // 组件 → 前端生产构建目录（-frontend-dist；键是组件名而不是平台）
 	stdout            io.Writer
 }
 
@@ -59,6 +61,7 @@ type buildRecord struct {
 	Tags          string            `json:"build_tags"`
 	Platforms     []string          `json:"platforms"`
 	Binaries      []binRecord       `json:"binaries"`
+	Frontends     []frontendRecord  `json:"frontends,omitempty"`
 	LinksResolved []linkRecord      `json:"links_resolved,omitempty"`
 	Migrations    *migrationsRecord `json:"migrations,omitempty"`
 	NPM           string            `json:"npm"`
@@ -80,7 +83,7 @@ type migrationsRecord struct {
 func cmdBuild(args []string, stdout, stderr io.Writer) error {
 	fl := flag.NewFlagSet("build", flag.ContinueOnError)
 	fl.SetOutput(stderr)
-	o := buildOpts{openrestyTrees: treeFlags{}, stdout: stdout}
+	o := buildOpts{openrestyTrees: treeFlags{}, frontendDirs: treeFlags{}, stdout: stdout}
 	plats := fl.String("platforms", "linux-amd64,linux-arm64", "目标平台（逗号分隔）")
 	fl.StringVar(&o.src, "src", ".", "源仓库根目录")
 	fl.StringVar(&o.out, "out", "", "输出目录（必填，须不存在或为空）")
@@ -91,6 +94,7 @@ func cmdBuild(args []string, stdout, stderr io.Writer) error {
 	fl.StringVar(&o.minUpgradeFrom, "min-upgrade-from", "", "min_upgrade_from（缺省 = 本版本）")
 	fl.StringVar(&o.openrestyVersion, "openresty-version", "", "提供 OpenResty 发行目录时的版本")
 	fl.Var(o.openrestyTrees, "openresty-tree", "OpenResty 发行目录 <platform>=<dir>（可重复）；其中的符号链接在构建期消除")
+	fl.Var(frontendFlag{o.frontendDirs}, "frontend-dist", "静态前端生产构建目录 <组件>=<目录>（可重复；组件为 admin-web|console|docs|status|website）；目录须含 index.html 并通过 mock 入口检查，包内布局为 payload/public/**（含预压缩 .gz）")
 	if err := fl.Parse(args); err != nil {
 		return err
 	}
@@ -166,6 +170,12 @@ func (o *buildOpts) build() error {
 			c.Description = "OpenResty 发行组件"
 			c.Requires = &manifest.Requires{System: &manifest.SystemReq{OS: []string{"linux"}}}
 		}
+		if _, ok := o.frontendDirs[c.Name]; ok {
+			c.Status = manifest.CompAvailable
+			c.Description = "LingEdge 静态前端（" + c.Name + "；平台 any，解压到 releases/<v>/public/ 由 Nginx 托管）"
+			c.Variant = frontendComponents[c.Name]
+			c.Requires = &manifest.Requires{System: &manifest.SystemReq{OS: []string{"linux"}}}
+		}
 		defs = append(defs, c)
 	}
 	var jobs []buildJob
@@ -183,6 +193,24 @@ func (o *buildOpts) build() error {
 			}
 		}
 	}
+	// 静态前端：目录必须是真实的生产构建（含 index.html、通过 mock 入口检查），且可追溯到 pnpm-lock.yaml。
+	var lockSHA string
+	if len(o.frontendDirs) > 0 {
+		if lockSHA, err = pnpmLockSHA256(o.src); err != nil {
+			return err
+		}
+		names := make([]string, 0, len(o.frontendDirs))
+		for n := range o.frontendDirs {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		for _, n := range names {
+			if err := checkFrontendDist(o.src, n, o.frontendDirs[n]); err != nil {
+				return err
+			}
+		}
+	}
+	o.lockSHA = lockSHA
 	ldflags := fmt.Sprintf("-s -w -X %s/pkg/version.Version=%s -X %s/pkg/version.Commit=%s", modulePath, o.version, modulePath, commit)
 
 	// 4. 构建（A），无 lingedge_testdouble 标签（从不传 -tags）。
@@ -199,12 +227,15 @@ func (o *buildOpts) build() error {
 
 	rec := &buildRecord{Release: o.version, Commit: commit, CommitTime: commitTime.Format(time.RFC3339), Dirty: dirty,
 		BuildFlags: []string{"-trimpath", "-buildvcs=false", "CGO_ENABLED=0", "GOFLAGS="}, LDFlags: ldflags, Tags: "(none)", Platforms: o.platforms,
-		NPM: "无 lockfile（frontend/ 尚无前端工程，Story 1.36 交付后纳入）", GateKeys: "gates release-keys -require 通过"}
+		NPM: "本次发行不含前端包（未提供 -frontend-dist）", GateKeys: "gates release-keys -require 通过"}
 	gv, err := goRun(o.src, buildEnv(), "env", "GOVERSION")
 	if err != nil {
 		return err
 	}
 	rec.GoVersion = strings.TrimSpace(string(gv))
+	if lockSHA != "" {
+		rec.NPM = pnpmLockRel + " sha256=" + lockSHA + "（pnpm install --frozen-lockfile；前端包的构建输出由 -frontend-dist 提供并经 mock 入口检查）"
+	}
 
 	// 5. 可复现性：同源第二次构建，逐文件比对。
 	hashA := map[string]string{}
@@ -256,6 +287,9 @@ func (o *buildOpts) build() error {
 					plats = append(plats, p)
 				}
 				sort.Strings(plats)
+			}
+			if _, ok := o.frontendDirs[c.Name]; ok {
+				plats = []string{"any"} // 静态资源与 CPU 架构无关
 			}
 			for _, plat := range plats {
 				pkg, bom, links, err := o.stagePackage(c, plat, buildA, commitTime, rec)
@@ -502,4 +536,21 @@ func compareBuilds(jobs []buildJob, a, b map[string]string) (rows []reproRow, ba
 		}
 	}
 	return rows, bad
+}
+
+// frontendFlag 实现 flag.Value：-frontend-dist <组件>=<目录>。
+type frontendFlag struct{ m treeFlags }
+
+func (f frontendFlag) String() string { return "" }
+
+func (f frontendFlag) Set(v string) error {
+	comp, dir, ok := strings.Cut(v, "=")
+	if _, known := frontendComponents[comp]; !ok || !known || dir == "" {
+		return fmt.Errorf("格式应为 <组件>=<目录>，组件为 admin-web|console|docs|status|website，收到 %q", v)
+	}
+	if _, dup := f.m[comp]; dup {
+		return fmt.Errorf("-frontend-dist %s 重复", comp)
+	}
+	f.m[comp] = dir
+	return nil
 }

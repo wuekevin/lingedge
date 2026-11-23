@@ -623,6 +623,18 @@ Node 独占 80/443（R-10）。若宝塔 Nginx 占用：预检在步骤 4/5 停�
 
 **官网 revalidate 共享密钥（SSR，MIN-08/M17）**：`lingedge install website --mode ssr` 由 Tools 生成 32 字节随机密钥 `website.revalidate_secret`：写入 `/etc/lingedge/website/revalidate.secret`（root:lingedge-web 0440）；同时交付 Server——本机 Server 经 `lingedge-server config set-secret website.revalidate_secret --from-file …`（密文入 `system_settings.value_enc`，ADR-011）；远端 Server 由运营者在 Admin「官网设置」粘贴。Tools 不把该密钥写入 `state.json` 或日志。
 
+**实现（Story 1.40，`internal/tools/installer/{staticspec,nginxsite,nginxlint,staticplan,nginxctl}.go`）**
+
+- **同一框架复用于五个前端**：`staticSpec{name}` + `staticProfiles`（SPA 回落、`/api/` 反代范围、不可变缓存前缀）。`admin-web`/`console`：SPA（`try_files $uri /index.html`）、`/api/` 整体同源反代到 `--set api-upstream`（缺省 `http://127.0.0.1:8080`）；`website`：非 SPA、只放行 `/api/v1/public/`，**`/api/v1/public/setup`（及其子路径）显式 404**（它属于 `/api/v1/public/` 前缀之内，不堵上则向导接口会经官网公网域可达）、其余 `/api/` 404、`/_nuxt/` immutable；`docs`/`status`：纯静态，`/api/` 一律 404。**website 只安装 `static` 变体**：`--mode ssr` 在单元模板检查处以 `install.component_spec_missing` 明确失败（SSR 的单元模板、Node.js 依赖与 revalidate 密钥属 Story 2.14）；`runtime-config.js`、自用模式的 `/pricing` 404、公开媒体目录属 Story 2.5。
+- **包布局**：`payload/public/**`（站点根；发行流水线随附确定性的预压缩 `.gz`，配合 `gzip_static`）+ `payload/share/lingedge-sbom.cdx.json`，平台 `any`。**落地前**由 `ValidatePayload` 校验（有 `public/index.html`、顶层只有 `public/` 与 `share/`），不合格 → 第 14 步失败并回滚，不写任何 release 内容。解压到 `/opt/lingedge/<c>/releases/<v>/`，`current` 原子切换（沿用第 14 步）；静态前端没有运行用户、数据目录与单元，`state.json` 记 `installed`。`Health`（第 20 步）校验 `current → releases/<v>` 且 `public/index.html` 非空。
+- **`--set` 键（均先过严格字符集校验，输出规范形式，原始字符串从不拼进配置）**：`host`（**必填**；小写 RFC 1123 主机名，拒绝通配符/IP/端口/路径/空白）、`api-upstream`（`http(s)://主机[:端口]`，无路径/用户信息）、`api-ca`（https 上游必填：Tools 不假定各发行版的 CA 路径，也不会不校验证书就代理到 https 上游）、`tls-cert`/`tls-key`（成对；有则启用 `ssl_protocols TLSv1.3`、HSTS，HTTP 端口 301 到 HTTPS）、`http-port`/`https-port`（缺省 80/443）、`ipv6`（缺省 yes）、`nginx-link`（yes|no）。**不存在放宽独立主机名的键**（`allow-*` 之类会被当作未知键以退出码 2 拒绝）。注意：`api-upstream` 的主机名在 nginx 载入配置时解析，无法解析则 `nginx -t` 失败（建议用 IP 或确保可解析）。
+- **独立主机名（AC5）**：Plan 阶段最先（只读、无需网络）读取 `/etc/lingedge/nginx/<c>.conf` 首行的机器可读标记 `# lingedge-site: component=<c> host=<h>`，本次 `host` 与任一**已安装**的其他静态前端相同（不区分大小写）→ 退出码 2（`KindSettings`），点名占用者，无绕过开关；读不了已装前端的片段 → 失败关闭（退出码 3），不当作无冲突。docs/status 一并纳入（同一主机名下 Cookie、安全头与 `/api/` 范围无法分开）。会话 Cookie host-only 与 realm 各异是 Server/前端侧的既有事实（ADR-018），片段不改写 Cookie 的 `Domain`（静态检查强制，见下）。「控制面与租户自定义域名不得同一可注册域」是部署规范（threat-model §5.7），Tools 没有公共后缀表，不做校验，只在文档声明。
+- **同域名站点/同名 conf（AC3）**：宿主机探测到的任何其他 server 块声明了同一 `server_name` → 冲突 `site`；`/etc/lingedge/nginx/<c>.conf` 或 conf.d 同名项已存在且内容不同 → 冲突 `file`（沿用第 18 步的「不覆盖、`.new`」机制）。非交互且无 `--yes` → 退出码 9 且零改动；确认后只生成片段，**同域名站点存在时不创建 conf.d 软链**。
+- **conf.d 软链（AC2）**：仅「非宝塔 + 系统 Nginx 的主配置在 `/etc/nginx` 且 include 了 `conf.d/*.conf`」时可选；**询问**（交互），或 `--set nginx-link=yes`（非交互显式启用；`--yes` 只用于确认冲突，**不会**隐式创建软链/reload；非交互默认不创建）。第 19 步：先记 journal undo → 创建软链 → `nginx -t` → `nginx -s reload`（经只允许 `nginx`/`openresty` 的独立 safeexec Runner，`service.NewWebServerRunner`，不放宽 `safeexec.DefaultAllowed` 与 service 的白名单）；`-t` 或 reload 失败 → 立即撤销软链并告警（带 nginx 自己的输出），静态文件与片段已就位，安装仍完成；同名项已存在（含计划之后才出现）→ 绝不覆盖。事务回滚（如第 20 步失败）按 undo 摘除软链并再 reload 一次。宝塔环境一律只打印指引（FR-7）；宝塔/不支持时给 `nginx-link=yes` → 退出码 2。
+- **片段与安全头**：`/etc/lingedge/nginx/<c>.conf`（server 块）与 `<c>-security-headers.conf`（每条 `always`：nosniff、X-Frame-Options、Referrer-Policy、Permissions-Policy、COOP、CSP；TLS 时加 HSTS）。**每个含 `add_header` 的 location 显式 `include` 头文件，server 级不出现 `add_header`**。`LintNginxSnippet`/`LintSecurityHeaders` 做静态检查（含：不得 `proxy_cookie_domain` 改写、不得自行下发 `Set-Cookie`），渲染器自检不通过则不写出；CI 入口 `tests/security/nginxsnippet`（随 `make security`）对 5 组件 × 设置组合与 golden 检查，并带变异负向样本。
+- **站点根缓存策略**：SPA 入口 `no-store`；哈希资源 `public, max-age=31536000, immutable`（`try_files $uri =404`，缺失不回落入口页）；非 SPA 页面 `no-cache`；点文件（`/.well-known/` 除外）404。CSP 与 Admin 的 E2E 服务一致（`default-src 'none'`，样式 `'unsafe-inline'` 仅因 Arco）。
+- **未做/属他处**：`uninstall` 保留数据（Story 1.41）；升级前端（1.43）；真实宝塔面板与真实 Linux 发行版 Nginx 的 `-t`/reload/HTTPS 验证（ENV-LNX/ENV-BT，1.45）。本机用真实 nginx（`tests/release/frontend_test.go`）验证片段被 `nginx -t` 接受并以 HTTP/HTTPS 提供预期响应。
+
 ## 12. 安装状态机与事务日志（journal）
 
 ### 12.1 22 步映射（基线 §4.5）
@@ -701,7 +713,7 @@ stateDiagram-v2
 
 ### 12.4 实现（Story 1.33：`internal/tools/installer`）
 
-**依赖与分层**：`cli → installer → {registry, downloader+manifest, resolver, probe, service, security}`；`installer` 不 import 任何 Server 包。组件特有知识经 `ComponentSpec` 注入（`Executables`/`ValidateSettings`/`InitConfig`/`Start`/`Health`，见 `installer/component.go`）；**生产构建的 `installer.ProductionSpecs()` 只登记已交付的组件（Story 1.33 时为空；Story 1.35 起为 `server`；1.40 静态前端、Epic 3 node 等 Story 交付后追加）**，未登记的组件 `install` 以 `install.component_spec_missing`（退出码 1）明确失败，**不存在占位实现**。假组件只在 `_test.go` 与 `tests/toolsworld`（G-11）；`tests/security/toolsbinary` 对编译出的 `lingedge` 做 `go tool nm` 与字符串扫描，证明二进制不含它们（带负向样本），并断言 `ProductionSpecs()` 恰为 `server`。
+**依赖与分层**：`cli → installer → {registry, downloader+manifest, resolver, probe, service, security}`；`installer` 不 import 任何 Server 包。组件特有知识经 `ComponentSpec` 注入（`Executables`/`ValidateSettings`/`InitConfig`/`Start`/`Health`，见 `installer/component.go`）；**生产构建的 `installer.ProductionSpecs()` 只登记已交付的组件（Story 1.33 时为空；Story 1.35 起 `server`；Story 1.40 起追加静态前端 `admin-web/console/docs/status/website`；Epic 3 node 等 Story 交付后追加）**，未登记的组件 `install` 以 `install.component_spec_missing`（退出码 1）明确失败，**不存在占位实现**。假组件只在 `_test.go` 与 `tests/toolsworld`（G-11）；`tests/security/toolsbinary` 对编译出的 `lingedge` 做 `go tool nm` 与字符串扫描，证明二进制不含它们（带负向样本），并断言 `ProductionSpecs()` 恰为已交付的那几个（`admin-web,console,docs,server,status,website`）。
 
 **一次安装的流程**（`Installer.Install`）：
 1. `cli` 的写命令入口 `registry.Begin`（组件锁 + journal 扫描，6/13）；`--dry-run` 不取锁、不开 journal。
@@ -1256,3 +1268,9 @@ LockPersonality=yes
   - **处置 A（沙箱写面）**：单元模板 `ReadWritePaths=` 追加 `/etc/lingedge/server`。注意：该目录属主 root，`lingedge` 用户仍不能 unlink（DAC），只能截断自己属主的哈希文件，所以效果只是「清空」而非「删除」，仍需手工删；且扩大沙箱写面。**文件级 `ReadWritePaths` 不可取**：它会把该文件 bind mount 进服务的挂载命名空间，固定在启动时的 inode，`--reset` 的原子 rename 之后 Server 仍读旧 inode（令牌重置失效），unlink 还会得到 EBUSY。
   - **处置 B（倾向，不动沙箱）**：由 Tools 清理——root 运行的 Tools 命令（`doctor`/`list` 一类，Story 1.42）发现 `install.lock` 存在而哈希文件仍在时删除它。
   - **为什么本机没有预先实现**：A 的效果取决于真实 systemd 的挂载命名空间与 DAC 的交互，且是安全相关的沙箱放宽，本机（无 systemd）无法验证，未经验证不放宽；B 属 1.42 `doctor` 的功能面。两种处置都**不需要改 Server 代码**（降级链已在），唯一的改动点是单元模板（A）或 Tools 的清理步骤（B），决定后以真实 systemd 验证。
+
+## 修订记录 2026-11-24（Story 1.40：静态前端安装器）
+
+- **§11.3 实现口径**：见 §11.3「实现（Story 1.40）」——五个静态前端共用一个生产 `ComponentSpec`、站点片段与安全头渲染、独立主机名强制（退出码 2、无绕过开关）、同域名站点/同名 conf 冲突、conf.d 软链（询问 + `nginx -t && reload` + 失败撤销 + 回滚摘除）、宝塔只打印指引、片段静态检查。`§11.3` 原有条文**未改**，其中「官网 `/api/` 反代范围」补充了一条原文没有写明的事实：`/api/v1/public/setup/*` 位于 `/api/v1/public/` 前缀之内，需显式 404 才能使向导接口在官网公网域不可达（已实现并经真实 nginx 验证）。
+- **§9 发行**：静态前端包为平台 `any`、`payload/public/**`（含确定性预压缩 `.gz`）；`scripts/release` 新增 `-frontend-dist <组件>=<目录>`（见 `docs/operations/release.md` §12）。**无迁移/OpenAPI/proto/CF-6/contract-v1 变更。**
+- **取舍（须披露）**：① nginx `-t`/reload 失败不使安装失败（撤销软链 + 告警 + 指引），因为静态文件与片段本身已就位且无法由 Tools 判断 nginx 失败是否由无关配置引起；② `--yes` 不隐式启用软链/reload，需显式 `--set nginx-link=yes`（reload 影响线上流量，不应夹带在「确认冲突」的同意里）；③ docs/status 也纳入独立主机名规则；④ website 的 ssr 变体、runtime-config.js、`/pricing` 404、媒体目录留给 Story 2.14/2.5。

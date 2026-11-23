@@ -43,6 +43,9 @@ type Undoer struct {
 	Root string
 	Reg  *registry.Registry
 	Svc  *service.Undoer
+	// Web 执行 nginx/openresty（撤销 conf.d 软链后 reload）；nil = 只摘软链不 reload。Notice 接收撤销过程中的非致命提示。
+	Web    service.Runner
+	Notice func(code, msg string)
 }
 
 func (u *Undoer) host(virtual string) string {
@@ -70,6 +73,8 @@ func (u *Undoer) Apply(ctx context.Context, a registry.UndoAction) (service.Undo
 		return u.removeOptDir(a)
 	case actStateForget:
 		return u.stateForget(ctx, a)
+	case actNginxLink:
+		return u.unlinkNginx(ctx, a)
 	}
 	return service.UndoResult{}, fmt.Errorf("未知的撤销动作 %q（journal 来自更新版本或被改动）", a.Action)
 }

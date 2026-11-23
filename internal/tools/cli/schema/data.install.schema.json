@@ -32,10 +32,10 @@
     "step_map": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["seq", "component", "kind", "steps"],
       "properties": {"seq": {"type": "integer"}, "component": {"type": "string"}, "kind": {"type": "string"}, "steps": {"type": "array", "items": {"type": "integer", "minimum": 1, "maximum": 22}}}}},
     "conflicts": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["kind", "message"],
-      "properties": {"kind": {"enum": ["file", "unit", "dir", "port_unverified"]}, "component": {"type": "string"}, "path": {"type": "string"}, "message": {"type": "string"}, "hint": {"type": "string"}}}},
+      "properties": {"kind": {"enum": ["file", "unit", "dir", "site", "port_unverified"]}, "component": {"type": "string"}, "path": {"type": "string"}, "message": {"type": "string"}, "hint": {"type": "string"}}}},
     "components": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["name", "version", "state", "release_dir"],
       "properties": {"name": {"type": "string"}, "version": {"type": "string"}, "state": {"type": "string"}, "release_dir": {"type": "string"}}}},
     "access": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["component", "kind", "label", "value"],
-      "properties": {"component": {"type": "string"}, "kind": {"enum": ["setup_url", "ssh_tunnel", "setup_token", "master_key_fingerprint", "master_key_warning", "note"]}, "label": {"type": "string"}, "value": {"type": "string"}, "one_time": {"type": "boolean"}}}}
+      "properties": {"component": {"type": "string"}, "kind": {"enum": ["setup_url", "ssh_tunnel", "setup_token", "master_key_fingerprint", "master_key_warning", "site_url", "nginx_include", "baota_guide", "note"]}, "label": {"type": "string"}, "value": {"type": "string"}, "one_time": {"type": "boolean"}}}}
   }
 }

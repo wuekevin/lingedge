@@ -24,15 +24,17 @@ import (
 type InstallEnv struct {
 	// Root 非空时 /etc /opt /var 路径前缀到该目录（测试用）；生产为空。
 	Root string
-	// Specs 是可用的组件规格；nil = installer.ProductionSpecs()（当前只有 server：未交付规格的组件 install 明确失败，不会有假组件）。
+	// Specs 是可用的组件规格；nil = installer.ProductionSpecs()（server 与静态前端；未交付规格的组件 install 明确失败，不会有假组件）。
 	Specs installer.SpecSet
 	// Collect 做系统探测；nil = 真实 probe.Collect。
 	Collect func(ctx context.Context) (probe.Result, error)
 	// Runner 执行 systemctl/useradd 等；nil = 真实的 service.SystemRunner。
 	Runner service.Runner
-	Own    service.Ownership
-	Booted func() bool
-	FS     baota.FS
+	// WebRunner 执行 nginx/openresty（静态前端的 conf.d 软链：nginx -t 与 -s reload）；nil = service.SystemWebServerRunner()。
+	WebRunner service.Runner
+	Own       service.Ownership
+	Booted    func() bool
+	FS        baota.FS
 	// NewClient 构造 HTTPS 客户端；nil = downloader.New。
 	NewClient func(cfg downloader.Config) (*downloader.Client, error)
 	// Hook/WrapJournal/WrapUndoer 是故障注入与 kill 挂钩（仅测试；生产为 nil）。
@@ -82,7 +84,7 @@ func (r *Run) newInstaller(events chan<- installer.Event, req installer.Request)
 	}
 	return installer.New(installer.Deps{
 		Root: ie.Root, Reg: reg, Verifier: r.env.NewVerifier, Config: cfg, Specs: specs, Collect: collect, FS: ie.FS,
-		Runner: runner, Own: own, Booted: ie.Booted, Geteuid: r.env.Geteuid, Now: r.env.Now, NewClient: ie.NewClient,
+		Runner: runner, WebRunner: ie.WebRunner, Own: own, Booted: ie.Booted, Geteuid: r.env.Geteuid, Now: r.env.Now, NewClient: ie.NewClient,
 		Confirm: r.confirmPrompt, Events: events, Hook: ie.Hook, WrapJournal: ie.WrapJournal, WrapUndoer: ie.WrapUndoer,
 	})
 }

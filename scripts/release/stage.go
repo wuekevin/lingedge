@@ -88,7 +88,27 @@ func (o *buildOpts) stagePackage(c compDef, plat, buildDir string, commitTime ti
 		}
 	}
 
-	// SBOM：Go 包用二进制的 SBOM 合并；无 Go 二进制的包（OpenResty）记录目录树摘要。
+	frontendDir, isFrontend := o.frontendDirs[c.Name]
+	if isFrontend {
+		var err error
+		if links, err = copyTree(frontendDir, payload, "public"); err != nil {
+			return nil, nil, nil, fmt.Errorf("前端目录 %s: %w", frontendDir, err)
+		}
+		if len(links) > 0 {
+			return nil, nil, nil, fmt.Errorf("前端构建输出 %s 含符号链接（%d 个）：生产构建不应产生链接，请检查构建", frontendDir, len(links))
+		}
+		gz, err := precompress(filepath.Join(payload, "public"))
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("预压缩 %s: %w", c.Name, err)
+		}
+		tree, nfiles, err := treeDigest(filepath.Join(payload, "public"))
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		rec.Frontends = append(rec.Frontends, frontendRecord{Component: c.Name, Variant: c.variant(), Files: nfiles, Precompressed: gz, TreeSHA256: tree, MockCheck: "pass"})
+	}
+
+	// SBOM：Go 包用二进制的 SBOM 合并；前端包记录目录树摘要与 pnpm-lock.yaml 哈希；无 Go 二进制的其他包（OpenResty）记录目录树摘要。
 	var bom *bomDoc
 	if len(parts) > 0 {
 		bom = mergeBOMs(ts, "lingedge-"+c.Name, o.version, parts)
@@ -109,8 +129,13 @@ func (o *buildOpts) stagePackage(c compDef, plat, buildDir string, commitTime ti
 		bom.Metadata.Component.BOMRef = "pkg:" + c.Name + "@" + o.version + "/" + plat
 		bom.Metadata.Component.Properties = []bomProp{{Name: "release:platform", Value: plat}, {Name: "release:payload-tree-sha256", Value: sha256Hex([]byte(sb.String()))}}
 		bom.Metadata.Component.Hashes = nil
-		bom.add(bomComp{Type: "application", BOMRef: bom.Metadata.Component.BOMRef + "#content", Name: c.Name, Version: o.version,
-			Properties: []bomProp{{Name: "release:note", Value: "第三方发行目录（来源与校验和见 manifests/）；本 SBOM 只记录目录树摘要，不枚举其内部组件"}}})
+		note := "第三方发行目录（来源与校验和见 manifests/）；本 SBOM 只记录目录树摘要，不枚举其内部组件"
+		props := []bomProp{{Name: "release:note", Value: note}}
+		if isFrontend {
+			bom.Metadata.Component.Properties = append(bom.Metadata.Component.Properties, bomProp{Name: "release:pnpm-lock-sha256", Value: o.lockSHA})
+			props = []bomProp{{Name: "release:note", Value: "前端生产构建输出（pnpm install --frozen-lockfile；依赖由 frontend/pnpm-lock.yaml 固定，其哈希见 release:pnpm-lock-sha256）；本 SBOM 记录目录树摘要，不枚举打包进产物的 npm 依赖"}}
+		}
+		bom.add(bomComp{Type: "application", BOMRef: bom.Metadata.Component.BOMRef + "#content", Name: c.Name, Version: o.version, Properties: props})
 	}
 	sbom, err := bom.finish()
 	if err != nil {

@@ -79,6 +79,12 @@ func (x *execution) doExtract(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		if pv, ok := x.in.d.Specs[c.Name].(payloadValidator); ok {
+			// 组件对包布局有要求（静态前端：public/index.html）：落地之前校验，不合格则第 14 步失败，不会写入任何 release 内容。
+			if err := pv.ValidatePayload(filepath.Join(a.PkgDir, "payload")); err != nil {
+				return &Error{Kind: KindPrecondition, Step: StepExtract, Msg: "组件 " + c.Name + " 的包布局不符合要求：" + err.Error(), SystemState: "unchanged"}
+			}
+		}
 		if _, err := os.Lstat(x.hp(rel)); err == nil {
 			// 目标 release 已存在：只有与已验证的包逐文件一致才算幂等完成，否则绝不覆盖。
 			if err := verifyTree(x.hp(rel), filepath.Join(a.PkgDir, "payload"), sums); err != nil {
@@ -524,6 +530,14 @@ func (x *execution) planStart() (registry.Undo, error) {
 	comps := x.installComps()
 	for i := len(comps) - 1; i >= 0; i-- { // 撤销顺序：后启动的先停
 		c := comps[i]
+		if x.pre.req.NginxLink && IsStaticComponent(c.Name) {
+			// 先摘 conf.d 软链（并 reload），再谈别的：先记 undo 再动手。
+			a, err := x.nginxLinkUndo(c.Name)
+			if err != nil {
+				return u, err
+			}
+			u.Actions = append(u.Actions, a)
+		}
 		for _, t := range service.EnableTargets(c.Name) {
 			st, err := x.in.sys.IsActive(ctx, t)
 			if err != nil {
@@ -562,6 +576,9 @@ func (x *execution) doStart(ctx context.Context) error {
 	for _, c := range x.installComps() {
 		if err := x.in.d.Specs[c.Name].Start(ctx, x.runtimeFor(c)); err != nil {
 			return fmt.Errorf("启动 %s 失败: %w", c.Name, err)
+		}
+		if x.pre.req.NginxLink && IsStaticComponent(c.Name) {
+			x.activateNginx(ctx, c.Name)
 		}
 	}
 	return nil
@@ -634,8 +651,12 @@ func (x *execution) doState(ctx context.Context) error {
 	rep := x.pre.probe.Baota.Scrub()
 	err := x.in.d.Reg.UpdateState(ctx, func(s *registry.State) error {
 		for _, c := range comps {
+			cstate := state
+			if IsStaticComponent(c.Name) && cstate == "running" {
+				cstate = "installed" // 静态前端没有进程可运行：由 Nginx 托管，记为 installed
+			}
 			rec := registry.Component{
-				Version: c.Version, State: state, RunUser: c.RunUser, Ports: uniquePorts(x.pre.Plan.Ports, c.Name),
+				Version: c.Version, State: cstate, RunUser: c.RunUser, Ports: uniquePorts(x.pre.Plan.Ports, c.Name),
 				ReleaseDir: releaseDir(c), InstalledAt: now, LastTx: x.tx,
 			}
 			if ts := service.EnableTargets(c.Name); len(ts) > 0 {
@@ -669,13 +690,21 @@ func (x *execution) doState(ctx context.Context) error {
 	}
 	x.committed = true
 	for _, c := range comps {
-		x.comps = append(x.comps, InstalledComponent{Name: c.Name, Version: c.Version, State: state, ReleaseDir: releaseDir(c)})
+		cstate := state
+		if IsStaticComponent(c.Name) && cstate == "running" {
+			cstate = "installed"
+		}
+		x.comps = append(x.comps, InstalledComponent{Name: c.Name, Version: c.Version, State: cstate, ReleaseDir: releaseDir(c)})
 	}
 	return nil
 }
 
 func (x *execution) doAccess(context.Context) error {
 	for _, c := range x.installComps() {
+		if IsStaticComponent(c.Name) {
+			x.access = append(x.access, x.staticAccess(c.Name)...)
+			continue
+		}
 		if c.Name != "server" {
 			continue
 		}

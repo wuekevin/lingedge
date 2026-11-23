@@ -33,7 +33,7 @@ type UndoApplier interface {
 
 // Prompt 是需要用户确认的事项。
 type Prompt struct {
-	Kind    string // passive_upgrade | conflicts | port_unverified
+	Kind    string // passive_upgrade | conflicts | port_unverified | nginx_link
 	Message string
 	Items   []string
 }
@@ -53,7 +53,9 @@ type Deps struct {
 	// FS 是宝塔/既有环境探测的文件视图（缺省 baota.OSFS{Root: Root 或 "/"}）。
 	FS     baota.FS
 	Runner service.Runner
-	Own    service.Ownership
+	// WebRunner 执行 nginx/openresty（静态前端的 conf.d 软链：nginx -t 与 -s reload，Story 1.40）；nil = service.SystemWebServerRunner()。
+	WebRunner service.Runner
+	Own       service.Ownership
 	// Booted 判定本机是否 systemd 启动（nil = 平台实现）。
 	Booted func() bool
 	// Geteuid 返回有效 uid（nil = os.Geteuid）；创建/删除运行用户需要 root，非 root 时 service 在动手前就明确失败。

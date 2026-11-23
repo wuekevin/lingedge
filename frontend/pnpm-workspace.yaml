@@ -12,3 +12,13 @@ packages:
 # 行为由 scripts/pnpm-hardening.test.mjs 用真实 pnpm install 验证。需要构建脚本的依赖须先经审核登记（README「生命周期脚本审核」）。
 ignoreScripts: true
 engineStrict: true
+
+# 供应链安全覆盖（Dependabot #2 / GHSA-g3hv-75wg-m249：minimatch >=7.0.0 <11.0.1 的 globparts 放大导致 glob 展开 DoS，已修复版本 11.0.1）。
+# 仅覆盖落在漏洞区间的 minimatch（当前是 js-beautify→editorconfig/glob 链上的 10.2.6，来自 @vue/test-utils 的开发依赖）；5.x（openapi-typescript 链）不在区间内，保持不动。
+# 精确版本（由 check:deps 校验）：11.0.9 即锁里已有的 11.x，同时被 eslint 链使用；不改 Node/pnpm 版本矩阵（minimatch 11 要求 Node 20||>=22，矩阵为 26）。
+#
+# 同一链上 pnpm audit（make vuln 的前端部分）报告的 glob（GHSA-3g3m-2fjr-6pw4，moderate：AbortSignal 取消后仍可越过超时遍历文件系统，>=9.0.0 <=14.0.1，已修复 14.0.2）：
+# 同样只经 js-beautify（@vue/test-utils 的开发依赖，只用其 html 美化函数，不走 glob CLI）引入，覆盖到 14.0.6（其依赖 minimatch ^11，与上面的覆盖一致）。
+overrides:
+  'minimatch@>=7.0.0 <11.0.1': 11.0.9
+  'glob@>=9.0.0 <14.0.2': 14.0.6

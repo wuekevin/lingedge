@@ -92,7 +92,9 @@ func sharedFlow(t *testing.T) *flow {
 	sharedOnce.Do(func() {
 		f := newFlowIn(t, "rel-e2e-a", mkSub("keys"), mkSub("src"))
 		f.out = filepath.Join(sharedDir, "out")
-		out, err := f.run(f.release, "build", "-src", f.src, "-out", f.out, "-version", relVer, "-platforms", relPlats, "-repro-fresh-cache=false")
+		adminDist, websiteDist := distOrFixture(t, "admin-web", mkSub("fe-admin")), frontendFixture(mkSub("fe-website"), "website")
+		out, err := f.run(f.release, "build", "-src", f.src, "-out", f.out, "-version", relVer, "-platforms", relPlats, "-repro-fresh-cache=false",
+			"-frontend-dist", "admin-web="+adminDist, "-frontend-dist", "website="+websiteDist)
 		if err != nil {
 			sharedErr = fmt.Errorf("build: %v\n%s", err, out)
 			return
@@ -196,9 +198,15 @@ func TestPublishLayoutAndManifestContent(t *testing.T) {
 	if st := m.Components["server"].Status; st != manifest.CompAvailable {
 		t.Errorf("server 应 available: %s", st)
 	}
-	for _, c := range []string{"node", "dns", "reporter", "admin-web", "console", "website", "docs", "status", "openresty"} {
+	for _, c := range []string{"node", "dns", "reporter", "console", "docs", "status", "openresty"} {
 		if m.Components[c].Status != manifest.CompUnreleased {
 			t.Errorf("%s 尚无真实交付物，必须如实标 unreleased，得到 %q", c, m.Components[c].Status)
+		}
+	}
+	// 静态前端：只有经 -frontend-dist 提供了构建目录的才 available（Story 1.40）；其余如实 unreleased（上一条）。
+	for _, c := range []string{"admin-web", "website"} {
+		if m.Components[c].Status != manifest.CompAvailable {
+			t.Errorf("%s 提供了前端构建目录，应 available，得到 %q", c, m.Components[c].Status)
 		}
 	}
 	if m.Components["scheduler"].Status != manifest.CompBuiltin || m.Components["worker"].BuiltinIn != "server" {
@@ -928,4 +936,43 @@ func TestRepoSecretScanPasses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("gates secrets 失败:\n%s", out)
 	}
+}
+
+// frontendFixture 写出一个形似 Vite 生产构建输出的目录（入口页 + 哈希命名的资源；足够大以触发预压缩）。
+// 内容是测试夹具，不是真实前端——流水线对前端目录的检查（index.html、mock 入口检查、预压缩、布局、哈希）作用于任何这样的目录；
+// 对真实 frontend/dist/admin 的端到端验证见 tests/integration/staticinstall。
+func frontendFixture(dir, name string) string {
+	files := map[string]string{
+		"index.html":                "<!doctype html><html><head><title>" + name + "</title><script type=\"module\" src=\"/assets/index-AbCd1234.js\"></script></head><body><div id=\"app\"></div></body></html>\n",
+		"assets/index-AbCd1234.js":  strings.Repeat("export const route = '/dashboard';\n", 200),
+		"assets/index-EfGh5678.css": strings.Repeat(".card{margin:0;padding:8px}\n", 100),
+		"assets/logo-0a1b2c3d.png":  "\x89PNG\r\n\x1a\n" + strings.Repeat("\x00", 64),
+		"robots.txt":                "User-agent: *\nDisallow: /\n",
+	}
+	for rel, body := range files {
+		p := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			panic(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			panic(err)
+		}
+	}
+	return dir
+}
+
+// realAdminDist 报告共享演练里的 admin-web 包是否来自真实的 frontend/dist/admin（make verify-build / make frontend-check 的构建产物）。
+var realAdminDist bool
+
+// distOrFixture：仓库里有真实的 Admin 生产构建（frontend/dist/admin）就用它——流水线打包、Tools 安装、Nginx 托管走的就是真实的 Admin；
+// 没有（未跑过前端构建）才回落夹具，并在测试日志里如实标注。
+func distOrFixture(t testing.TB, comp, fixtureDir string) string {
+	if comp == "admin-web" {
+		real := filepath.Join(repoRoot(t), "frontend", "dist", "admin")
+		if st, err := os.Stat(filepath.Join(real, "index.html")); err == nil && st.Mode().IsRegular() {
+			realAdminDist = true
+			return real
+		}
+	}
+	return frontendFixture(fixtureDir, comp)
 }

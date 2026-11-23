@@ -81,7 +81,7 @@ development_status:
   1-38-admin-工程与壳-登录-动态菜单-守卫-多标签-代管横幅: review   # 开发完成、本机门禁与真实浏览器 E2E 见 docs/bmad/stories/1-38-*.md：frontend/admin 独立工程（Vue3+TS+Arco 2.59.0+vue-router 4.6.5+pinia 3.0.4；Arco Pro 实测为脚手架故只采用其布局架构）；登录（口令→TOTP/恢复码，le_admin_sid，自动 X-CSRF-Token，租户账号与错口令逐字相同的中性提示）；「已交付页面注册表」驱动路由/菜单/搜索（模块已交付∧权限∧运行模式；整组为空不渲染、无占位；404 vs 403 分流；对账测试读后端 DeliveredModules 与 OpenAPI 权限）；生产清单当前为空（业务页面属 1.39）；多标签/全局搜索壳/代管默认租户横幅/亮暗跟随系统/中英文/响应式（手机抽屉+面包屑、复杂编辑如实标注）/三态与表单校验；e2e 模式构建带夹具页面仅供 Playwright，生产构建经 check:mock+admin-build 自测证明不含；未改 OpenAPI（/auth/me 已足够，无 CC-14）；vitest 76 + Playwright（真实 server/MySQL/Redis/Chromium）登录/TOTP/恢复码/无权限菜单隐藏/直访 403·404/租户账号被拒/手机宽度/亮暗对比度逐页审计；Admin 产物不嵌入 Server，沿用 Tools admin-web 的 Nginx 托管（1.40）；等待环境验证：真机/Safari 手机端视觉、真实 Nginx+HTTPS 下 Host/CSP/Secure Cookie（1.40/1.45）；后续：1.39 业务页面、1.40 admin-web 安装与发行
   1-39-admin-系统管理页-系统设置-用户与角色-api-token-审计: review   # 开发完成，见 docs/bmad/stories/1-39-*.md：12 个登记页面（3 个别名）、L2/L3 对话框 + L4 再认证（后端 /auth/reauth 现成，无 CC-14、无后端/OpenAPI 改动）、一次性明文、游标分页与过滤、UX-27 静态检查；vitest admin 130 + Playwright 16 项（真实 server/MySQL/Redis/Chromium）；等待环境验证：真机/Safari/真实 Nginx+HTTPS（1.40/1.45）；后续：官网读取品牌（2.4/2.6）、权限集缓存 token:manage 回填缺陷（1.18/1.19）
   1-39b-权限集缓存回填缺陷修复: review   # 1.39 遗留缺陷修复（清理型，见 docs/bmad/stories/1-39b-*.md）：token:manage/credential:read/credential:write 被 redact.String 误判致 auth:perms 缓存无法回填；redisx 新增 StructuredGuard 路径（SetStructured/GetOrLoadStructured），权限缓存走 schema+权限目录白名单，pkg/redact 与普通 Set 门禁不变；真实 Redis/MySQL 回归 + 22 个负向用例；删除 1.18 遗留的 rbac_perm_test.go.bak
-  1-40-静态前端安装器-admin-web-docs-status-console-website-static: backlog
+  1-40-静态前端安装器-admin-web-docs-status-console-website-static: review   # 开发完成，见 docs/bmad/stories/1-40-*.md：五个静态前端共用生产 ComponentSpec（admin-web/console/docs/status/website static）；站点片段+安全头渲染（纯函数、严格字符集、每个含 add_header 的 location 显式 include、CI 静态检查 tests/security/nginxsnippet）；独立主机名强制（退出码 2、无绕过开关）；同名 conf/同域名站点不覆盖（9）；原生 Nginx conf.d 软链（询问/--set nginx-link=yes，nginx -t && reload，失败与回滚撤销）、宝塔只打印指引；发行流水线 -frontend-dist（预压缩 .gz、mock 检查、pnpm-lock 哈希）；真实 nginx 加载安装器生成的片段并服务（真实 frontend/dist/admin 经 流水线→验签→安装→nginx）；发现并修复 tools-design 原文漏洞（/public/setup 在 /public/ 前缀内需显式 404）；清理：Dependabot #2 minimatch + glob 经 pnpm overrides 钉到已修复精确版本，make vuln 增 pnpm audit；无 CC-14/迁移/OpenAPI 变更
   1-41-backup-restore-uninstall-含主密钥指纹与加密: backlog
   1-42-doctor-config-service-logs-status-list-完整: backlog
   1-43-升级与回滚-update-check-升级编排-迁移决策表-rollback-update-self: backlog
@@ -845,6 +845,14 @@ environment_verification:   # 『等待环境验证』登记（验证人/日期�
     condition: "系统管理页全部功能代码与测试本机完成并真跑（真实 server + 临时 MySQL/Redis + Chromium）；仅真机/Safari/Firefox 手机端视觉与真实 Nginx+HTTPS 需真实环境"
     done_locally: "见 docs/bmad/stories/1-39-*.md"
     pending: "真机/Safari/Firefox 手机端；真实 Nginx + HTTPS（1.40/1.45）；UD-14 沿用。"
+    verified_by: ""
+    verified_on: ""
+  1-40-静态前端安装器-admin-web-docs-status-console-website-static:
+    status: partial
+    required_env: "ENV-LNX（Debian/Ubuntu 与 RHEL 系的系统 Nginx reload 与 gzip_static/http2）、ENV-BT（真实宝塔面板）、真实公网证书与浏览器"
+    condition: "全部功能代码与测试本机完成并真跑（真实 nginx 加载生成片段并服务 HTTP/HTTPS、发行流水线→验签→安装全链、伪的只有 OS）；仅真实发行版 Nginx 的 conf.d 软链 reload、真实宝塔手工接入、真实公网证书 HTTPS、浏览器经 Nginx 登录需真实环境"
+    done_locally: "gofmt -l . 无输出；make lint security gate-selftest vuln（含 pnpm audit）contract-check build verify-build migrate-test frontend-check race e2e 全绿；真实 nginx 用例（tests/release/frontend_test.go）通过；变异验证全部检出：见 docs/bmad/stories/1-40-*.md。"
+    pending: "ENV-LNX/ENV-BT 真机验证（1.45）；uninstall 保留数据（1.41）；website ssr/runtime-config（2.5/2.14）。"
     verified_by: ""
     verified_on: ""
 

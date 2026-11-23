@@ -46,7 +46,7 @@ endef
 .PHONY: help build verify-build test race lint fmt vet check-scaffold clean \
         gen-lint arch-check golangci shell-check repo-check gate-selftest vuln verify-gates \
         release-keys-check contract-bin contract-selftest openapi-breaking migrations-check migrations-seal freeze-check perms-check tenantscope-check audit-check contract-check \
-        frontend-install frontend-lint frontend-test frontend-types-check frontend-gate-selftest frontend-check setup-web setup-web-check admin-e2e-build \
+        frontend-install frontend-audit frontend-lint frontend-test frontend-types-check frontend-gate-selftest frontend-check setup-web setup-web-check admin-e2e-build \
         print-ldflags migrate migrate-test proto proto-check openapi-check frontend e2e edge-test security release release-finalize release-verify release-sign release-sign-test release-test secrets-check
 
 help:
@@ -140,9 +140,20 @@ gate-selftest:
 	$(MAKE) --no-print-directory release-sign-test
 	$(MAKE) --no-print-directory frontend-gate-selftest
 
-# 依赖漏洞扫描（G-7 的 Go 部分；需访问 vuln.go.dev，不在 make security 内，完整供应链门禁属 Story 1.34）。
+# 依赖漏洞扫描（G-7；需联网，不在 make security 内，完整供应链门禁属 Story 1.34）：
+#   Go：govulncheck（访问 vuln.go.dev）；前端：pnpm audit（Story 1.40，见 frontend-audit）。两部分都失败即失败，无豁免清单。
 vuln:
 	$(GOVULNCHECK) ./...
+	@$(MAKE) --no-print-directory frontend-audit
+
+# 前端依赖漏洞（Story 1.40，Dependabot #2 的后续）：对 frontend/pnpm-lock.yaml 固定的**全部**依赖（含 devDependencies：minimatch/glob 的告警就在开发依赖链上）
+# 运行 pnpm audit，moderate 及以上即失败。注意：
+#   · 需要访问 npm registry 的 audit 端点（与 govulncheck 访问 vuln.go.dev 同类的联网依赖）；联网失败按失败处理（fail closed），不会静默通过；
+#   · 结果取决于当天的公告库（与 govulncheck 一样可能随时间出现新告警）——可确定、可复现的部分是：锁文件固定、overrides 精确版本由 check:deps 校验、
+#     frontend-check 每次都在冻结锁文件上重跑全部检查；修复方式见 frontend/pnpm-workspace.yaml 顶部的 overrides 注释（先升级依赖，必要时用 overrides 钉到已修复的精确版本）。
+FRONTEND_AUDIT_LEVEL ?= moderate
+frontend-audit: frontend-install
+	$(PNPM) -C $(FRONTEND) audit --audit-level $(FRONTEND_AUDIT_LEVEL)
 
 # 一次性运行 Story 1.2 的全部门禁与自测。
 verify-gates: lint security gate-selftest

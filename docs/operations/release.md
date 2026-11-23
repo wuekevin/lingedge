@@ -38,7 +38,7 @@ publish/lingedge-offline-<版本>.tar  publish/SBOM.cdx.json  publish/RELEASE-RE
 - 包格式严格遵循 tools-design §9.3：`META/package.json`、`META/SHA256SUMS`、`META/SHA256SUMS.sig`、`payload/…`，META 三个文件在归档前部；`SHA256SUMS` 只列 `payload/`；`files_count`/`unpacked_size` 与解压限额口径一致；包内只有普通文件与目录，可执行位由 payload 文件模式带出（`bin/*` 为 0755，其余 0644；安装器按组件约定最终决定）。
 - 文件名：`lingedge-<组件>-<版本>-<os>-<arch>.tar.gz`（ADR-012 §1.3）；`any` 平台为 `lingedge-<组件>[-<变体>]-<版本>.tar.gz`。
 - 清单：`stable` 与 `beta` 是独立通道；清单地址为 `<release.base_url>/<通道>/manifest.json`（`.sig` 在其后），包地址为 `<release.base_url>/<组件>/<版本>/<文件名>`。发布时把 `publish/` 下的内容原样放到发行源即可。
-- **哪些组件有包**由 `scripts/release/components.go` 的目录表决定，状态如实：当前 `server`、`tools` 为 `available`；`node/dns/reporter/openresty`（等待 Epic 3 的真实交付物）与前端各组件为 `unreleased`；`scheduler/worker` 为 `builtin`。**不为「看起来完整」发布空壳包。** 某组件交付物落地后，只需改该表。
+- **哪些组件有包**由 `scripts/release/components.go` 的目录表决定，状态如实：当前 `server`、`tools` 为 `available`；`node/dns/reporter/openresty`（等待 Epic 3 的真实交付物）为 `unreleased`；静态前端（`admin-web/console/docs/status/website`）仅在构建时经 `-frontend-dist` 提供了前端生产构建目录才为 `available`（见 §12），否则如实 `unreleased`；`scheduler/worker` 为 `builtin`。**不为「看起来完整」发布空壳包。** 某组件交付物落地后，只需改该表。
 
 ## 4. 标准流程（两轮离线签名）
 
@@ -136,6 +136,7 @@ OpenResty 发行目录里有大量符号链接（`libfoo.so -> libfoo.so.1`、`b
 | §9.6 向量与 1.27 golden 交叉验证（Ruby OpenSSL × Go ed25519） | `scripts/release-sign`：`TestGolden96ReproducedBySigner`、`TestGolden96VerifiedByRubyOpenSSL`、`TestRubyOpenSSLSignsSameAsGo`；`tests/release`：`TestRubyOpenSSLVerifiesPipelineSignatures` |
 | 可复现性 | `TestReproducibilityRecord`、`repro.json`、`TestCompareBuildsDetectsMismatch` |
 | 生产构建无 `lingedge_testdouble`、含测试公钥的 keys.json 构建失败 | `TestProductionBuildFlags`、`TestReleaseBuildRejectsBadBuiltinKeys`、既有 `gates release-keys`/`tests/security/releasekeys` |
+| 静态前端包：布局/预压缩/平台 any/锁文件哈希/目录守卫；发行包 → Tools 验签 → 安装 → 真实 nginx 托管 | `tests/release/frontend_test.go`（`TestFrontendPackagesInPublishedRelease`、`TestFrontendDistGuards`、`TestInstallFrontendFromPublishedRelease`、`TestRealNginx*`） |
 | `release.base_url` 可配置（T-3） | `make release-finalize RELEASE_BASE_URL=…`；Tools 侧 `release.base_url` 的清单地址与发行目录布局由 `TestPublishLayoutAndManifestContent` 对账 |
 
 Ruby 交叉验证需要 OpenSSL ≥ 1.1.1 的 Ruby（macOS 自带 Ruby 2.6/LibreSSL 3.3 不支持 Ed25519；用 `RUBY=/opt/homebrew/bin/ruby` 指定）。缺失时测试明确跳过并标「等待环境验证」，`make release-sign-test` 缺省把缺失视为失败（`RELEASE_REQUIRE_RUBY=0` 可降级）。
@@ -145,4 +146,12 @@ Ruby 交叉验证需要 OpenSSL ≥ 1.1.1 的 Ruby（macOS 自带 Ruby 2.6/Libre
 - **UD-3**：真实签名人、保管介质、轮换/吊销演练周期、公开发行源地址与应急渠道待用户确认；确认前本流程以测试密钥在本机演练通过为准，**不得对外发行**。
 - **产物内置公钥的实际覆盖**：`cmd/lingedge` 自 Story 1.33 起已链接 `internal/tools/manifest`（经 `internal/tools/cli` 的安装编排），发行二进制 `go:embed` 内置 `keys.json`；守卫（`gates release-keys`、产物字节的测试公钥扫描、`tests/security/releasekeys` 的真实 `go build` 扫描）对真实 `lingedge` 产物生效（Story 1.35 补了对真实产物的证明）。发行构建仍须由发行流水线在构建前注入真实公钥（缺失即失败，`make build RELEASE=1`）。
 - 在线取包路径（HTTPS 发行源）由 Story 1.28 的 downloader 负责；本流水线用离线 bundle 路径（同一条校验链）验证，并产出可直接发布的目录。
-- 许可证扫描（G-7 子项）尚未选型接入；SBOM 的 npm 部分待前端工程（Story 1.36）出现 lockfile 后纳入。
+- 许可证扫描（G-7 子项）尚未选型接入；前端包的 SBOM 只登记目录树摘要与 `frontend/pnpm-lock.yaml` 的哈希，**不枚举打进产物的 npm 依赖**（见 §12），逐依赖的 npm SBOM 待选型。
+- 前端漏洞：`make vuln` 现含 `pnpm audit`（见 `Makefile` 的 `frontend-audit`），联网、无豁免清单。
+
+## 12. 静态前端包（Story 1.40）
+
+- **提供方式**：`make release RELEASE_FLAGS='-frontend-dist admin-web=frontend/dist/admin -frontend-dist website=<官网 generate 输出目录>'`（可重复；组件限 `admin-web|console|docs|status|website`，website 的变体为 `static`）。目录必须来自**前端生产构建**（`pnpm -C frontend install --frozen-lockfile && pnpm -C frontend run build`，建议在发行用的干净提交上）。没有提供的组件在清单里保持 `unreleased`（docs/status 目前没有构建产物源，console 是基座探针，website 属 Epic 2——不发布空壳包）。
+- **流水线做什么**：① 要求目录含 `index.html` 并**重新运行** `frontend/scripts/check-mock.mjs --dist <目录>`（生产产物不得含 mock 入口，NFR-1；需要 `node`，缺失即失败）；② 要求能读到 `frontend/pnpm-lock.yaml`，其 SHA-256 写入 `build-record.json` 的 `npm` 与包内 SBOM（`release:pnpm-lock-sha256`）；③ 复制到 `payload/public/`（同一套 SafeExtract 路径规则/限额；目录内**含符号链接则失败**——生产构建不应产生）；④ 为 `.html .js .mjs .css .svg .json .txt .xml .map .webmanifest` 生成确定性预压缩 `.gz`（gzip 9 级、头部时间清零；≥256 字节且更小才生成，不压缩已压缩的图片/字体）；⑤ 平台 `any`，包文件名 `lingedge-<组件>-<版本>.tar.gz`（website 为 `lingedge-website-static-<版本>.tar.gz`）；⑥ `build-record.json` 的 `frontends[]` 记录文件数、预压缩数与目录树摘要。
+- **边界**：流水线**不能证明**给它的目录确实由该提交构建（它不重新构建前端）；约束靠「干净提交 + 冻结锁文件 + mock 检查 + 目录树摘要入记录」。Tools 侧在落地前再校验包布局（见 tools-design §11.3）。
+

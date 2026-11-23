@@ -17,7 +17,7 @@ import (
 // ComponentSpec 是 installer 对「具体组件」的唯一依赖面：resolver 的部署画像只描述落地形态（用户/单元/文件路径），
 // 而这些只有组件自己知道——哪些包内文件要可执行、初始配置文件的内容、怎样启动、怎样判定健康。
 // 具体组件由后续 Story 实现并在 ProductionSpecs 登记（1.35 server、1.40 静态前端、Epic 3 node 等）；
-// **本 Story 的生产构建不含任何实现**，所以未登记的组件 install 会以 install.component_spec_missing 明确失败。
+// 生产构建只登记已交付的组件（见 ProductionSpecs），未登记的组件 install 会以 install.component_spec_missing 明确失败。
 // 测试用的假组件只存在于 _test.go（G-11，由构建符号检查测试证明生产二进制不含它们）。
 //
 // 契约：
@@ -120,9 +120,14 @@ func (s SpecSet) Names() []string {
 	return out
 }
 
-// ProductionSpecs 返回生产构建的组件规格：目前只有 server（Story 1.35）；其余组件由后续 Story（1.40 静态前端、Epic 3 node 等）在此登记，
-// 未登记的组件 install 以 install.component_spec_missing 明确失败。刻意不用包级可变注册表——那会让测试里的假组件有机会经全局状态混进生产路径。
-func ProductionSpecs() SpecSet { return SpecSet{"server": serverSpec{}} }
+// ProductionSpecs 返回生产构建的组件规格：server（Story 1.35）与静态前端 admin-web/console/docs/status/website（Story 1.40，同一框架，website 仅 static 变体）；
+// 其余组件（node、dns、reporter 等，Epic 3 与 Epic 2）由后续 Story 在此登记，未登记的组件 install 以 install.component_spec_missing 明确失败。
+// 刻意不用包级可变注册表——那会让测试里的假组件有机会经全局状态混进生产路径。
+func ProductionSpecs() SpecSet {
+	out := staticSpecs()
+	out["server"] = serverSpec{}
+	return out
+}
 
 // HTTPOK 对 url 发 GET，2xx 视为健康。仅用于组件的 Health 实现（本机环回探测，不跟随到非本机的重定向以外的任何东西）。
 func HTTPOK(ctx context.Context, url string, timeout time.Duration) error {

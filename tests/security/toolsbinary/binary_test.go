@@ -60,11 +60,11 @@ func symbolHits(t *testing.T, bin string) (hits []string, total int) {
 	return hits, total
 }
 
-// 生产规格只登记已交付的组件（Story 1.35：server）；多出的名字意味着有人把未交付/测试用的规格混进了生产路径。
+// 生产规格只登记已交付的组件（Story 1.35：server；Story 1.40：静态前端 admin-web/console/docs/status/website）；多出的名字意味着有人把未交付/测试用的规格混进了生产路径。
 func TestProductionSpecsAreOnlyDeliveredComponents(t *testing.T) {
 	got := strings.Join(installer.ProductionSpecs().Names(), ",")
-	if got != "server" {
-		t.Fatalf("生产构建只应登记 server 的组件规格（具体组件由其 Story 交付后在此追加），实际：%q", got)
+	if got != "admin-web,console,docs,server,status,website" {
+		t.Fatalf("生产构建只应登记已交付组件（server 与静态前端；其余由各自 Story 交付后在此追加）的规格，实际：%q", got)
 	}
 	for name, spec := range installer.ProductionSpecs() {
 		if reFake.MatchString(fmt.Sprintf("%T", spec)) {

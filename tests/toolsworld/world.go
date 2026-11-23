@@ -86,6 +86,11 @@ type Options struct {
 	ServerBinary string
 	// ProductionServerSpec 为 true：Specs["server"] 使用 installer.ProductionSpecs()["server"]（生产规格），而不是假规格。
 	ProductionServerSpec bool
+	// Static 为 true：bundle 额外含静态前端（admin-web/console/docs/status/website 的 static 变体，平台 any，布局与发行流水线一致：payload/public/…，含预压缩的 .gz），
+	// Specs 使用 installer.ProductionSpecs() 里**生产的**静态前端规格（不是假组件）；Deps 带伪 nginx 的 WebRunner（Story 1.40）。
+	Static bool
+	// StaticBrokenLayout 为 true（需要 Static）：docs 包的布局违反约定（没有 public/index.html，顶层多出文件）——用于「包布局在落地前被拒绝」的测试。
+	StaticBrokenLayout bool
 }
 
 // NewWorldWith 按 Options 建立（或复用）世界。
@@ -118,6 +123,11 @@ func NewWorldWith(root string, o Options) (*World, error) {
 	if o.ProductionServerSpec {
 		w.Specs["server"] = installer.ProductionSpecs()["server"]
 	}
+	if o.Static {
+		for _, n := range installer.StaticComponents() {
+			w.Specs[n] = installer.ProductionSpecs()[n]
+		}
+	}
 	w.Probe = probe.Result{
 		System: resolver.System{OS: "linux", Arch: "amd64", MemoryTotalMB: 16000, MemoryAvailableMB: 12000,
 			Disks: []resolver.Disk{{Mount: "/", FreeMB: 500000}}, Listeners: []resolver.Listener{}, Deps: map[string]resolver.Dep{}},
@@ -141,6 +151,15 @@ case "$1" in
   restart) ;;
   daemon-reload) echo reload >> "$ST/reloads";;
   *) echo "unknown verb $1" >&2; exit 2;;
+esac
+`,
+		// 伪 nginx：-t 与 -s reload 的调用记录在状态目录；开关 fail-nginx-t / fail-nginx-reload 注入失败。
+		"nginx": pre + `
+echo "$@" >> "$ST/nginx-calls"
+case "$1" in
+  -t) [ -e "` + w.Ctl + `/fail-nginx-t" ] && { echo "nginx: [emerg] unknown directive in /etc/nginx/conf.d/lingedge.conf:3" >&2; echo "nginx: configuration file /etc/nginx/nginx.conf test failed" >&2; exit 1; }; echo "nginx: configuration file /etc/nginx/nginx.conf test is successful" >&2;;
+  -s) [ "$2" = reload ] || exit 2; [ -e "` + w.Ctl + `/fail-nginx-reload" ] && { echo "nginx: [error] invalid PID number in /run/nginx.pid" >&2; exit 1; }; echo reload >> "$ST/nginx-reloads";;
+  *) exit 2;;
 esac
 `,
 		"id": pre + `
@@ -184,7 +203,7 @@ type pkgFileSpec struct {
 	exec bool
 }
 
-func (w *World) buildPkg(comp, ver string, files []pkgFileSpec) ([]byte, error) {
+func (w *World) buildPkg(comp, ver, plat, variant string, files []pkgFileSpec) ([]byte, error) {
 	var names []string
 	by := map[string]pkgFileSpec{}
 	var total int64
@@ -198,13 +217,13 @@ func (w *World) buildPkg(comp, ver string, files []pkgFileSpec) ([]byte, error) 
 	for _, n := range names {
 		fmt.Fprintf(&sums, "%s  payload/%s\n", sha([]byte(by[n].body)), n)
 	}
-	in, err := manifest.PackageSigInput(comp, ver, "linux-amd64", []byte(sums.String()))
+	in, err := manifest.PackageSigInput(comp, ver, plat, []byte(sums.String()))
 	if err != nil {
 		return nil, err
 	}
 	id, priv := tkeyFor("a")
 	sigb, _ := json.Marshal(map[string]string{"key_id": id, "alg": "ed25519", "sig": base64.StdEncoding.EncodeToString(ed25519.Sign(priv, in))})
-	meta, _ := json.Marshal(map[string]any{"component": comp, "version": ver, "variant": "default", "platform": "linux-amd64",
+	meta, _ := json.Marshal(map[string]any{"component": comp, "version": ver, "variant": variant, "platform": plat,
 		"built_at": "2026-11-15T00:00:00Z", "config_schema_version": 1, "files_count": len(files), "unpacked_size": total})
 	var raw bytes.Buffer
 	tw := tar.NewWriter(&raw)
@@ -277,6 +296,7 @@ func (w *World) writeBundle() error {
 		ports    []map[string]any
 		files    []pkgFileSpec
 	}
+	statics := map[string]string{} // 静态前端：组件名 → 变体
 	comps := []comp{
 		w.serverComp(),
 		{name: "openresty", internal: true, files: []pkgFileSpec{{"bin/openresty", "#!openresty-v1" + w.Variant + "\n", true}}},
@@ -284,23 +304,44 @@ func (w *World) writeBundle() error {
 			ports: []map[string]any{{"proto": "tcp", "port": 9100, "bind": "127.0.0.1", "purpose": "agent"}},
 			files: []pkgFileSpec{{"bin/lingedge-node", "#!node-binary-v1\n", true}}},
 	}
+	if w.opts.Static {
+		for _, n := range []string{"admin-web", "console", "docs", "status"} {
+			statics[n] = "default"
+			files := staticPkgFiles(n)
+			if n == "docs" && w.opts.StaticBrokenLayout {
+				files = []pkgFileSpec{{"public/readme.txt", "no index here\n", false}, {"evil.sh", "#!/bin/sh\n", true}}
+			}
+			comps = append(comps, comp{name: n, files: files})
+		}
+		statics["website"] = "static"
+		comps = append(comps, comp{name: "website", files: staticPkgFiles("website")})
+	}
 	var tarEnts []struct {
 		n string
 		b []byte
 	}
 	cm := map[string]any{}
 	for _, c := range comps {
-		pkg, err := w.buildPkg(c.name, "0.1.0", c.files)
+		plat, variant := "linux-amd64", "default"
+		fn := fmt.Sprintf("lingedge-%s-0.1.0-linux-amd64.tar.gz", c.name)
+		if v, ok := statics[c.name]; ok {
+			plat, variant = "any", v
+			if v == "default" {
+				fn = fmt.Sprintf("lingedge-%s-0.1.0.tar.gz", c.name)
+			} else {
+				fn = fmt.Sprintf("lingedge-%s-%s-0.1.0.tar.gz", c.name, v)
+			}
+		}
+		pkg, err := w.buildPkg(c.name, "0.1.0", plat, variant, c.files)
 		if err != nil {
 			return err
 		}
-		fn := fmt.Sprintf("lingedge-%s-0.1.0-linux-amd64.tar.gz", c.name)
 		tarEnts = append(tarEnts, struct {
 			n string
 			b []byte
 		}{"packages/" + fn, pkg})
-		ve := map[string]any{"version": "0.1.0", "variants": map[string]any{"default": map[string]any{"artifacts": map[string]any{
-			"linux-amd64": map[string]any{"url": w.PackageBase + "/dl/" + fn, "sha256": sha(pkg), "size": len(pkg)}}}}}
+		ve := map[string]any{"version": "0.1.0", "variants": map[string]any{variant: map[string]any{"artifacts": map[string]any{
+			plat: map[string]any{"url": w.PackageBase + "/dl/" + fn, "sha256": sha(pkg), "size": len(pkg)}}}}}
 		if c.requires != nil {
 			ve["requires"] = c.requires
 		}
@@ -384,10 +425,14 @@ func (w *World) Deps(runID string) installer.Deps {
 	if err != nil {
 		panic(err)
 	}
+	wr, err := service.NewWebServerRunner([]string{w.Bin})
+	if err != nil {
+		panic(err)
+	}
 	return installer.Deps{
 		Root: w.Root, Reg: w.Registry(runID), Verifier: w.Verifier, Specs: w.Specs,
 		Collect: func(context.Context) (probe.Result, error) { return w.Probe, nil },
-		Runner:  r, Own: w.Own, Booted: func() bool { return true }, Geteuid: func() int { return 0 },
+		Runner:  r, WebRunner: wr, Own: w.Own, Booted: func() bool { return true }, Geteuid: func() int { return 0 },
 		Now: func() time.Time { return T0 }, FS: baota.OSFS{Root: w.Root},
 	}
 }
@@ -527,4 +572,44 @@ func (w *World) RewriteBundle(variant string) error {
 // SetSystemdVersion 让伪 systemctl --version 输出给定的第一行（如 "systemd 245 (245.4-4ubuntu3)"）。
 func (w *World) SetSystemdVersion(line string) error {
 	return os.WriteFile(filepath.Join(w.Fake, "version"), []byte(line+"\n"), 0o644)
+}
+
+// staticPkgFiles 是静态前端包的内容：布局与发行流水线一致（payload/public/…，哈希命名的资源与预压缩 .gz）。
+func staticPkgFiles(comp string) []pkgFileSpec {
+	idx := "<!doctype html><title>" + comp + "</title><script type=\"module\" src=\"/assets/app-1a2b3c.js\"></script>\n"
+	js := "console.log('" + comp + "');\n"
+	return []pkgFileSpec{
+		{"public/index.html", idx, false}, {"public/index.html.gz", gzString(idx), false},
+		{"public/assets/app-1a2b3c.js", js, false}, {"public/assets/app-1a2b3c.js.gz", gzString(js), false},
+	}
+}
+
+// SetNativeNginx 让探测结果呈现「原生 Nginx（非宝塔）+ conf.d 约定」：Probe 里有系统 Nginx，世界里有 /etc/nginx/nginx.conf（include conf.d/*.conf）与 /etc/nginx/conf.d。
+func (w *World) SetNativeNginx() error {
+	if err := os.MkdirAll(filepath.Join(w.Root, "etc/nginx/conf.d"), 0o755); err != nil {
+		return err
+	}
+	conf := "user www-data;\nevents {}\nhttp {\n    include /etc/nginx/mime.types;\n    include /etc/nginx/conf.d/*.conf;\n}\n"
+	if err := os.WriteFile(filepath.Join(w.Root, "etc/nginx/nginx.conf"), []byte(conf), 0o644); err != nil {
+		return err
+	}
+	w.Probe.Baota.WebServers = []baota.WebServer{{Variant: "system", Kind: "nginx", Binary: "/usr/sbin/nginx", Conf: "/etc/nginx/nginx.conf"}}
+	return nil
+}
+
+// NginxCalls 返回伪 nginx 被调用的参数行（每行一次调用）。
+func (w *World) NginxCalls() []string {
+	b, err := os.ReadFile(filepath.Join(w.Fake, "nginx-calls"))
+	if err != nil {
+		return nil
+	}
+	return strings.Split(strings.TrimSpace(string(b)), "\n")
+}
+
+func gzString(v string) string {
+	var b bytes.Buffer
+	zw, _ := gzip.NewWriterLevel(&b, gzip.BestCompression)
+	_, _ = zw.Write([]byte(v))
+	_ = zw.Close()
+	return b.String()
 }

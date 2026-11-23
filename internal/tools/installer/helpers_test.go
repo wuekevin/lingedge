@@ -163,7 +163,7 @@ func sysSnap(t testing.TB, w *toolsworld.World) map[string]string {
 			continue
 		}
 		if k == "var/lib/lingedge/tools" || (strings.HasPrefix(k, "var/lib/lingedge/tools/") && k != "var/lib/lingedge/tools/state.json") ||
-			k == "fake/reloads" || k == "bundle.tar" || k == "ctl" || strings.HasPrefix(k, "ctl/") {
+			k == "fake/reloads" || k == "fake/nginx-calls" || k == "fake/nginx-reloads" || k == "bundle.tar" || k == "ctl" || strings.HasPrefix(k, "ctl/") {
 			continue
 		}
 		out[k] = v

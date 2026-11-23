@@ -29,6 +29,8 @@ type Request struct {
 	SkipStart     bool                    `json:"skip_start,omitempty"`
 	NoRollback    bool                    `json:"no_rollback,omitempty"`
 	SetupListen   string                  `json:"setup_listen,omitempty"`
+	// NginxLink 是静态前端安装时对「创建 conf.d 软链并 nginx -t && reload」的决定（Plan 阶段询问或由 --set nginx-link= 给出；续跑据此不再询问）。
+	NginxLink bool `json:"nginx_link,omitempty"`
 	// Accepted 记录安装时用户已确认冲突（既有内容保留、新内容写 .new）；续跑时据此不再重复询问。
 	Accepted bool `json:"accepted,omitempty"`
 	// Pinned 是求解结果（组件 → 版本/变体）：写入 journal 后供续跑使用。

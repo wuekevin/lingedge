@@ -70,7 +70,7 @@ func TestUsageErrors(t *testing.T) {
 func TestInstallValidCombosPassValidation(t *testing.T) {
 	for _, args := range [][]string{
 		{"install", "server", "--channel", "beta", "--version", "1.2.3-rc.1+b5", "--set", "env=staging", "--setup-listen", ":8080"},
-		{"install", "website", "--mode", "ssr"},
+		{"install", "website", "--mode", "ssr", "--set", "host=www.example.com"}, // Story 1.40：website 是静态前端规格，host 为必填项
 		{"install", "node", "--set", "port.node.tcp.9100=19100@127.0.0.1"},
 	} {
 		h := newHarness(t, asRoot())

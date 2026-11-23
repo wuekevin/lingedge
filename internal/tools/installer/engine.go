@@ -19,7 +19,7 @@ import (
 // Access 是步骤 22 输出的访问/管理信息。Secret=true 的值（setup token）只在本次输出中出现一次，不落盘、不写日志、不进事件。
 type Access struct {
 	Component string `json:"component"`
-	Kind      string `json:"kind"` // setup_url | ssh_tunnel | setup_token | master_key_fingerprint | master_key_warning | note
+	Kind      string `json:"kind"` // setup_url | ssh_tunnel | setup_token | master_key_fingerprint | master_key_warning | site_url | nginx_include | baota_guide | note
 	Label     string `json:"label"`
 	Value     string `json:"value"`
 	// JSON 键刻意不叫 secret：信封脱敏按键名把名为 secret 的键的值替换成 "***"（布尔也不例外），会破坏 schema。
@@ -108,6 +108,8 @@ type execution struct {
 	healthErr   error // --no-rollback 下保留的健康检查失败
 	comps       []InstalledComponent
 	userCreated map[string]bool
+	// nginxLinked：静态前端的 conf.d 软链已创建且 nginx -t 与 reload 通过（Story 1.40）。
+	nginxLinked map[string]bool
 	// committed：第 21 步已把 state.json 原子写入（提交点已过）。
 	committed bool
 	// masterKeyFP 是本次新建的 master.key 的短指纹（F-7；仅当本事务创建了它）。
@@ -116,12 +118,14 @@ type execution struct {
 
 func (x *execution) init() {
 	svc := &service.Undoer{Root: x.in.d.Root, Prov: x.in.prov, Sys: x.in.sys}
-	var u UndoApplier = &Undoer{Root: x.in.d.Root, Reg: x.in.d.Reg, Svc: svc}
+	var u UndoApplier = &Undoer{Root: x.in.d.Root, Reg: x.in.d.Reg, Svc: svc, Web: x.in.webRunnerOrNil(),
+		Notice: func(code, msg string) { x.warn(Warning{Code: code, Step: StepStart, Message: msg}) }}
 	if x.in.d.WrapUndoer != nil {
 		u = x.in.d.WrapUndoer(u)
 	}
 	x.udo = u
 	x.acqByC = map[string]*downloader.Acquired{}
+	x.nginxLinked = map[string]bool{}
 	x.warnings = append([]Warning(nil), x.pre.Warnings...)
 }
 

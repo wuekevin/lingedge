@@ -74,6 +74,9 @@ type PreflightResult struct {
 	cred       service.CredentialMode
 	token      string // 本次生成的 setup token（仅内存；步骤 22 显示一次）
 	acceptedBy string
+	// 静态前端（Story 1.40）：组件 → 校验后的设置；宿主机的 Nginx 能力（conf.d 软链/宝塔指引）。
+	static map[string]StaticSettings
+	nginx  nginxCapability
 }
 
 type plannedFile struct {
@@ -105,6 +108,11 @@ func (in *Installer) Plan(ctx context.Context, req Request) (*PreflightResult, e
 
 	// --set：非端口键先过组件自己的 schema（退出码 2），不进入任何副作用。
 	if err := in.checkSettings(req); err != nil {
+		return nil, err
+	}
+
+	// 静态前端：独立主机名（Story 1.40 AC5，退出码 2，无绕过开关）——只读、无需网络，所以排在探测与取清单之前。
+	if err := in.checkStaticHosts(req); err != nil {
 		return nil, err
 	}
 
@@ -170,7 +178,7 @@ func (in *Installer) Plan(ctx context.Context, req Request) (*PreflightResult, e
 		return res, e
 	}
 
-	// 组件规格：每个要安装的组件都必须有 ComponentSpec（生产构建目前为空）。
+	// 组件规格：每个要安装的组件都必须有 ComponentSpec（生产构建只登记已交付的组件）。
 	if err := in.checkSpecs(plan); err != nil {
 		return res, err
 	}
@@ -217,6 +225,9 @@ func (in *Installer) Plan(ctx context.Context, req Request) (*PreflightResult, e
 	if err := in.render(ctx, res); err != nil {
 		return res, err
 	}
+	if err := in.planStatic(res); err != nil {
+		return res, err
+	}
 	in.checkConflicts(res)
 	in.emitVerdicts(res.Steps)
 	for _, w := range res.Warnings {
@@ -260,7 +271,8 @@ func (in *Installer) checkRequest(req *Request) error {
 
 // checkSettings 校验非端口的 --set：server 的内建键由 installer 校验，其余交给组件规格；没有规格的组件不接受任何设置。
 func (in *Installer) checkSettings(req Request) error {
-	if len(req.Settings) == 0 {
+	_, isStatic := in.d.Specs[req.Component].(staticFrontend)
+	if len(req.Settings) == 0 && !isStatic { // 静态前端有必填项（host），空设置也要校验
 		return nil
 	}
 	rest := map[string]string{}
@@ -275,7 +287,7 @@ func (in *Installer) checkSettings(req Request) error {
 			return wrap(KindSettings, err, "--set 的 server 配置项不合法")
 		}
 	}
-	if len(rest) == 0 {
+	if len(rest) == 0 && !isStatic {
 		return nil
 	}
 	spec, ok := in.d.Specs[req.Component]
@@ -494,7 +506,7 @@ func (in *Installer) checkSpecs(plan *resolver.Plan) error {
 		return nil
 	}
 	return &Error{Kind: KindSpecMissing, Step: StepDependencies, Msg: "组件 " + strings.Join(missing, "、") + " 的安装规格（ComponentSpec）尚未交付，无法安装",
-		Hint:    "该组件的安装实现由后续 Story 交付（1.40 静态前端、Epic 3 node 等）；本命令不会用占位实现假装安装",
+		Hint:    "该组件的安装实现由后续 Story 交付（Epic 3 node/dns/reporter、website 的 ssr 变体 2.14 等）；本命令不会用占位实现假装安装",
 		Details: map[string]any{"components": missing, "registered": in.d.Specs.Names()}, SystemState: "unchanged"}
 }
 
@@ -865,6 +877,13 @@ func (in *Installer) dirSpecs(res *PreflightResult, c resolver.PlanComponent) []
 		return append(service.NodeDirs(user, group), service.UpgradeResultDir())
 	case "openresty":
 		return nil
+	}
+	if IsStaticComponent(c.Name) {
+		// 静态前端：/etc/lingedge/nginx 由各前端共用（root:root 0755，Nginx 主进程以 root 读取片段）；没有运行用户，也没有数据目录。
+		return []service.DirSpec{
+			{Path: "/etc/lingedge", Mode: 0o755, Owner: "root", Group: "root", Why: "§8 配置根", Loose: true},
+			{Path: nginxEtcDir, Mode: 0o755, Owner: "root", Group: "root", Why: "§11.3 Nginx 片段目录（各静态前端共用）", Loose: true},
+		}
 	}
 	var out []service.DirSpec
 	hasCfg := false
