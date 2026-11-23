@@ -291,6 +291,36 @@ func checkWrite(k Key, ttl time.Duration, value string) error {
 	return nil
 }
 
+// StructuredGuard 是「结构化缓存值」的写入守卫（Story 1.39b）：调用方为自己的缓存值提供严格的 schema 校验，返回 nil 才允许写入。
+// 它**替换**（不是叠加）redact.String 的自由文本启发式——启发式会把形如 `token:manage` 的权限码当成「token: 值」而误伤。
+// 守卫必须是白名单式的（只放行已知的、非机密的形态）；不能写成「找不到敏感词就放行」。nil 守卫等价于拒绝（fail-closed）。
+type StructuredGuard func(value string) error
+
+func checkStructuredWrite(k Key, ttl time.Duration, value string, guard StructuredGuard) error {
+	if !k.Valid() {
+		return ErrBadKey
+	}
+	if ttl < time.Millisecond {
+		return ErrNoTTL
+	}
+	if guard == nil {
+		return ErrSensitiveValue
+	}
+	if err := guard(value); err != nil {
+		return fmt.Errorf("%w: %v", ErrSensitiveValue, err)
+	}
+	return nil
+}
+
+// SetStructured 与 Set 相同，但值由调用方的 StructuredGuard（严格 schema 白名单）校验，而非 redact.String 启发式。
+// 值不通过守卫返回 ErrSensitiveValue（errors.Is 可判），不发出任何命令。
+func (c *Client) SetStructured(ctx context.Context, k Key, value string, ttl time.Duration, guard StructuredGuard) error {
+	if err := checkStructuredWrite(k, ttl, value, guard); err != nil {
+		return err
+	}
+	return c.run(ctx, func(r *redis.Client) error { return r.Set(ctx, k.s, value, ttl).Err() })
+}
+
 // Set 写入字符串值。ttl 必须为正（否则 ErrNoTTL，不发出任何命令）；值含明文敏感信息返回 ErrSensitiveValue。
 func (c *Client) Set(ctx context.Context, k Key, value string, ttl time.Duration) error {
 	if err := checkWrite(k, ttl, value); err != nil {

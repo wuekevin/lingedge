@@ -71,7 +71,7 @@ context:
 | 品牌 Logo/Favicon 上传 | **属后续 Story（官网 CMS，P2）** | 媒体库 |
 | 邮件/API/系统安全/数据保留/系统日志设置页 | **属后续 Story（P2）** | 后端键已在注册表，页面按 FR-36 不渲染 |
 | 租户用户/团队成员管理 | **属后续 Story（P5）** | `GET /admin/users` 仅平台用户 |
-| 权限集缓存：含 `token:manage` 的权限集因 `redact.String` 判为敏感而无法回填 Redis（每请求一条 warn、回库查询；结果正确，仅性能/日志噪声） | **属后续 Story（1.18/1.19 缺陷，本 Story 未改后端）** | 证据：E2E 服务端日志 `缓存值含敏感信息，已跳过回填` key `auth:perms:*` |
+| 权限集缓存：含 `token:manage` 的权限集因 `redact.String` 判为敏感而无法回填 Redis（每请求一条 warn、回库查询；结果正确，仅性能/日志噪声） | **已由 Story 1.39b 修复**（本 Story 未改后端） | 证据：E2E 服务端日志 `缓存值含敏感信息，已跳过回填` key `auth:perms:*` |
 | 远端 CI 首跑、UD-14 视觉确认 | 沿用 1.36/1.38 | |
 
 ## 验证记录

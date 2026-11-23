@@ -23,6 +23,19 @@ func NewCache(c *Client) *Cache { return &Cache{c: c} }
 
 // GetOrLoad 见 Cache 说明。ttl 必须为正（编程错误，先于 load 失败）。
 func (ca *Cache) GetOrLoad(ctx context.Context, k Key, ttl time.Duration, load Loader) ([]byte, error) {
+	return ca.getOrLoad(ctx, k, ttl, load, nil)
+}
+
+// GetOrLoadStructured 同 GetOrLoad，但回填时用调用方的 StructuredGuard 校验缓存值（结构化、非机密数据，如权限码集合），
+// 而不是 redact.String 自由文本启发式。守卫不通过仍是「编程错误」：跳过回填并记 warn，结果照常返回。
+func (ca *Cache) GetOrLoadStructured(ctx context.Context, k Key, ttl time.Duration, load Loader, guard StructuredGuard) ([]byte, error) {
+	if guard == nil {
+		return nil, ErrSensitiveValue
+	}
+	return ca.getOrLoad(ctx, k, ttl, load, guard)
+}
+
+func (ca *Cache) getOrLoad(ctx context.Context, k Key, ttl time.Duration, load Loader, guard StructuredGuard) ([]byte, error) {
 	if !k.Valid() {
 		return nil, ErrBadKey
 	}
@@ -42,7 +55,13 @@ func (ca *Cache) GetOrLoad(ctx context.Context, k Key, ttl time.Duration, load L
 	if lerr != nil {
 		return nil, lerr
 	}
-	if err := ca.c.Set(ctx, k, string(val), ttl); err != nil {
+	var serr error
+	if guard != nil {
+		serr = ca.c.SetStructured(ctx, k, string(val), ttl, guard)
+	} else {
+		serr = ca.c.Set(ctx, k, string(val), ttl)
+	}
+	if err := serr; err != nil {
 		switch {
 		case errors.Is(err, ErrSensitiveValue):
 			ca.c.log.Warn("缓存值含敏感信息，已跳过回填（编程错误）", zap.String("key", k.s))

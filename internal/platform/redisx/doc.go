@@ -4,7 +4,8 @@
 // 不可用或被清空时只降级、不丢数据、不停服。本包把这条边界落到代码：
 //
 //   - 键空间（keys.go）：全部键为 le:<env>:<模块>:<用途>:<标识>，租户段 t<tenant_uid> 经 scope.Scope 构造；
-//     写入必须带 TTL（无 TTL 返回 ErrNoTTL，且不发出任何命令）；值含明文敏感信息被拒绝（ErrSensitiveValue）；
+//     写入必须带 TTL（无 TTL 返回 ErrNoTTL，且不发出任何命令）；值含明文敏感信息被拒绝（ErrSensitiveValue；自由文本走 redact.String 启发式，
+//     结构化、非机密的缓存值（权限码集合）走调用方提供的 StructuredGuard 白名单——Set/GetOrLoad 与 SetStructured/GetOrLoadStructured）；
 //   - 连接与降级（client.go）：New 在 Redis 不可达时不失败，而以 Degraded 状态返回并告警；后台探测恢复后自愈；
 //     降级期间调用快速失败（ErrUnavailable），不被超时拖慢；调用方的 ctx 取消不算 Redis 故障；
 //   - 三类接口（limiter.go / cache.go / pubsub.go）：Limiter（Redis→进程内→DB 兜底）、Cache（miss/故障→直读真相源，

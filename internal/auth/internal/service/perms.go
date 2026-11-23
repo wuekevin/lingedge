@@ -1,9 +1,13 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"regexp"
 	"strconv"
 	"time"
 
@@ -11,7 +15,9 @@ import (
 
 	"github.com/wuekevin/lingedge/internal/auth/internal/domain"
 	"github.com/wuekevin/lingedge/internal/platform/apierr"
+	"github.com/wuekevin/lingedge/internal/platform/rbac"
 	"github.com/wuekevin/lingedge/internal/platform/redisx"
+	"github.com/wuekevin/lingedge/pkg/redact"
 )
 
 // 权限集缓存（Story 1.18、ADR-018 §8、ADR-025）。
@@ -44,6 +50,46 @@ type permEntry struct {
 }
 
 const permEntryVersion = 2
+
+// reMenuKey 是菜单键的语法（小写字母开头，仅小写字母/数字/下划线/点/连字符；不含冒号，故不会与权限码混淆）。
+var reMenuKey = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,63}$`)
+
+// permEntryGuard 是权限缓存项的写入守卫（Story 1.39b、redisx.StructuredGuard）。
+//
+// 为什么不用 redact.String：缓存项是「非机密的结构化数据」（权限码 / 角色码 / 菜单键）。redact 的键名启发式会把权限码
+// `token:manage`、`credential:read/write` 读成「token: 值」「credential: 值」而误伤，导致缓存永远无法回填。
+// 这里改为严格的 schema 白名单（比启发式更窄，不是更松）：
+//   - 整体必须是单个 JSON 对象，只允许 p/r/m/v 四个字段（未知字段一律拒绝，机密无处可藏）；
+//   - p 的每一项必须是权限目录（rbac）里的已知权限码——不在目录里的任何字符串都进不来；
+//   - r 的每一项必须符合角色码语法，m 的每一项必须符合菜单键语法，且逐项再过一遍 redact.String（形态级规则：
+//     API Token、注册令牌、PEM、Bearer 等原样拦截，裸密钥同样拦截）。
+func permEntryGuard(value string) error {
+	dec := json.NewDecoder(bytes.NewReader([]byte(value)))
+	dec.DisallowUnknownFields()
+	var e permEntry
+	if err := dec.Decode(&e); err != nil {
+		return fmt.Errorf("权限缓存项不是合法的 schema: %w", err)
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return errors.New("权限缓存项含多余内容")
+	}
+	for _, c := range e.P {
+		if !rbac.Known(c) {
+			return fmt.Errorf("权限码不在权限目录内: %d 字节", len(c))
+		}
+	}
+	for _, r := range e.R {
+		if !reRoleCode.MatchString(r) || redact.String(r) != r {
+			return errors.New("角色码不符合语法或形态敏感")
+		}
+	}
+	for _, m := range e.M {
+		if !reMenuKey.MatchString(m) || redact.String(m) != m {
+			return errors.New("菜单键不符合语法或形态敏感")
+		}
+	}
+	return nil
+}
 
 func (s *Service) permKey(userUID string, scopeID, version uint64) (redisx.Key, error) {
 	return s.ks.Key("auth", "perms", userUID, "s"+strconv.FormatUint(scopeID, 10), "v"+strconv.FormatUint(version, 10))
@@ -156,7 +202,7 @@ func (s *Service) loadEntry(ctx context.Context, p *domain.Principal) (permEntry
 		}
 	} else {
 		var err error
-		raw, err = s.permCache.GetOrLoad(ctx, key, s.permTTL, load)
+		raw, err = s.permCache.GetOrLoadStructured(ctx, key, s.permTTL, load, permEntryGuard)
 		if err != nil {
 			return permEntry{}, apierr.Internal(err)
 		}

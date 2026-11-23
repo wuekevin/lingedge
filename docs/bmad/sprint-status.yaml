@@ -80,6 +80,7 @@ development_status:
   1-37b-遗留项清理: review   # 1.37 及前序遗留清理（清理型 Story，不属 epics 原编号；本机可做项全部完成并测试，见 docs/bmad/stories/1-37b-遗留项清理.md）：向导服务端消息 i18n（按稳定错误码/检查项/步骤映射 zh-CN/en，未知回落服务端原文；check:setup-codes 对账 Go 源码与 OpenAPI，缺键 CI 失败）、向导暗色主题（跟随系统 + 顶栏切换；Playwright 暗色全流程含渐变侧栏最坏色标审计）、1.36 对比度例外（light chart-3 调为 #D17A1F；Arco 暗色实心控件窄覆盖 + check:arco-contrast 对照 Arco 真实 CSS）、文档过时表述订正、令牌重置跟随 server.yaml 的 secrets.setup_token_hash_file；等待环境验证：setup-token.hash 在 ProtectSystem=strict 下的清理处置（准则已写入 tools-design）、UD-14 视觉确认
   1-38-admin-工程与壳-登录-动态菜单-守卫-多标签-代管横幅: review   # 开发完成、本机门禁与真实浏览器 E2E 见 docs/bmad/stories/1-38-*.md：frontend/admin 独立工程（Vue3+TS+Arco 2.59.0+vue-router 4.6.5+pinia 3.0.4；Arco Pro 实测为脚手架故只采用其布局架构）；登录（口令→TOTP/恢复码，le_admin_sid，自动 X-CSRF-Token，租户账号与错口令逐字相同的中性提示）；「已交付页面注册表」驱动路由/菜单/搜索（模块已交付∧权限∧运行模式；整组为空不渲染、无占位；404 vs 403 分流；对账测试读后端 DeliveredModules 与 OpenAPI 权限）；生产清单当前为空（业务页面属 1.39）；多标签/全局搜索壳/代管默认租户横幅/亮暗跟随系统/中英文/响应式（手机抽屉+面包屑、复杂编辑如实标注）/三态与表单校验；e2e 模式构建带夹具页面仅供 Playwright，生产构建经 check:mock+admin-build 自测证明不含；未改 OpenAPI（/auth/me 已足够，无 CC-14）；vitest 76 + Playwright（真实 server/MySQL/Redis/Chromium）登录/TOTP/恢复码/无权限菜单隐藏/直访 403·404/租户账号被拒/手机宽度/亮暗对比度逐页审计；Admin 产物不嵌入 Server，沿用 Tools admin-web 的 Nginx 托管（1.40）；等待环境验证：真机/Safari 手机端视觉、真实 Nginx+HTTPS 下 Host/CSP/Secure Cookie（1.40/1.45）；后续：1.39 业务页面、1.40 admin-web 安装与发行
   1-39-admin-系统管理页-系统设置-用户与角色-api-token-审计: review   # 开发完成，见 docs/bmad/stories/1-39-*.md：12 个登记页面（3 个别名）、L2/L3 对话框 + L4 再认证（后端 /auth/reauth 现成，无 CC-14、无后端/OpenAPI 改动）、一次性明文、游标分页与过滤、UX-27 静态检查；vitest admin 130 + Playwright 16 项（真实 server/MySQL/Redis/Chromium）；等待环境验证：真机/Safari/真实 Nginx+HTTPS（1.40/1.45）；后续：官网读取品牌（2.4/2.6）、权限集缓存 token:manage 回填缺陷（1.18/1.19）
+  1-39b-权限集缓存回填缺陷修复: review   # 1.39 遗留缺陷修复（清理型，见 docs/bmad/stories/1-39b-*.md）：token:manage/credential:read/credential:write 被 redact.String 误判致 auth:perms 缓存无法回填；redisx 新增 StructuredGuard 路径（SetStructured/GetOrLoadStructured），权限缓存走 schema+权限目录白名单，pkg/redact 与普通 Set 门禁不变；真实 Redis/MySQL 回归 + 22 个负向用例；删除 1.18 遗留的 rbac_perm_test.go.bak
   1-40-静态前端安装器-admin-web-docs-status-console-website-static: backlog
   1-41-backup-restore-uninstall-含主密钥指纹与加密: backlog
   1-42-doctor-config-service-logs-status-list-完整: backlog
@@ -552,6 +553,7 @@ sprint_plan:
       1 并行"
     order: ["1-36-前端-workspace-基座-shared-tokens-三态-i18n-类型生成-门禁", "1-37-安装向导-spa-go-embed", "1-37b-遗留项清理",
       "1-38-admin-工程与壳-登录-动态菜单-守卫-多标签-代管横幅", "1-39-admin-系统管理页-系统设置-用户与角色-api-token-审计",
+      "1-39b-权限集缓存回填缺陷修复",
       "1-40-静态前端安装器-admin-web-docs-status-console-website-static", "1-41-backup-restore-uninstall-含主密钥指纹与加密",
       "1-42-doctor-config-service-logs-status-list-完整", "1-43-升级与回滚-update-check-升级编排-迁移决策表-rollback-update-self",
       "1-44-tui-主菜单-多选安装-计划确认-进度-不可逆确认", "1-45-epic-1-验收-全新-linux-服务器-cli-安装主控-闭环-a-的-mvp-子集-闭环-j-的-server"]

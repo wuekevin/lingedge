@@ -740,3 +740,83 @@ func TestLimiterPeekAndReset(t *testing.T) {
 		return err == nil && d.Source == redisx.SourceRedis && d.Allowed
 	})
 }
+
+// Story 1.39b：结构化缓存值走调用方的 StructuredGuard（schema 白名单），不再被 redact.String 的键名启发式误伤；
+// 守卫不通过 / 无守卫则 fail-closed；普通 Set 的 redact 门禁原样保留（不放宽）。
+func TestStructuredCacheGuard(t *testing.T) {
+	in := redistest.Start(t)
+	c, logs := newClient(t, in, nil)
+	ctx := context.Background()
+	ca := redisx.NewCache(c)
+	k := key(t, c, "structured")
+	const perm = `{"p":["token:manage","credential:read"],"v":2}`
+	var loads atomic.Int64
+	load := func(context.Context) ([]byte, error) { loads.Add(1); return []byte(perm), nil }
+	allow := func(v string) error {
+		if v != perm {
+			return errors.New("非预期值")
+		}
+		return nil
+	}
+
+	// 基线：旧路径（redact 启发式）仍拒绝该值——证明启发式未被改动。
+	if err := c.Set(ctx, key(t, c, "plain"), perm, time.Minute); !errors.Is(err, redisx.ErrSensitiveValue) {
+		t.Fatalf("普通 Set 的 redact 门禁必须保持: %v", err)
+	}
+	// 结构化路径：回填成功、命中缓存、带 TTL、无 warn。
+	for i := 0; i < 3; i++ {
+		v, err := ca.GetOrLoadStructured(ctx, k, time.Minute, load, allow)
+		if err != nil || string(v) != perm {
+			t.Fatalf("%q %v", v, err)
+		}
+	}
+	if loads.Load() != 1 {
+		t.Errorf("回填后应命中缓存，真相源被读 %d 次", loads.Load())
+	}
+	if ttl, ok, err := c.TTL(ctx, k); err != nil || !ok || ttl <= 0 || ttl > time.Minute {
+		t.Errorf("必须带 TTL: %v %v %v", ttl, ok, err)
+	}
+	if strings.Contains(logs.String(), "缓存值含敏感信息") {
+		t.Errorf("不应有敏感信息 warn:\n%s", logs.String())
+	}
+	// 失效后重新回填。
+	if err := ca.Invalidate(ctx, k); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ca.GetOrLoadStructured(ctx, k, time.Minute, load, allow); err != nil || loads.Load() != 2 {
+		t.Fatalf("失效后应重新读取并回填: %v %d", err, loads.Load())
+	}
+
+	// 守卫拒绝：值不写入 Redis，结果仍原样返回，并记 warn。
+	k2 := key(t, c, "rejected")
+	deny := func(string) error { return errors.New("拒绝") }
+	if v, err := ca.GetOrLoadStructured(ctx, k2, time.Minute, load, deny); err != nil || string(v) != perm {
+		t.Fatalf("守卫拒绝不得影响返回: %q %v", v, err)
+	}
+	if _, ok, _ := c.Get(ctx, k2); ok {
+		t.Error("被守卫拒绝的值不得写入 Redis")
+	}
+	if !strings.Contains(logs.String(), "缓存值含敏感信息") {
+		t.Error("守卫拒绝应记 warn")
+	}
+	// SetStructured：nil 守卫与守卫拒绝都返回 ErrSensitiveValue 且不发命令；无 TTL / 坏键优先报对应错误。
+	k3 := key(t, c, "direct")
+	if err := c.SetStructured(ctx, k3, perm, time.Minute, nil); !errors.Is(err, redisx.ErrSensitiveValue) {
+		t.Errorf("nil 守卫必须 fail-closed: %v", err)
+	}
+	if err := c.SetStructured(ctx, k3, perm, time.Minute, deny); !errors.Is(err, redisx.ErrSensitiveValue) {
+		t.Errorf("守卫拒绝: %v", err)
+	}
+	if err := c.SetStructured(ctx, k3, perm, 0, allow); !errors.Is(err, redisx.ErrNoTTL) {
+		t.Errorf("无 TTL: %v", err)
+	}
+	if err := c.SetStructured(ctx, redisx.Key{}, perm, time.Minute, allow); !errors.Is(err, redisx.ErrBadKey) {
+		t.Errorf("零值键: %v", err)
+	}
+	if _, ok, _ := c.Get(ctx, k3); ok {
+		t.Error("以上失败路径均不得写入")
+	}
+	if _, err := ca.GetOrLoadStructured(ctx, k3, time.Minute, load, nil); !errors.Is(err, redisx.ErrSensitiveValue) {
+		t.Errorf("GetOrLoadStructured 缺守卫必须拒绝: %v", err)
+	}
+}
