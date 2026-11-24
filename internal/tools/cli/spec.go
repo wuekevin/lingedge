@@ -132,6 +132,11 @@ func (s *cmdSpec) build(r *Run) *cobra.Command {
 			}
 		}
 		res, err := s.Run(inv)
+		// 命令可以同时返回结果与错误（doctor 有失败项、status 发现不健康、config validate 有问题）：data 仍进入 envelope，
+		// 人类输出仍然打印，退出码由错误决定。返回 (nil, err) 的命令行为不变。
+		if res != nil {
+			r.result = res
+		}
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				return err
@@ -142,7 +147,6 @@ func (s *cmdSpec) build(r *Run) *cobra.Command {
 			}
 			return err
 		}
-		r.result = res
 		return nil
 	}
 	return c

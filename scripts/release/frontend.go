@@ -132,19 +132,62 @@ func pnpmLockSHA256(srcRoot string) (string, error) {
 	return h, nil
 }
 
-// checkFrontendDist 校验 -frontend-dist 目录：存在 index.html；跑 frontend/scripts/check-mock.mjs（生产产物不得含 mock 入口，NFR-1）。
+// checkFrontendDist 校验前端目录 dir：存在 index.html；跑 frontend/scripts/check-mock.mjs（生产产物不得含 mock 入口，NFR-1）。
+// shown 是用户在 -frontend-dist 里给出的目录（只用于报错文案；dir 通常是它的快照，见 snapshotFrontend）。
 // node 缺失视为失败：不能因为工具缺席就放过检查。
-func checkFrontendDist(srcRoot, comp, dir string) error {
+func checkFrontendDist(srcRoot, comp, shown, dir string) error {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return err
 	}
 	st, err := os.Stat(filepath.Join(abs, "index.html"))
 	if err != nil || !st.Mode().IsRegular() {
-		return fmt.Errorf("-frontend-dist %s=%s：缺少 index.html（应为前端生产构建的输出目录）", comp, dir)
+		return fmt.Errorf("-frontend-dist %s=%s：缺少 index.html（应为前端生产构建的输出目录）", comp, shown)
 	}
 	if out, err := execCmd(srcRoot, nil, "node", filepath.Join(srcRoot, filepath.FromSlash(mockCheckRel)), "--dist", abs); err != nil {
-		return fmt.Errorf("-frontend-dist %s=%s 未通过生产产物 mock 入口检查：%w\n%s", comp, dir, err, out)
+		return fmt.Errorf("-frontend-dist %s=%s 未通过生产产物 mock 入口检查：%w\n%s", comp, shown, err, out)
 	}
 	return nil
+}
+
+// snapshotHook 仅供测试：在「复制完成、复核前」调用，用来制造目录在复制期间被改动的竞态。
+var snapshotHook func()
+
+// snapshotFrontend 把前端构建目录 dir 复制成 <out>/work/frontend/<comp> 的快照，返回快照路径；此后校验与打包都只读快照。
+//
+// 为什么：`vite build` 的 emptyOutDir 会先清空 frontend/dist/<x> 再重建。流水线在 build 的第 3 步校验目录，随后编译 Go 目标（数十秒～数分钟），
+// 第 7 步才从同一个目录打包；旧实现在此期间对活目录没有任何保护——并发的前端构建会让包悄悄缺少 payload/public/index.html（流水线仍然成功）。
+// 快照把「校验的字节」与「打包的字节」固定为同一份：复制前后各取一次活目录的摘要，并与快照摘要三者必须一致，
+// 否则说明复制期间目录被改动（并发构建），以明确的错误失败，而不是采用一份不知道是什么状态的拷贝。
+func snapshotFrontend(out, comp, dir string) (string, error) {
+	before, _, err := treeDigest(dir)
+	if err != nil {
+		return "", fmt.Errorf("-frontend-dist %s=%s：无法读取目录：%w", comp, dir, err)
+	}
+	snap := filepath.Join(out, "work", "frontend", comp)
+	if err := os.RemoveAll(snap); err != nil {
+		return "", err
+	}
+	links, err := copyTree(dir, snap, "")
+	if err != nil {
+		return "", fmt.Errorf("前端目录 %s: %w", dir, err)
+	}
+	if len(links) > 0 {
+		return "", fmt.Errorf("前端构建输出 %s 含符号链接（%d 个）：生产构建不应产生链接，请检查构建", dir, len(links))
+	}
+	if snapshotHook != nil {
+		snapshotHook()
+	}
+	after, _, err := treeDigest(dir)
+	if err != nil {
+		return "", fmt.Errorf("-frontend-dist %s=%s：复制期间目录不可读（并发的前端构建？）：%w", comp, dir, err)
+	}
+	copied, _, err := treeDigest(snap)
+	if err != nil {
+		return "", err
+	}
+	if before != after || before != copied {
+		return "", fmt.Errorf("-frontend-dist %s=%s：目录在复制快照期间被改动（是否有并发的前端构建在清空/重建 %s？）；请等构建结束后重试", comp, dir, dir)
+	}
+	return snap, nil
 }

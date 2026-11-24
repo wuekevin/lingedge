@@ -39,6 +39,11 @@ func withHostname(n string) hopt {
 }
 func withState(s StateSource) hopt { return func(h *harness) { h.env.State = s } }
 
+// noSystemd 让 systemctl 封装认定本机不是 systemd 启动的系统：与运行测试的宿主机无关（宿主机的 systemd 里没有这些测试组件）。
+func noSystemd() hopt {
+	return func(h *harness) { h.env.Install.Booted = func() bool { return false } }
+}
+
 func newHarness(t *testing.T, opts ...hopt) *harness {
 	t.Helper()
 	dir := t.TempDir()

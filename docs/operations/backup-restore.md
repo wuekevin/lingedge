@@ -47,7 +47,7 @@ sudo -E lingedge backup restore <文件> [--passphrase-file …] [--replace --co
 | 10 / 12 | 失败已回滚 / 回滚失败需人工 |
 | 13 / 14 | 存在未完成事务（`recover`）/ 组件未安装（先 `lingedge install`，restore 只恢复配置与数据，不装二进制） |
 
-- **恢复后的 lineage**：恢复到更早的备份后，Tools 在启动 Server **之前**执行 `lingedge-server lineage bump`（`deploy.lineage = max(恢复后 DB 值 + 1, 当前 UNIX 秒)`），使恢复后产生的修订、站点 epoch、URL 失效标记按 `(lineage, …)` 字典序严格大于节点已应用值——节点仍能接收新修订。请保证本机时钟没有倒退（`doctor` 的 `sys.time_sync` 属 Story 1.42）。
+- **恢复后的 lineage**：恢复到更早的备份后，Tools 在启动 Server **之前**执行 `lingedge-server lineage bump`（`deploy.lineage = max(恢复后 DB 值 + 1, 当前 UNIX 秒)`），使恢复后产生的修订、站点 epoch、URL 失效标记按 `(lineage, …)` 字典序严格大于节点已应用值——节点仍能接收新修订。请保证本机时钟没有倒退（`lingedge doctor` 的 `sys.time_sync` 会判定时钟回拨，见 `diagnostics.md`；`backup.recent`/`backup.master_key_separate` 也由 doctor 检查）。
 - **`runtime-credentials.json`**：本机已有且仍能被主密钥解开时保留本机文件（它与当前 MySQL 账号口令一致）；否则用备份里的。恢复后若口令与 MySQL 账号不一致，`lineage bump` 会失败并整体回滚——先 `lingedge-server db credential rotate …` 对齐。
 - **`state.json` 不会被覆盖**（它反映本机已装的二进制）；备份里只作参考。恢复只覆盖备份里有的文件，不删除备份里没有的文件。
 - 恢复前安全备份会保留（`backup list` 可见，用途 `pre-restore`）；确认无误后自行删除。需要撤销这次恢复，就用它再 `restore` 一次。

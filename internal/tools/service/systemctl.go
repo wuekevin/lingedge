@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/wuekevin/lingedge/internal/tools/registry"
@@ -209,4 +210,96 @@ func (s *Systemctl) simple(ctx context.Context, verb string, units []UnitName) e
 	}
 	_, err := s.do(ctx, unitArgs(verb, units))
 	return err
+}
+
+// UnitProps 是 `systemctl show` 的受限属性集（只读；Show 只请求这些属性）。
+type UnitProps struct {
+	LoadState     string `json:"load_state"`
+	ActiveState   string `json:"active_state"`
+	SubState      string `json:"sub_state"`
+	UnitFileState string `json:"unit_file_state"`
+	Result        string `json:"result,omitempty"`
+	MainPID       int    `json:"main_pid"`
+	NRestarts     int    `json:"restarts"`
+	// ActiveEnterTimestamp 是 systemd 给出的原文（本地时区文本，仅展示）；空 = 从未进入 active。
+	ActiveEnterTimestamp string `json:"active_since,omitempty"`
+}
+
+// showProps 是 Show 请求的属性（固定，不接受调用方传入）。
+const showProps = "LoadState,ActiveState,SubState,UnitFileState,Result,MainPID,NRestarts,ActiveEnterTimestamp"
+
+var (
+	reShowWord = regexp.MustCompile(`^[A-Za-z0-9._:@+-]{0,64}$`)
+	reShowTime = regexp.MustCompile(`^[A-Za-z0-9 :+._()/-]{0,64}$`)
+)
+
+// Show 执行 `systemctl show <unit> --property=<固定集合> --no-pager`，解析为 UnitProps。单元不存在时 systemctl 仍返回 0 且 LoadState=not-found。
+// 所有取值经枚举/长度校验（输出来自外部命令，不当作可信文本）。
+func (s *Systemctl) Show(ctx context.Context, u UnitName) (UnitProps, error) {
+	var p UnitProps
+	if err := s.ensure(); err != nil {
+		return p, err
+	}
+	if err := checkUnits([]UnitName{u}); err != nil {
+		return p, err
+	}
+	res, err := s.do(ctx, []string{"show", "--no-pager", "--property=" + showProps, string(u)})
+	if err != nil {
+		return p, err
+	}
+	return parseShow(string(res.Stdout))
+}
+
+func parseShow(out string) (UnitProps, error) {
+	var p UnitProps
+	seen := 0
+	for _, ln := range strings.Split(out, "\n") {
+		k, v, ok := strings.Cut(strings.TrimRight(ln, "\r"), "=")
+		if !ok {
+			continue
+		}
+		bad := func() (UnitProps, error) {
+			return UnitProps{}, newErr(KindExec, "systemctl show 的 %s 输出无法识别", k)
+		}
+		switch k {
+		case "LoadState", "ActiveState", "SubState", "UnitFileState", "Result":
+			if !reShowWord.MatchString(v) {
+				return bad()
+			}
+			switch k {
+			case "LoadState":
+				p.LoadState = v
+			case "ActiveState":
+				p.ActiveState = v
+			case "SubState":
+				p.SubState = v
+			case "UnitFileState":
+				p.UnitFileState = v
+			default:
+				p.Result = v
+			}
+			seen++
+		case "MainPID", "NRestarts":
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 0 || n > 1<<30 {
+				return bad()
+			}
+			if k == "MainPID" {
+				p.MainPID = n
+			} else {
+				p.NRestarts = n
+			}
+			seen++
+		case "ActiveEnterTimestamp":
+			if !reShowTime.MatchString(v) {
+				return bad()
+			}
+			p.ActiveEnterTimestamp = v
+			seen++
+		}
+	}
+	if seen == 0 || p.ActiveState == "" {
+		return UnitProps{}, newErr(KindExec, "systemctl show 没有返回可识别的状态")
+	}
+	return p, nil
 }

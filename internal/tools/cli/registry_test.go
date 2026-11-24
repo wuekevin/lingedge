@@ -210,9 +210,15 @@ func TestListStatusFromRealRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	h.env.Install.Booted = func() bool { return false } // 与宿主机是否有 systemd 无关：测试环境没有这两个组件的真实安装
 	for _, c := range []string{"version", "list", "status"} {
-		if code := h.run(c, "--json"); code != 0 {
-			t.Fatalf("%s 退出码 %d\n%s", c, code, h.stdout)
+		// Story 1.42 起 status 做真实的健康探测：这里的 server 没有在监听、docs 没有发布物，如实报告不健康 → 退出码 11（data 仍符合 schema）。
+		want := 0
+		if c == "status" {
+			want = 11
+		}
+		if code := h.run(c, "--json"); code != want {
+			t.Fatalf("%s 退出码 %d，期望 %d\n%s", c, code, want, h.stdout)
 		}
 		env := h.envelope()
 		if err := validateAgainst(t, "data."+c+".schema.json", env["data"]); err != nil {

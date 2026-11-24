@@ -100,8 +100,15 @@ func commandSpecs() []*cmdSpec {
 		Use: "list", Short: "列出已装组件",
 		Args: cobra.NoArgs,
 		Flags: func(fs *pflag.FlagSet) {
-			hidden(fs.Bool("available", false, "列出清单中可装版本"), fs, "available")
+			fs.Bool("available", false, "另列出（经验签的）清单中的可装组件与版本")
+			str(fs, "channel", "stable", "仅与 --available 联用：发行通道 stable|beta")
 		},
+		Validate: chain(flagChecks, func(inv *invocation) *Error {
+			if inv.changed("channel") && !inv.flag("available") {
+				return usageErr("usage.flag_requires", "--channel 必须与 --available 一起使用", "")
+			}
+			return nil
+		}),
 		Run: runList,
 	}
 	statusSpec := &cmdSpec{Use: "status", Short: "汇总已装组件状态", Args: cobra.NoArgs, Run: runStatus}
@@ -209,22 +216,22 @@ func commandSpecs() []*cmdSpec {
 	service := &cmdSpec{
 		Use: "service", Short: "服务管理",
 		Sub: []*cmdSpec{
-			{Use: "status [组件]", Short: "查看服务状态", Story: "Story 1.42", Args: cobra.MaximumNArgs(1),
-				Flags: func(fs *pflag.FlagSet) { fs.Bool("all", false, "全部组件") },
+			{Use: "status [组件]", Short: "查看服务状态（真实 systemd 状态 + 健康探测）", Args: cobra.MaximumNArgs(1), Run: runServiceStatus,
+				Flags: func(fs *pflag.FlagSet) { fs.Bool("all", false, "全部组件（缺省即全部）") },
 				Validate: chain(compArg(false), func(inv *invocation) *Error {
 					if inv.flag("all") && len(inv.args) > 0 {
 						return conflict("all", "<组件>")
 					}
 					return nil
 				})},
-			{Use: "start <组件>", Short: "启动服务", Story: "Story 1.42", Args: cobra.ExactArgs(1), NeedsRoot: true, Locks: argLocks, Validate: compArg(false)},
-			{Use: "stop <组件>", Short: "停止服务", Story: "Story 1.42", Args: cobra.ExactArgs(1), NeedsRoot: true, Locks: argLocks, Validate: compArg(false)},
-			{Use: "restart <组件>", Short: "重启服务", Story: "Story 1.42", Args: cobra.ExactArgs(1), NeedsRoot: true, Locks: argLocks, Validate: compArg(false)},
+			{Use: "start <组件>", Short: "启动服务", Args: cobra.ExactArgs(1), NeedsRoot: true, Locks: argLocks, Validate: compArg(false), Run: serviceAction("start")},
+			{Use: "stop <组件>", Short: "停止服务", Args: cobra.ExactArgs(1), NeedsRoot: true, Locks: argLocks, Validate: compArg(false), Run: serviceAction("stop")},
+			{Use: "restart <组件>", Short: "重启服务", Args: cobra.ExactArgs(1), NeedsRoot: true, Locks: argLocks, Validate: compArg(false), Run: serviceAction("restart")},
 		},
 	}
 
 	logs := &cmdSpec{
-		Use: "logs <组件>", Short: "查看组件日志（脱敏）", Story: "Story 1.42", Args: cobra.ExactArgs(1),
+		Use: "logs <组件>", Short: "查看组件日志（journalctl，输出脱敏）", Args: cobra.ExactArgs(1), Run: runLogs,
 		Flags: func(fs *pflag.FlagSet) {
 			fs.BoolP("follow", "f", false, "持续输出")
 			str(fs, "since", "", "起始时间窗口，如 10m")
@@ -244,15 +251,18 @@ func commandSpecs() []*cmdSpec {
 	}
 
 	doctor := &cmdSpec{
-		Use: "doctor [组件]", Short: "环境与安装诊断", Story: "Story 1.42", Args: cobra.MaximumNArgs(1),
+		Use: "doctor [组件]", Short: "环境与安装诊断（pass|warn|fail|skip）", Args: cobra.MaximumNArgs(1), Run: runDoctor,
 		Flags: func(fs *pflag.FlagSet) {
-			fs.Bool("all", false, "检查全部")
-			fs.Bool("strict", false, "警告升级为失败")
-			fs.Bool("fix-perms", false, "修复权限问题")
+			fs.Bool("all", false, "检查全部（缺省即全部）")
+			fs.Bool("strict", false, "警告视同失败（退出码 3）")
+			fs.Bool("fix-perms", false, "修复明确定义的权限偏差（仅 master.key、配置、节点身份；需 root，逐项输出）")
 		},
 		Validate: chain(compArg(false), func(inv *invocation) *Error {
 			if inv.flag("all") && len(inv.args) > 0 {
 				return conflict("all", "<组件>")
+			}
+			if inv.flag("fix-perms") && inv.r.env.Geteuid() != 0 {
+				return inv.r.needRoot()
 			}
 			return nil
 		}),
@@ -261,11 +271,24 @@ func commandSpecs() []*cmdSpec {
 	config := &cmdSpec{
 		Use: "config", Short: "配置管理",
 		Sub: []*cmdSpec{
-			{Use: "validate [组件]", Short: "校验配置", Story: "Story 1.42", Args: cobra.MaximumNArgs(1),
-				Flags:    func(fs *pflag.FlagSet) { str(fs, "file", "", "待校验的配置文件") },
-				Validate: compArg(false)},
-			{Use: "show <组件>", Short: "脱敏显示配置", Story: "Story 1.42", Args: cobra.ExactArgs(1), Validate: compArg(false)},
-			{Use: "edit <组件>", Short: "编辑配置（校验后原子替换）", Story: "Story 1.42", Args: cobra.ExactArgs(1), NeedsRoot: true, Validate: compArg(false)},
+			{Use: "validate [组件|tools]", Short: "校验配置（不给组件 = tools.yaml 与全部已装组件；--file 指定文件）", Args: cobra.MaximumNArgs(1), Run: runConfigValidate,
+				Flags: func(fs *pflag.FlagSet) {
+					str(fs, "file", "", "待校验的配置文件（配合组件名按该组件的规则校验；单独使用则按 tools.yaml）")
+				},
+				Validate: cfgCompArg(true)},
+			{Use: "show <组件|tools>", Short: "脱敏显示配置（密码/令牌/私钥路径等不展示）", Args: cobra.ExactArgs(1), Run: runConfigShow, Validate: cfgCompArg(true)},
+			{Use: "edit <组件|tools>", Short: "编辑配置副本→校验→原子替换（保留 .bak）→可选重启", Args: cobra.ExactArgs(1), NeedsRoot: true, Locks: argLocks, Run: runConfigEdit,
+				Flags: func(fs *pflag.FlagSet) {
+					fs.Bool("restart", false, "替换成功后重启该组件（缺省交互时询问）")
+				},
+				Validate: cfgCompArg(true),
+				Confirm: func(inv *invocation) *Error {
+					if !inv.r.opts.DryRun && (inv.r.jsonMode() || !inv.r.interactive()) {
+						return &Error{Exit: ExitConfirmRequired, Code: "confirm.interactive_required", Message: "config edit 需要交互终端（会启动编辑器）",
+							Hint: "在 TTY 里运行；非交互场景请直接修改文件后运行 lingedge config validate，或 --dry-run 查看计划"}
+					}
+					return nil
+				}},
 			{Use: "setup-token", Short: "重新生成 Server 安装向导的一次性令牌", Args: cobra.NoArgs, NeedsRoot: true, Run: runSetupToken,
 				Locks: func(*invocation) ([]string, *Error) { return []string{"server"}, nil },
 				Flags: func(fs *pflag.FlagSet) { fs.Bool("reset", false, "重新生成令牌") },

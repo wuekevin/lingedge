@@ -216,33 +216,49 @@ func buildEnv(extra []string) ([]string, error) {
 	return env, nil
 }
 
-// Run 执行 c。退出码非 0 时返回 (Result, *ExitError)；其余失败（白名单、解析、启动、超时）返回对应错误。
-func (r *Runner) Run(ctx context.Context, c Cmd) (Result, error) {
-	var res Result
+// prepared 是经过全部校验的调用：白名单与路径解析、参数检查、环境清洗、工作目录。
+type prepared struct {
+	exe string
+	env []string
+	dir string
+}
+
+func (r *Runner) prepare(c Cmd) (prepared, error) {
+	var p prepared
 	if len(c.Args) > maxArgs {
-		return res, fmt.Errorf("%w: 参数过多", ErrBadArg)
+		return p, fmt.Errorf("%w: 参数过多", ErrBadArg)
 	}
 	for i, a := range c.Args {
 		if strings.ContainsRune(a, 0) {
-			return res, fmt.Errorf("%w: 第 %d 个参数含 NUL", ErrBadArg, i)
+			return p, fmt.Errorf("%w: 第 %d 个参数含 NUL", ErrBadArg, i)
 		}
 		if len(a) > maxArgLen {
-			return res, fmt.Errorf("%w: 第 %d 个参数过长", ErrBadArg, i)
+			return p, fmt.Errorf("%w: 第 %d 个参数过长", ErrBadArg, i)
 		}
 	}
 	exe, err := r.Resolve(c.Path)
 	if err != nil {
-		return res, err
+		return p, err
 	}
 	env, err := buildEnv(c.Env)
 	if err != nil {
-		return res, err
+		return p, err
 	}
 	dir := c.Dir
 	if dir == "" {
 		dir = "/"
 	} else if !filepath.IsAbs(dir) {
-		return res, fmt.Errorf("%w: 工作目录必须是绝对路径", ErrBadArg)
+		return p, fmt.Errorf("%w: 工作目录必须是绝对路径", ErrBadArg)
+	}
+	return prepared{exe: exe, env: env, dir: dir}, nil
+}
+
+// Run 执行 c。退出码非 0 时返回 (Result, *ExitError)；其余失败（白名单、解析、启动、超时）返回对应错误。
+func (r *Runner) Run(ctx context.Context, c Cmd) (Result, error) {
+	var res Result
+	p, err := r.prepare(c)
+	if err != nil {
+		return res, err
 	}
 	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc
@@ -250,9 +266,9 @@ func (r *Runner) Run(ctx context.Context, c Cmd) (Result, error) {
 		defer cancel()
 	}
 
-	cmd := exec.CommandContext(ctx, exe, c.Args...)
-	cmd.Env = env // 非 nil：不继承父进程环境
-	cmd.Dir = dir
+	cmd := exec.CommandContext(ctx, p.exe, c.Args...)
+	cmd.Env = p.env // 非 nil：不继承父进程环境
+	cmd.Dir = p.dir
 	cmd.Stdin = c.Stdin
 	so, se := &limitedBuffer{max: r.maxOutput}, &limitedBuffer{max: r.maxOutput}
 	cmd.Stdout, cmd.Stderr = so, se
@@ -261,6 +277,7 @@ func (r *Runner) Run(ctx context.Context, c Cmd) (Result, error) {
 
 	err = cmd.Run()
 	res = Result{Stdout: so.buf.Bytes(), Stderr: se.buf.Bytes(), Truncated: so.truncated || se.truncated}
+	exe := p.exe
 	if cerr := ctx.Err(); cerr != nil {
 		res.ExitCode = -1
 		return res, fmt.Errorf("safeexec: %s 被中止: %w", filepath.Base(exe), cerr)
@@ -275,6 +292,42 @@ func (r *Runner) Run(ctx context.Context, c Cmd) (Result, error) {
 		return res, fmt.Errorf("safeexec: 启动 %s 失败: %w", filepath.Base(exe), security.RedactError(err))
 	}
 	return res, nil
+}
+
+// Stream 与 Run 共用同一套白名单、解析、参数与环境检查，但把 stdout 实时写给 stdout（不缓冲、不设输出上限），stderr 写给 stderr
+// （nil 时只保留尾部用于错误信息）。用于 `logs -f` 的 journalctl 跟随与 `config edit` 的交互式编辑器：这两者的输出不是「一次性结果」。
+// 调用方负责经 writer 脱敏。ctx 取消即终止子进程（独立进程组，Linux 上父进程死亡由内核补发 SIGKILL）；
+// 没有 deadline 的 ctx 不加默认超时（跟随/编辑都可能长时间运行），需要上限的调用方自带 deadline。
+func (r *Runner) Stream(ctx context.Context, c Cmd, stdout, stderr io.Writer) error {
+	p, err := r.prepare(c)
+	if err != nil {
+		return err
+	}
+	cmd := exec.CommandContext(ctx, p.exe, c.Args...)
+	cmd.Env = p.env
+	cmd.Dir = p.dir
+	cmd.Stdin = c.Stdin
+	cmd.Stdout = stdout
+	se := &limitedBuffer{max: r.maxOutput}
+	if stderr != nil {
+		cmd.Stderr = io.MultiWriter(stderr, se)
+	} else {
+		cmd.Stderr = se
+	}
+	cmd.WaitDelay = 3 * time.Second
+	applyPlatform(cmd)
+	err = cmd.Run()
+	if cerr := ctx.Err(); cerr != nil {
+		return fmt.Errorf("safeexec: %s 被中止: %w", filepath.Base(p.exe), cerr)
+	}
+	if err != nil {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			return &ExitError{Exe: filepath.Base(p.exe), Args: security.RedactArgs(c.Args), Code: ee.ExitCode(), Stderr: security.RedactString(tail(se.buf.Bytes(), 512))}
+		}
+		return fmt.Errorf("safeexec: 启动 %s 失败: %w", filepath.Base(p.exe), security.RedactError(err))
+	}
+	return nil
 }
 
 // ExitError 表示命令以非 0 退出；Args 与 Stderr 已脱敏，可安全写入日志。

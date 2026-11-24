@@ -171,6 +171,9 @@ func (r *Run) finish(cmd *cobra.Command, err error) int {
 	}
 
 	if ce != nil {
+		if r.result != nil && r.result.Human != nil {
+			r.result.Human(r.env.Stdout) // 结果与错误并存（见 spec.go）：先打印结果，再给出错误说明
+		}
 		r.renderError(ce, exit, name)
 		return int(exit)
 	}

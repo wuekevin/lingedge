@@ -146,9 +146,16 @@ case "$1" in
   is-active) if [ -e "$ST/active-$2" ]; then echo active; exit 0; else echo inactive; exit 3; fi;;
   enable) [ -e "` + w.Ctl + `/fail-enable" ] && { echo boom >&2; exit 1; }; shift; for u in "$@"; do : > "$ST/enabled-$u"; done;;
   disable) shift; for u in "$@"; do rm -f "$ST/enabled-$u"; done;;
-  start) [ -e "` + w.Ctl + `/fail-start" ] && { echo "Job failed" >&2; exit 1; }; shift; for u in "$@"; do : > "$ST/active-$u"; done;;
-  stop) shift; for u in "$@"; do rm -f "$ST/active-$u"; done;;
-  restart) ;;
+  start) [ -e "` + w.Ctl + `/fail-start" ] && { echo "Job failed" >&2; exit 1; }; shift; for u in "$@"; do : > "$ST/active-$u"; echo "start $u" >> "` + w.Ctl + `/calls"; done;;
+  stop) shift; for u in "$@"; do rm -f "$ST/active-$u"; echo "stop $u" >> "` + w.Ctl + `/calls"; done;;
+  restart) shift; for u in "$@"; do echo "restart $u" >> "` + w.Ctl + `/calls"; done;;
+  show)
+    shift; unit=""; for a in "$@"; do case "$a" in --*) ;; *) unit="$a";; esac; done
+    if [ -e "$ST/active-$unit" ]; then A=active; S=running; else A=inactive; S=dead; fi
+    if [ -e "$ST/enabled-$unit" ]; then E=enabled; else E=disabled; fi
+    L=loaded; if [ -e "$ST/notfound-$unit" ]; then L=not-found; E=""; A=inactive; S=dead; fi
+    echo "LoadState=$L"; echo "ActiveState=$A"; echo "SubState=$S"; echo "UnitFileState=$E"; echo "Result=success"; echo "MainPID=0"; echo "NRestarts=0"; echo "ActiveEnterTimestamp="
+    if [ -e "$ST/props-$unit" ]; then cat "$ST/props-$unit"; fi;;
   daemon-reload) echo reload >> "$ST/reloads";;
   *) echo "unknown verb $1" >&2; exit 2;;
 esac
@@ -161,6 +168,19 @@ case "$1" in
   -s) [ "$2" = reload ] || exit 2; [ -e "` + w.Ctl + `/fail-nginx-reload" ] && { echo "nginx: [error] invalid PID number in /run/nginx.pid" >&2; exit 1; }; echo reload >> "$ST/nginx-reloads";;
   *) exit 2;;
 esac
+`,
+		// 伪 journalctl：输出 $ST/journal 的内容（测试写入），并记录参数；伪 timedatectl / openresty 同理由状态文件决定输出。
+		"journalctl": pre + `
+echo "$@" > "$ST/journal-args"
+[ -e "$ST/journal" ] && cat "$ST/journal"
+exit 0
+`,
+		"timedatectl": pre + `
+if [ -e "$ST/timedatectl" ]; then cat "$ST/timedatectl"; else echo "NTPSynchronized=yes"; fi
+`,
+		"openresty": pre + `
+[ "$1" = "-V" ] || exit 2
+if [ -e "$ST/openresty-v" ]; then cat "$ST/openresty-v" >&2; else echo "nginx version: openresty/1.21.4.1" >&2; echo "configure arguments: --prefix=/usr/local/openresty/nginx --with-http_ssl_module --add-module=../ngx_lua-0.10.21" >&2; fi
 `,
 		"id": pre + `
 [ "$1" = "-u" ] || exit 9

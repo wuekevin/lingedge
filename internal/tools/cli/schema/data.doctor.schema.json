@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "doctor 的 data（tools-design §6/§19；checks[].id/category 稳定）",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "checks",
+    "summary",
+    "strict",
+    "fix_perms"
+  ],
+  "properties": {
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "category",
+          "level",
+          "message"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*(\\.[a-z0-9_-]+)+$"
+          },
+          "category": {
+            "type": "string"
+          },
+          "level": {
+            "enum": [
+              "pass",
+              "warn",
+              "fail",
+              "skip"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "hint": {
+            "type": "string"
+          },
+          "component": {
+            "type": "string"
+          },
+          "details": {
+            "type": "object"
+          },
+          "fixed": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pass",
+        "warn",
+        "fail",
+        "skip"
+      ],
+      "properties": {
+        "pass": {
+          "type": "integer"
+        },
+        "warn": {
+          "type": "integer"
+        },
+        "fail": {
+          "type": "integer"
+        },
+        "skip": {
+          "type": "integer"
+        }
+      }
+    },
+    "strict": {
+      "type": "boolean"
+    },
+    "fix_perms": {
+      "type": "boolean"
+    }
+  }
+}

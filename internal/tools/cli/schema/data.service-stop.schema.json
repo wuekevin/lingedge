@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "service stop 的 data（Story 1.42）",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "component",
+    "action",
+    "units",
+    "active"
+  ],
+  "properties": {
+    "component": {
+      "type": "string"
+    },
+    "action": {
+      "enum": [
+        "start",
+        "stop",
+        "restart"
+      ]
+    },
+    "units": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "dry_run": {
+      "type": "boolean"
+    },
+    "active": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "health": {
+      "type": "string"
+    },
+    "detail": {
+      "type": "string"
+    },
+    "state": {
+      "type": "string"
+    }
+  }
+}

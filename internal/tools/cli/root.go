@@ -125,6 +125,19 @@ func (r *Run) prepare(cmd *cobra.Command, args []string) error {
 	if !explicitLog {
 		logPath = r.env.DefaultLogFile
 	}
+	// tools.yaml 的 log 节是 --log-level/--log-file 的缺省（命令行显式给出时以命令行为准）。tools.yaml 读取/校验失败一律回落到内置缺省，
+	// 所以损坏的 tools.yaml 不会阻止 config validate/config edit 运行；配置里的日志文件等同于显式指定（会创建目录；打不开 → 退出码 3，
+	// 此时可用 --log-file 覆盖来修复配置）。
+	if !cmd.Flags().Changed("log-level") || !explicitLog {
+		if tc := r.toolsConfigLenient(); tc.Log.Level != "" || tc.Log.File != "" {
+			if !cmd.Flags().Changed("log-level") && tc.Log.Level != "" {
+				r.opts.LogLevel = tc.Log.Level
+			}
+			if !explicitLog && tc.Log.File != "" {
+				logPath, explicitLog = r.hostPath(tc.Log.File), true
+			}
+		}
+	}
 	lg, lerr := openLogger(logPath, explicitLog, r.opts.LogLevel, r.runID, r.env.Now)
 	if lerr != nil {
 		return lerr

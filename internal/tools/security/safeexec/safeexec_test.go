@@ -3,11 +3,13 @@ package safeexec
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -298,4 +300,82 @@ func FuzzRunArgsInert(f *testing.F) {
 			t.Fatalf("参数被改写: %q -> %q", s, res.Stdout)
 		}
 	})
+}
+
+// Stream：与 Run 同一套白名单/解析/环境清洗，stdout 实时写给调用方的 writer（无输出上限）；取消 ctx 终止子进程。
+type syncBuf struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (s *syncBuf) Write(p []byte) (int, error) { s.mu.Lock(); defer s.mu.Unlock(); return s.b.Write(p) }
+func (s *syncBuf) String() string              { s.mu.Lock(); defer s.mu.Unlock(); return s.b.String() }
+
+func TestStreamWritesStdoutAndEnforcesSameRules(t *testing.T) {
+	need(t, "printf")
+	r := realRunner(t, "printf")
+	var out syncBuf
+	if err := r.Stream(context.Background(), Cmd{Path: "printf", Args: []string{"%s\n", "你好; touch /tmp/x"}}, &out, nil); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "你好; touch /tmp/x\n" {
+		t.Errorf("stdout：%q", out.String())
+	}
+	// 白名单与 Run 相同：不在白名单的程序被拒绝，shell 解释器不能进白名单。
+	if err := r.Stream(context.Background(), Cmd{Path: "ls"}, &out, nil); !errors.Is(err, ErrNotAllowed) {
+		t.Errorf("未列入白名单应被拒绝：%v", err)
+	}
+	if _, err := New(Options{Allowed: []string{"bash"}}); err == nil {
+		t.Error("shell 不得进入白名单")
+	}
+	if err := r.Stream(context.Background(), Cmd{Path: "printf", Args: []string{"a\x00b"}}, &out, nil); !errors.Is(err, ErrBadArg) {
+		t.Errorf("NUL 参数应被拒绝：%v", err)
+	}
+	if err := r.Stream(context.Background(), Cmd{Path: "printf", Env: []string{"LD_PRELOAD=/x"}}, &out, nil); !errors.Is(err, ErrBadEnv) {
+		t.Errorf("加载器注入环境变量应被拒绝：%v", err)
+	}
+}
+
+func TestStreamExitErrorIsRedactedAndLargeOutputIsNotTruncated(t *testing.T) {
+	need(t, "sh")
+	dir := t.TempDir()
+	script := filepath.Join(dir, "gen")
+	body := "#!/bin/sh\ni=0; while [ $i -lt 20000 ]; do echo line-$i-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx; i=$((i+1)); done\necho 'password=hunter2' >&2\nexit 3\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r, err := New(Options{Allowed: []string{"gen"}, SearchDirs: []string{dir}, MaxOutput: 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out syncBuf
+	err = r.Stream(context.Background(), Cmd{Path: "gen"}, &out, nil)
+	var ee *ExitError
+	if !errors.As(err, &ee) || ee.Code != 3 {
+		t.Fatalf("应返回退出码 3：%v", err)
+	}
+	if strings.Contains(ee.Stderr, "hunter2") {
+		t.Errorf("stderr 里的口令必须脱敏：%q", ee.Stderr)
+	}
+	if n := strings.Count(out.String(), "\n"); n != 20000 {
+		t.Errorf("Stream 不应按 MaxOutput 截断 stdout：%d 行", n)
+	}
+}
+
+func TestStreamStopsOnContextCancel(t *testing.T) {
+	need(t, "sleep")
+	r := realRunner(t, "sleep")
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- r.Stream(ctx, Cmd{Path: "sleep", Args: []string{"30"}}, io.Discard, nil) }()
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("应返回 context.Canceled：%v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("取消后子进程没有被终止")
+	}
 }

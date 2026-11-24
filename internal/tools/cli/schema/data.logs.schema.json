@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "logs 的 data（Story 1.42；人类模式下日志直接流到 stdout，--json 时 lines 为脱敏后的行）",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "component",
+    "units"
+  ],
+  "properties": {
+    "component": {
+      "type": "string"
+    },
+    "units": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "lines": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "truncated": {
+      "type": "boolean"
+    }
+  }
+}

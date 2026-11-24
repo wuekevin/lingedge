@@ -254,6 +254,66 @@ func TestFrontendDistGuards(t *testing.T) {
 	}
 }
 
+// 回归（Story 1.42 排查的偶发失败的根因）：前端目录在「校验通过」与「打包」之间被改动——典型场景是并发的 `vite build`（frontend/admin/vite.config.ts 的
+// emptyOutDir: true 会先清空 frontend/dist/admin）。流水线在 build 的第 3 步校验目录（index.html、mock 入口），随后要编译 Go 目标（数十秒），
+// 第 7 步才从同一个活目录打包；旧实现中间没有任何保护，于是包里缺少 payload/public/index.html，且流水线不报错。
+// 本用例在 Go 编译期间把活目录清空、再恢复：流水线必须产出完整的包（实现：开始即把目录快照到 out/work/frontend 并核对复制前后目录摘要一致，之后只读快照）。
+func TestFrontendDistMutatedDuringBuildStillYieldsIntactPackage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("需要完整源仓库副本与流水线二进制")
+	}
+	f := newFlow(t, "fe-race")
+	dist := frontendFixture(t.TempDir(), "admin-web")
+	want := readFile(t, filepath.Join(dist, "index.html"))
+	out := filepath.Join(t.TempDir(), "out")
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	removed := make(chan bool, 1)
+	go func() {
+		defer close(done)
+		// 观察到 Go 编译开始（work/build-a 出现）后清空活目录；之后保持清空直到 stage 出现或测试结束，再恢复（模拟 vite build 先清空再重建）。
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			if _, err := os.Stat(filepath.Join(out, "work", "build-a")); err == nil {
+				_ = os.Remove(filepath.Join(dist, "index.html"))
+				removed <- true
+				for {
+					select {
+					case <-stop:
+						return
+					default:
+					}
+					if _, err := os.Stat(filepath.Join(out, "stage")); err == nil {
+						time.Sleep(50 * time.Millisecond)
+						return
+					}
+					time.Sleep(2 * time.Millisecond)
+				}
+			}
+			time.Sleep(2 * time.Millisecond)
+		}
+	}()
+	outStr, err := f.run(f.release, "build", "-src", f.src, "-out", out, "-version", relVer, "-platforms", "linux-amd64", "-repro-fresh-cache=false", "-frontend-dist", "admin-web="+dist)
+	close(stop)
+	<-done
+	select {
+	case <-removed:
+	default:
+		t.Fatalf("竞态未被制造出来（没有观察到 Go 编译开始）：测试无效\n%s", outStr)
+	}
+	if err != nil {
+		t.Fatalf("流水线应基于开始时的快照产出完整的包：%v\n%s", err, outStr)
+	}
+	got, rerr := os.ReadFile(filepath.Join(out, "stage", "admin-web-"+relVer+"-any", "payload", "public", "index.html"))
+	if rerr != nil || !bytes.Equal(got, want) {
+		t.Fatalf("包内 payload/public/index.html 缺失或内容不符：%v", rerr)
+	}
+}
+
 // ---- 安装（发行包 → Tools 验签链 → 生产静态前端规格）----
 
 func TestInstallFrontendFromPublishedRelease(t *testing.T) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -67,6 +69,50 @@ func collectOpts(t *testing.T, scripts externalScripts, bt string) Options {
 		// 1.31b：既有用例只验证 TCP 路径；关闭 unix socket 自动发现，以免探测到开发机上常驻的 /tmp/mysql.sock
 		MySQLSockets: []string{}, RedisSockets: []string{},
 		Now: time.Date(2026, 11, 21, 1, 2, 3, 0, time.UTC)}
+}
+
+// Story 1.42：ListenersOnly 只采集内存/磁盘与监听——不调用 systemctl（服务识别），也不向 MySQL/Redis 发起任何连接
+// （免凭据握手会被 MySQL 计入 Aborted_connects；list/status 只需要「谁占着哪个端口」）。
+func TestCollectListenersOnlyDoesNotTouchDeps(t *testing.T) {
+	sc := newExternalScripts(t, "ss/ss-lntup-root.txt", 0)
+	o := collectOpts(t, sc, "bt-full")
+	// 把依赖端点指向一个真实监听的端口：若被连接，监听端会观察到连接。
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ln.Close() }()
+	var conns atomic.Int32
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			conns.Add(1)
+			_ = c.Close()
+		}
+	}()
+	port := ln.Addr().(*net.TCPAddr).Port
+	o.MySQL, o.Redis = []Endpoint{{Host: "127.0.0.1", Port: port}}, []Endpoint{{Host: "127.0.0.1", Port: port}}
+	o.ListenersOnly = true
+	res, err := Collect(context.Background(), o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.ListenersKnown || len(res.Sockets) == 0 || res.System.MemoryTotalMB <= 0 {
+		t.Fatalf("监听与内存应被采集：%+v", res.ListenersKnown)
+	}
+	if got := readLog(t, sc.sysLog); len(got) != 0 {
+		t.Errorf("ListenersOnly 不得调用 systemctl：%q", got)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if n := conns.Load(); n != 0 {
+		t.Errorf("ListenersOnly 不得连接 MySQL/Redis 端点：%d 个连接", n)
+	}
+	if len(res.Deps) != 0 || len(res.Baota.Services) != 0 {
+		t.Errorf("不应有依赖/服务探测结果：%+v %+v", res.Deps, res.Baota.Services)
+	}
 }
 
 func TestCollectEndToEnd(t *testing.T) {

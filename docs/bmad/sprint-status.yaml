@@ -83,7 +83,7 @@ development_status:
   1-39b-权限集缓存回填缺陷修复: review   # 1.39 遗留缺陷修复（清理型，见 docs/bmad/stories/1-39b-*.md）：token:manage/credential:read/credential:write 被 redact.String 误判致 auth:perms 缓存无法回填；redisx 新增 StructuredGuard 路径（SetStructured/GetOrLoadStructured），权限缓存走 schema+权限目录白名单，pkg/redact 与普通 Set 门禁不变；真实 Redis/MySQL 回归 + 22 个负向用例；删除 1.18 遗留的 rbac_perm_test.go.bak
   1-40-静态前端安装器-admin-web-docs-status-console-website-static: review   # 开发完成，见 docs/bmad/stories/1-40-*.md：五个静态前端共用生产 ComponentSpec（admin-web/console/docs/status/website static）；站点片段+安全头渲染（纯函数、严格字符集、每个含 add_header 的 location 显式 include、CI 静态检查 tests/security/nginxsnippet）；独立主机名强制（退出码 2、无绕过开关）；同名 conf/同域名站点不覆盖（9）；原生 Nginx conf.d 软链（询问/--set nginx-link=yes，nginx -t && reload，失败与回滚撤销）、宝塔只打印指引；发行流水线 -frontend-dist（预压缩 .gz、mock 检查、pnpm-lock 哈希）；真实 nginx 加载安装器生成的片段并服务（真实 frontend/dist/admin 经 流水线→验签→安装→nginx）；发现并修复 tools-design 原文漏洞（/public/setup 在 /public/ 前缀内需显式 404）；清理：Dependabot #2 minimatch + glob 经 pnpm overrides 钉到已修复精确版本，make vuln 增 pnpm audit；无 CC-14/迁移/OpenAPI 变更
   1-41-backup-restore-uninstall-含主密钥指纹与加密: review   # 开发完成，见 docs/bmad/stories/1-41-*.md：internal/tools/backup（备份格式 BACKUP.json + argon2id/AES-256-GCM 分块加密 + 主密钥指纹（文件 SHA-256，与 install 输出同源）与逐 kek_id 比对 + 凭据经 0600 临时 defaults-extra-file 用后清零删除、命令行/环境变量无口令）+ 恢复事务（完整校验→只读前置检查→恢复前安全备份→停服务→主密钥→文件→数据库(--replace 先清空)→探针解密每个 kek_id→lingedge-server lineage bump(启动前)→启动与健康检查；失败回滚到安全备份，退出码 10/12，recover --rollback 经 journal 重试）+ 卸载（默认保留配置/数据/备份，--purge 需主机名确认，静态前端无数据目录，软链摘除 nginx -t && reload）；KEK 移除前核对的数据源与守卫（GuardKEKRemoval，与 CheckKEKRemovable 联动）；真实临时 MySQL 8.0 + 真实 lingedge-server + 真实 mysqldump/mysql 联调（备份→清空→恢复一致、7 个故障注入点回滚、主密钥门禁、探针失败回滚、崩溃后 recover）；变异验证 26 条全部检出（5 条初次存活后补强）；发现并修正 10 处原文缺口/矛盾（tools-design §17.6、epics 实现澄清、docs/operations/backup-restore.md）；G-4 门禁未放宽（tar.gz 读写进 security/tarstream.go）；无 CC-14/迁移/OpenAPI 变更
-  1-42-doctor-config-service-logs-status-list-完整: backlog
+  1-42-doctor-config-service-logs-status-list-完整: review   # 开发完成，见 docs/bmad/stories/1-42-*.md：internal/tools/doctor（注册表可扩展 + 约 40 个检查项，含 sys.time_sync、cert.*（1/6 阈值）、backup.*、fe.*（静态前端深度检查）、dep.mysql.pmax、ver.*）+ internal/tools/cfgcheck（键/行/列）+ cli 真实命令 doctor/config validate|show|edit/service/logs/status/list（真实 systemd 状态 + 健康探测 + 进程归属）+ lingedge-server config check + safeexec.Stream + tools.yaml 完整 schema；tests/release 偶发失败根因（前端活目录并发重建）已在旧实现复现并修复（流水线快照）；变异验证 41/41；等待环境验证：ENV-LNX/ENV-BT；后续：health.node/node.*/dns.*（3.31/4.x）、1.43、SIGHUP（ADR-026 Deferred）
   1-43-升级与回滚-update-check-升级编排-迁移决策表-rollback-update-self: backlog
   1-44-tui-主菜单-多选安装-计划确认-进度-不可逆确认: backlog
   1-45-epic-1-验收-全新-linux-服务器-cli-安装主控-闭环-a-的-mvp-子集-闭环-j-的-server: backlog
@@ -674,7 +674,7 @@ environment_verification:   # 『等待环境验证』登记（验证人/日期�
     required_env: "ENV-LNX（Linux 验收机，多 Server 实例）；ENV-BT（宝塔 MySQL 的 lingedge_maint 授权与触发器前置条件）；MySQL 8.0.16"
     condition: "本机通过仅代表 macOS + 8.0.46 临时 mysqld + Redis 临时实例、单进程单库下的行为：MySQL 8.0.16 上审计 INSERT（VARBINARY ip、JSON changes）、分区表 REORGANIZE PARTITION 与 BEFORE UPDATE/DELETE 触发器、LEFT JOIN 游标查询、测试里 root 建 BEFORE INSERT 触发器的故障注入手法；宝塔/生产 MySQL 上 lingedge_maint 授权与 information_schema.PARTITIONS 可见性、触发器创建前置条件（binlog/SET_USER_ID）；多 Server 实例并发写审计及审计 INSERT 对写路径延迟/锁的影响，均不得由本机通过代替。"
     done_locally: "make lint security gate-selftest race vuln contract-check build verify-build migrate-test 全绿：见 docs/bmad/stories/1-21-*.md 的 Tasks & Acceptance（27 个审计 operation 逐个驱动各恰好一条审计行与动作全覆盖、acting-as 双记、同事务回滚注入（9 个写 operation）、不可篡改（真实 app 账号）、分区联调（真实 lingedge_maint）、游标分页/过滤/字段裁剪/越权/契约、平台登录日志、Request ID 追踪审计+Task+Worker 日志、G-5 脱敏扫描、make audit-check 与负向样本、隔离矩阵 cancelTask Driven 与 audit-logs 驱动）。"
-    pending: "① MySQL 8.0.16 与 Linux 验收机重跑 tests/integration/audit、tests/security/tenant_isolation、tests/integration/auth、tests/integration/tenant、tests/integration/server、make migrate-test；② 宝塔/生产 MySQL 上 lingedge_maint 授权、分区可见性与触发器前置条件，1.24 向导写入 database.maint.* 后的整链联调；③ 多 Server 实例并发写审计与延迟压测；④ 产品/安全确认：只记成功、租户视角平台操作者裁剪为 platform、审计保留期 365 天（OQ-6）；⑤ 保留期 DROP PARTITION 清理（Story 3.48）与 pmax 非空告警/doctor（1.42）；⑥ ~~失败/拒绝类安全事件审计未写~~（denied 已完成：Story 1.22b，只记已认证主体的授权类拒绝、防刷、best-effort，登录失败仍只写 login_logs；result=failure 仍未写——事务回滚没有变更）。"
+    pending: "① MySQL 8.0.16 与 Linux 验收机重跑 tests/integration/audit、tests/security/tenant_isolation、tests/integration/auth、tests/integration/tenant、tests/integration/server、make migrate-test；② 宝塔/生产 MySQL 上 lingedge_maint 授权、分区可见性与触发器前置条件，1.24 向导写入 database.maint.* 后的整链联调；③ 多 Server 实例并发写审计与延迟压测；④ 产品/安全确认：只记成功、租户视角平台操作者裁剪为 platform、审计保留期 365 天（OQ-6）；⑤ 保留期 DROP PARTITION 清理（Story 3.48）与 pmax 非空告警（已由 1.42 的 dep.mysql.pmax 交付）；⑥ ~~失败/拒绝类安全事件审计未写~~（denied 已完成：Story 1.22b，只记已认证主体的授权类拒绝、防刷、best-effort，登录失败仍只写 login_logs；result=failure 仍未写——事务回滚没有变更）。"
     verified_by: ""
     verified_on: ""
   1-22-系统设置-运行模式开关与能力注册表:
@@ -752,7 +752,7 @@ environment_verification:   # 『等待环境验证』登记（验证人/日期�
     required_env: "本机（macOS 支持 flock）；`/proc` 相关与 root 目录布局需 ENV-LNX"
     condition: "仅代表 macOS 本机：state/journal/锁的逻辑、真实子进程 kill -9 与故障注入；真实 `/var/lib/lingedge` root 目录布局、Linux 上的 flock/`/proc`/statfs 行为、断电造成的撕裂尾行在 ENV-LNX 验证。"
     done_locally: "make lint security gate-selftest race vuln contract-check build verify-build migrate-test 全绿：见 docs/bmad/stories/1-29-registry-安装状态-journal-任务锁.md。"
-    pending: "ENV-LNX 复验（1.45）；1.33 编排与 recover 本体（API 已就绪）；1.42 doctor 对网络文件系统告警与 --fix-perms。"
+    pending: "ENV-LNX 复验（1.45）；1.33 编排与 recover 本体（API 已就绪）；（doctor 的网络文件系统告警与 --fix-perms 已由 1.42 交付）。"
     verified_by: ""
     verified_on: ""
   1-31-系统与宝塔只读探测-baota-端口-依赖:
@@ -778,7 +778,7 @@ environment_verification:   # 『等待环境验证』登记（验证人/日期�
     condition: "模板渲染与 `ValidateUnitValue` 本机完成；`systemd-analyze verify`、真实 `systemctl`
       与 `LoadCredential` 最低版本在 ENV-LNX 验证前标「等待环境验证」。"
     done_locally: "make lint security gate-selftest race vuln contract-check build verify-build migrate-test 全绿：见 docs/bmad/stories/1-32-service-包-systemd-unit-渲染-运行用户-目录-systemctl-封装.md。本机真实：模板渲染/golden/属性/注入/fuzz、真实文件系统上的目录与文件权限（umask 无关）、符号链接拒绝、.new 流程、undo 回放与 journal 往返、真实 id 解析、对当前用户的真实 lchown；伪二进制（仅验证 argv，经真实 safeexec）：systemctl/systemd-analyze/id/getent/useradd/userdel。"
-    pending: "ENV-LNX（Story 1.45）：真实 systemctl 输出与退出码、systemd-analyze verify（门控测试 TestEnvLNXRealSystemctlReadOnly）、LoadCredential ≥247 的真实行为与 <247 降级变体启动、各发行版 systemctl --version 输出与指令引入版本表复核、真实 useradd/userdel 与 root chown、Agent 单元内 openresty -t 与生产启动一致（IMP-20，需 OpenResty）、openresty.path/upgrade.path 真实触发；1.33 编排、1.42 doctor 汇总。"
+    pending: "ENV-LNX（Story 1.45）：真实 systemctl 输出与退出码、systemd-analyze verify（门控测试 TestEnvLNXRealSystemctlReadOnly）、LoadCredential ≥247 的真实行为与 <247 降级变体启动、各发行版 systemctl --version 输出与指令引入版本表复核、真实 useradd/userdel 与 root chown、Agent 单元内 openresty -t 与生产启动一致（IMP-20，需 OpenResty）、openresty.path/upgrade.path 真实触发；1.33 编排；（doctor 汇总已由 1.42 交付）。"
     verified_by: ""
     verified_on: ""
   1-33-installer-编排-22-步安装状态机-journal-回滚-dry-run-recover:
@@ -860,7 +860,15 @@ environment_verification:   # 『等待环境验证』登记（验证人/日期�
     required_env: "ENV-LNX（真实 systemd 停启、root 属主 chown/0400 属主检查、全新机器灾后重装演练）、ENV-BT（真实宝塔 MySQL 客户端路径与权限）、Epic 3 的真实节点（AC-J-5 恢复后节点接收新修订）"
     condition: "全部功能代码与测试本机完成并真跑（真实 MySQL 8.0 临时实例 + 真实 mysqldump/mysql + 本机构建的真实 lingedge-server 的 lineage bump/migrate plan//healthz + 真实向导产生的加密数据；伪的只有 OS）；仅真实 systemd/root 属主/宝塔/真实节点需真实环境"
     done_locally: "gofmt -l . 无输出；make lint security gate-selftest vuln contract-check build verify-build migrate-test frontend-check race e2e 全绿（退出码均为 0）；真实 MySQL 联调 tests/integration/toolsinstall/backup_test.go 通过；变异验证 26 条全部检出：见 docs/bmad/stories/1-41-*.md。"
-    pending: "ENV-LNX/ENV-BT 真机验证与灾后重装演练（1.45）；真实节点上的 AC-J-5（Epic 3/1.45）；KEK 移除命令与 secrets.rewrap 接线（6.18）；doctor 的 backup.* 与 sys.time_sync 检查（1.42）；升级前强制备份与 rollback --from-backup 编排（1.43）。"
+    pending: "ENV-LNX/ENV-BT 真机验证与灾后重装演练（1.45）；真实节点上的 AC-J-5（Epic 3/1.45）；KEK 移除命令与 secrets.rewrap 接线（6.18）；（doctor 的 backup.* 与 sys.time_sync 检查已由 1.42 交付）；升级前强制备份与 rollback --from-backup 编排（1.43）。"
+    verified_by: ""
+    verified_on: ""
+  1-42-doctor-config-service-logs-status-list-完整:
+    status: partial
+    required_env: "ENV-LNX（真实 systemd 的 systemctl show/NRestarts、真实 journald、root 下真实 chown 的 --fix-perms、真实节点 identity 与 gRPC 证书链）、ENV-BT（真实宝塔 baota.*、ufw/firewalld 真实配置）"
+    condition: "全部功能代码与测试本机完成并真跑（真实 lingedge-server 进程/config check、临时 MySQL 8.0+Redis、真实 HTTPS 发行源与验签、真实 UDP SNTP、真实 TLS 握手、真实编辑器进程；伪的只有 OS）；仅真实 systemd/journald/root 属主/宝塔/真实节点需真实环境"
+    done_locally: "gofmt -l . 无输出；make lint security gate-selftest vuln contract-check build verify-build migrate-test frontend-check race 全绿（退出码均为 0；未涉及浏览器，e2e 未运行）；变异验证 41 条全部检出；tests/release 偶发失败根因已复现并修复：见 docs/bmad/stories/1-42-*.md。"
+    pending: "ENV-LNX/ENV-BT 真机验证（1.45）；health.node 与 node/dns/disk 检查（3.31、4.x）；node/dns/reporter 配置 schema（Epic 3）；version --check 与 update check（1.43）；SIGHUP 热加载（ADR-026 Deferred）。"
     verified_by: ""
     verified_on: ""
 

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "config show 的 data（Story 1.42；content 已脱敏）",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "target",
+    "file",
+    "exists",
+    "content"
+  ],
+  "properties": {
+    "target": {
+      "type": "string"
+    },
+    "file": {
+      "type": "string"
+    },
+    "exists": {
+      "type": "boolean"
+    },
+    "content": {
+      "type": "string"
+    }
+  }
+}

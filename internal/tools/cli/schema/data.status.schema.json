@@ -1,13 +1,150 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "status 的 data（本 Story：registry 记录的安装状态；systemd 状态与健康探测随 Story 1.42 以新增字段补全）",
   "type": "object",
   "additionalProperties": false,
-  "required": ["components"],
+  "required": [
+    "components",
+    "summary"
+  ],
   "properties": {
     "components": {
       "type": "array",
-      "items": {"type": "object", "additionalProperties": false, "required": ["name", "version", "state"], "properties": {"name": {"type": "string"}, "version": {"type": "string"}, "state": {"type": "string"}}}
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "version",
+          "state",
+          "healthy",
+          "systemd",
+          "health"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "healthy": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "systemd": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "managed",
+              "active",
+              "units"
+            ],
+            "properties": {
+              "managed": {
+                "type": "boolean"
+              },
+              "active": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "units": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "unit",
+                    "active_state",
+                    "sub_state",
+                    "unit_file_state",
+                    "main_pid",
+                    "restarts"
+                  ],
+                  "properties": {
+                    "unit": {
+                      "type": "string"
+                    },
+                    "active_state": {
+                      "type": "string"
+                    },
+                    "sub_state": {
+                      "type": "string"
+                    },
+                    "unit_file_state": {
+                      "type": "string"
+                    },
+                    "main_pid": {
+                      "type": "integer"
+                    },
+                    "restarts": {
+                      "type": "integer"
+                    },
+                    "active_since": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "note": {
+                "type": "string"
+              }
+            }
+          },
+          "health": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "status",
+              "detail"
+            ],
+            "properties": {
+              "status": {
+                "enum": [
+                  "ok",
+                  "degraded",
+                  "unhealthy",
+                  "unknown",
+                  "n/a"
+                ]
+              },
+              "detail": {
+                "type": "string"
+              },
+              "check": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "healthy",
+        "unhealthy",
+        "unknown"
+      ],
+      "properties": {
+        "healthy": {
+          "type": "integer"
+        },
+        "unhealthy": {
+          "type": "integer"
+        },
+        "unknown": {
+          "type": "integer"
+        }
+      }
     }
-  }
+  },
+  "title": "status 的 data（Story 1.42：每个已装组件的真实 systemd 状态 + 健康探测；healthy=null 表示信息不足）"
 }

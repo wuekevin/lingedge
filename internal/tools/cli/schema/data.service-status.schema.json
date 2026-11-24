@@ -1,0 +1,150 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "components",
+    "summary"
+  ],
+  "properties": {
+    "components": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "version",
+          "state",
+          "healthy",
+          "systemd",
+          "health"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "healthy": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "systemd": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "managed",
+              "active",
+              "units"
+            ],
+            "properties": {
+              "managed": {
+                "type": "boolean"
+              },
+              "active": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "units": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "unit",
+                    "active_state",
+                    "sub_state",
+                    "unit_file_state",
+                    "main_pid",
+                    "restarts"
+                  ],
+                  "properties": {
+                    "unit": {
+                      "type": "string"
+                    },
+                    "active_state": {
+                      "type": "string"
+                    },
+                    "sub_state": {
+                      "type": "string"
+                    },
+                    "unit_file_state": {
+                      "type": "string"
+                    },
+                    "main_pid": {
+                      "type": "integer"
+                    },
+                    "restarts": {
+                      "type": "integer"
+                    },
+                    "active_since": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "note": {
+                "type": "string"
+              }
+            }
+          },
+          "health": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "status",
+              "detail"
+            ],
+            "properties": {
+              "status": {
+                "enum": [
+                  "ok",
+                  "degraded",
+                  "unhealthy",
+                  "unknown",
+                  "n/a"
+                ]
+              },
+              "detail": {
+                "type": "string"
+              },
+              "check": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "healthy",
+        "unhealthy",
+        "unknown"
+      ],
+      "properties": {
+        "healthy": {
+          "type": "integer"
+        },
+        "unhealthy": {
+          "type": "integer"
+        },
+        "unknown": {
+          "type": "integer"
+        }
+      }
+    }
+  },
+  "title": "service status 的 data（与 status 同形，限定组件）"
+}

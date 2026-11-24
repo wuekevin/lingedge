@@ -1,1 +1,1 @@
-{"schema":"lingedge.cli/v1","ok":true,"command":"status","run_id":"01JD5Y3C8Q5G7M0V1N2P3R4S5T","exit_code":0,"exit_name":"OK","started_at":"2026-11-21T12:00:00.000Z","duration_ms":25,"dry_run":false,"data":{"components":[]},"warnings":[],"errors":[]}
+{"schema":"lingedge.cli/v1","ok":true,"command":"status","run_id":"01JD5Y3C8Q5G7M0V1N2P3R4S5T","exit_code":0,"exit_name":"OK","started_at":"2026-11-21T12:00:00.000Z","duration_ms":25,"dry_run":false,"data":{"components":[],"summary":{"healthy":0,"unhealthy":0,"unknown":0}},"warnings":[],"errors":[]}

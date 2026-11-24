@@ -93,9 +93,9 @@ func FuzzParseSet(f *testing.F) {
 	})
 }
 
-// tools.yaml：release/install 两节严格校验（未知键、错误类型、非 https、相对路径一律拒绝），其他顶层节忽略；缺省值。
+// tools.yaml：全部顶层节（release/install，以及 Story 1.42 起的 log/backup/doctor）严格校验（未知键、错误类型、非 https、相对路径一律拒绝）；缺省值。
 func TestParseToolsConfig(t *testing.T) {
-	cfg, err := installer.ParseToolsConfig([]byte("release:\n  base_url: https://releases.example.org/\n  ca_file: /etc/lingedge/ca.pem\n  proxy: socks5://127.0.0.1:1080\n  resume_dir: /var/lib/lingedge/tools/dl\ninstall:\n  health_timeout: 90s\n  health_interval: 2s\nlog:\n  level: debug # 1.42 的节：此处忽略\n"))
+	cfg, err := installer.ParseToolsConfig([]byte("release:\n  base_url: https://releases.example.org/\n  ca_file: /etc/lingedge/ca.pem\n  proxy: socks5://127.0.0.1:1080\n  resume_dir: /var/lib/lingedge/tools/dl\ninstall:\n  health_timeout: 90s\n  health_interval: 2s\nlog:\n  level: debug # Story 1.42 起 log 节同样被严格校验\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,6 +129,55 @@ func TestParseToolsConfig(t *testing.T) {
 	}
 	if _, err := (installer.ToolsConfig{}).ManifestURL("stable"); kindOf(t, err) != installer.KindPrecondition {
 		t.Errorf("缺 base_url 应为前置条件失败: %v", err)
+	}
+}
+
+// Story 1.42：log/backup/doctor 节也被严格校验；未知顶层节不再被忽略；Problems 返回全部取值问题（Validate 取第一个）。
+func TestToolsConfigAllSections(t *testing.T) {
+	good := "log:\n  level: warn\n  file: /var/log/lingedge/tools.log\nbackup:\n  dir: /var/lib/lingedge/backups\n  recent_max_age: 72h\n  custody_fingerprint: 0123456789abcdef\n" +
+		"doctor:\n  min_memory_mb: 512\n  min_disk_mb: 1024\n  nofile_min: 8192\n  time_skew_warn: 2s\n  time_skew_fail: 1m\n  time_sync_servers: [ntp.example.org:123, '192.0.2.1:123']\n  restarts_warn: 5\n  offline: true\n"
+	cfg, err := installer.ParseToolsConfig([]byte(good))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w, _ := cfg.TimeSkewWarn(); w.Seconds() != 2 {
+		t.Errorf("time_skew_warn=%v", w)
+	}
+	if f, _ := cfg.TimeSkewFail(); f.Minutes() != 1 {
+		t.Errorf("time_skew_fail=%v", f)
+	}
+	if cfg.BackupRecentMaxAge().Hours() != 72 || (installer.ToolsConfig{}).BackupRecentMaxAge().Hours() != 168 {
+		t.Errorf("backup.recent_max_age 取值/缺省：%v", cfg.BackupRecentMaxAge())
+	}
+	if !cfg.Doctor.Offline || cfg.Doctor.MinMemoryMB != 512 || len(cfg.Doctor.TimeSyncServers) != 2 {
+		t.Errorf("%+v", cfg.Doctor)
+	}
+	for _, bad := range []string{
+		"bogus:\n  a: 1\n", "log:\n  level: trace\n", "log:\n  file: rel.log\n", "log:\n  unknown: 1\n", "backup:\n  recent_max_age: 10m\n", "backup:\n  custody_fingerprint: ZZ\n",
+		"backup:\n  dir: /a/../b\n", "doctor:\n  min_memory_mb: -1\n", "doctor:\n  restarts_warn: 99999999\n", "doctor:\n  time_skew_warn: 1h\n  time_skew_fail: 1m\n",
+		"doctor:\n  time_sync_servers: [nohostport]\n", "doctor:\n  time_sync_servers: ['a:1','b:1','c:1','d:1','e:1','f:1','g:1','h:1','i:1']\n", "doctor:\n  offline: maybe\n",
+		"release:\n  proxy: ftp://x\n",
+	} {
+		if _, err := installer.ParseToolsConfig([]byte(bad)); err == nil || kindOf(t, err) != installer.KindConfig {
+			t.Errorf("应拒绝 %q: %v", bad, err)
+		}
+	}
+	// Problems 返回全部问题，路径稳定；Validate 与第一个一致。
+	multi := installer.ToolsConfig{Log: installer.LogConfig{Level: "x"}, Doctor: installer.DoctorConfig{MinMemoryMB: -1}}
+	ps := multi.Problems()
+	if len(ps) != 2 || ps[0].Path != "log.level" || ps[1].Path != "doctor.min_memory_mb" {
+		t.Errorf("Problems=%+v", ps)
+	}
+	if err := multi.Validate(); err == nil || !strings.Contains(err.Error(), "log.level") {
+		t.Errorf("Validate 应返回第一个问题：%v", err)
+	}
+	if installer.CheckHostPort("ntp.example.org:123") != nil || installer.CheckHostPort("[2001:db8::1]:123") != nil {
+		t.Error("合法 host:port 被拒绝")
+	}
+	for _, bad := range []string{"", ":123", "host", "host:0", "host:70000", "bad host:1", "-x.example:1"} {
+		if installer.CheckHostPort(bad) == nil {
+			t.Errorf("应拒绝 %q", bad)
+		}
 	}
 }
 

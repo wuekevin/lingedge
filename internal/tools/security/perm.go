@@ -37,6 +37,12 @@ func CreateFile(path string, perm fs.FileMode) (*os.File, error) {
 // WriteFileAtomic 原子写文件：同目录临时文件（0600→显式 chmod 为 perm，先于写入）→ 写入 → fsync → rename → fsync 目录。
 // 目标已存在则被替换；任何失败都不留下临时文件，也不会让读者看到半个文件。
 func WriteFileAtomic(path string, data []byte, perm fs.FileMode) error {
+	return WriteFileAtomicPre(path, data, perm, nil)
+}
+
+// WriteFileAtomicPre 同 WriteFileAtomic，但在内容写入之前调用 pre(临时文件路径)（用于先 chown 再写内容、再 rename：
+// 目标路径上的文件在任何时刻都不会出现「内容已就位而属主不对」的状态）。pre 失败则整体失败并清理临时文件，目标保持原样。
+func WriteFileAtomicPre(path string, data []byte, perm fs.FileMode, pre func(tmp string) error) error {
 	if err := checkPerm(perm); err != nil {
 		return err
 	}
@@ -66,6 +72,11 @@ func WriteFileAtomic(path string, data []byte, perm fs.FileMode) error {
 		_ = f.Close()
 		_ = os.Remove(tmp)
 		return err
+	}
+	if pre != nil {
+		if err := pre(tmp); err != nil {
+			return fail(err)
+		}
 	}
 	if _, err := f.Write(data); err != nil {
 		return fail(err)

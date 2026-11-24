@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "config validate 的 data（Story 1.42；problems 指出键/行/列，不含取值）",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "ok",
+    "targets"
+  ],
+  "properties": {
+    "ok": {
+      "type": "boolean"
+    },
+    "targets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "target",
+          "file",
+          "ok",
+          "problems",
+          "notes"
+        ],
+        "properties": {
+          "target": {
+            "type": "string"
+          },
+          "file": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "reason"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "line": {
+                  "type": "integer"
+                },
+                "column": {
+                  "type": "integer"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "partial": {
+            "type": "string"
+          },
+          "unavailable": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

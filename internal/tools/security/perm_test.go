@@ -149,3 +149,47 @@ func TestWithUmask077Restores(t *testing.T) {
 		t.Fatalf("结束后应恢复为 022，实际 %04o", now)
 	}
 }
+
+// WriteFileAtomicPre：pre 在内容写入之前、rename 之前被调用（先 chown 再写内容）；pre 失败则目标保持原样且不留临时文件。
+func TestWriteFileAtomicPre(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "cfg.yaml")
+	if err := os.WriteFile(p, []byte("old"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	var sawEmpty, sawTarget string
+	err := WriteFileAtomicPre(p, []byte("new"), 0o640, func(tmp string) error {
+		b, _ := os.ReadFile(tmp)
+		sawEmpty = string(b)
+		b, _ = os.ReadFile(p)
+		sawTarget = string(b)
+		if filepath.Dir(tmp) != dir {
+			t.Errorf("临时文件应与目标同目录：%s", tmp)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sawEmpty != "" || sawTarget != "old" {
+		t.Errorf("pre 调用时临时文件应为空、目标仍是旧内容：%q %q", sawEmpty, sawTarget)
+	}
+	if b, _ := os.ReadFile(p); string(b) != "new" {
+		t.Errorf("内容：%q", b)
+	}
+	if fi, _ := os.Stat(p); fi.Mode().Perm() != 0o640 {
+		t.Errorf("权限：%v", fi.Mode().Perm())
+	}
+	// pre 失败：目标不变，无残留。
+	err = WriteFileAtomicPre(p, []byte("never"), 0o640, func(string) error { return errors.New("chown 失败") })
+	if err == nil {
+		t.Fatal("pre 失败应整体失败")
+	}
+	if b, _ := os.ReadFile(p); string(b) != "new" {
+		t.Errorf("目标应保持：%q", b)
+	}
+	ents, _ := os.ReadDir(dir)
+	if len(ents) != 1 {
+		t.Errorf("不应留下临时文件：%v", ents)
+	}
+}

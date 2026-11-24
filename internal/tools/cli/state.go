@@ -22,6 +22,10 @@ type ComponentInfo struct {
 	PrevVersion string `json:"prev_version,omitempty"`
 	// Setup 仅 server：安装向导的进展（Story 1.35）。由 list 在读到 state.json 之后另行填充（只读检查 <data_dir>/install.lock）。
 	Setup *SetupInfo `json:"setup,omitempty"`
+	// Process 是端口上的真实监听者与主进程（FR-58 的「进程归属」，Story 1.42；list 由 ss//proc 与 systemctl show 填充）。
+	Process *ProcessInfo `json:"process,omitempty"`
+	// Site 仅静态前端：站点域名、根目录、Nginx 片段与 conf.d 软链状态（Story 1.42）。
+	Site *SiteInfo `json:"site,omitempty"`
 }
 
 // SetupInfo 描述 Server 的安装向导进展。Phase：wizard_pending（install.lock 不存在，Server 处于 setup mode，向导未完成）| initialized（install.lock 存在）|

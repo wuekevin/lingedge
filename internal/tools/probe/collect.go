@@ -33,6 +33,9 @@ type Options struct {
 	Creds       Creds // 可选；见 Creds
 	DialTimeout time.Duration
 	Now         time.Time
+	// ListenersOnly 为 true 时只采集内存/磁盘与监听（ss、/proc），不探测宝塔/服务/MySQL/Redis/Node.js：
+	// list/status 只需要「谁占着哪个端口」，不应为此向 MySQL/Redis 发起连接（免凭据握手会被 MySQL 计入 Aborted_connects）。
+	ListenersOnly bool
 	// LittleEndian 指明 /proc/net 的主机字节序；nil = 运行主机的字节序。
 	LittleEndian *bool
 }
@@ -103,6 +106,10 @@ func Collect(ctx context.Context, o Options) (Result, error) {
 		return Result{}, err
 	}
 	c.listeners(ctx)
+	if o.ListenersOnly {
+		c.finish()
+		return c.res, nil
+	}
 	c.baota(ctx)
 	c.services(ctx)
 	c.deps(ctx)

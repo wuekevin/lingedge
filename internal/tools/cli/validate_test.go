@@ -55,7 +55,6 @@ func TestUsageErrors(t *testing.T) {
 	for _, args := range [][]string{
 		{"update", "node", "--no-backup", "--yes"},
 		{"update", "node", "--apply-staged"},
-		{"logs", "node", "--since", "10m", "-n", "5"},
 		{"node", "enroll", "--server", "https://panel.example.com:8443"},
 		{"update", "--all", "--plan-only"},
 	} {
@@ -63,6 +62,14 @@ func TestUsageErrors(t *testing.T) {
 		if code := h.run(append(args, "--non-interactive", "--yes")...); code != 1 {
 			t.Errorf("%v 应通过校验落到未实现(1)，得 %d\n%s", args, code, h.stderr)
 		}
+	}
+}
+
+// logs 的合法标志组合通过校验后落到命令本身：node 未安装 → 14（Story 1.42；此前它落到「尚未实现」1）。
+func TestLogsValidCombosPassValidation(t *testing.T) {
+	h := newHarness(t, asRoot())
+	if code := h.run("logs", "node", "--since", "10m", "-n", "5", "--non-interactive"); code != int(ExitNotInstalled) {
+		t.Errorf("应通过校验落到命令本身（14），得 %d\n%s", code, h.stderr)
 	}
 }
 

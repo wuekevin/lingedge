@@ -1844,6 +1844,7 @@ created: 2026-11-16
 - **需求**：实现 FR-15、FR-3、FR-58；验证/支撑 FR-9、NFR-6
 - **关联**：闭环 AC：AC-A-8；架构反馈：F-2；架构评审项：L24（见 `docs/bmad/review-architecture*.md`、`architecture-revision-log.md`）
 - **修订（2026-11-16）**：`cert.node_mtls` 告警阈值由 1/3 改为 <1/6（L24）；增 Server 叶证书/CA 有效期与时钟回拨检查。
+- **实现澄清（2026-11-24，Story 1.42 落地时发现原文缺口；ACs 语义未改）**：① AC2 的 `backup.master_key_separate`「独立备份记录」没有任何记录来源——记录 = `tools.yaml` 的 `backup.custody_fingerprint`，只提示；② `sys.mem/sys.disk`「清单要求」只在能获取并验证清单时可用，否则退回 `tools.yaml` 的下限（**[ASSUMPTION]** 缺省 256/512）；`backup.recent` 阈值缺省 168h（**[ASSUMPTION]**）；③ `sys.time_sync` 的「回拨」= 当前时钟早于 Tools 自己记录过的时间点；④ Server 叶证书/CA 经 TLS 握手读取（Tools 不读数据库）；⑤ AC3 的 `config validate` 对 `server.yaml` 经新增的 `lingedge-server config check`（与启动同一解析器），`node/dns/reporter` 的 schema 随 Epic 3，现只校验语法并如实标注；`tools.yaml` 的完整 schema 在本 Story 定稿（新增 `log/backup/doctor` 节，未知节/键一律拒绝）；⑥ AC4 的 `service stop node` 只作用于 Agent（ADR-020 节点自治）；⑦ AC5 的 `status` 有不健康组件 → 退出码 11；⑧ SIGHUP 热加载不属本 Story（ADR-026 Deferred）。详见 tools-design §19.1、`docs/operations/diagnostics.md` 与 `docs/bmad/stories/1-42-*.md`。
 - **参考**：tools-design §19；§3
 - **环境依赖**：ENV-LNX
 - **等待环境验证条件**：检查项注册表、JSON 输出、配置校验本机完成；systemd/端口/权限真实检查在 ENV-LNX 验证前标「等待环境验证」。

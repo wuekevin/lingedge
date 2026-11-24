@@ -14,6 +14,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -966,13 +967,61 @@ var realAdminDist bool
 
 // distOrFixture：仓库里有真实的 Admin 生产构建（frontend/dist/admin）就用它——流水线打包、Tools 安装、Nginx 托管走的就是真实的 Admin；
 // 没有（未跑过前端构建）才回落夹具，并在测试日志里如实标注。
+//
+// 不直接把活目录交给流水线：frontend/dist/admin 随时可能被并发的 `vite build`（emptyOutDir）清空重建（偶发失败的根因，见
+// TestFrontendDistMutatedDuringBuildStillYieldsIntactPackage）。这里先把它复制到独立的临时目录，并要求复制前后目录摘要一致（不一致则重试）；
+// 流水线自身也会再做一次带一致性核对的快照（scripts/release 的 snapshotFrontend）。
 func distOrFixture(t testing.TB, comp, fixtureDir string) string {
 	if comp == "admin-web" {
 		real := filepath.Join(repoRoot(t), "frontend", "dist", "admin")
 		if st, err := os.Stat(filepath.Join(real, "index.html")); err == nil && st.Mode().IsRegular() {
-			realAdminDist = true
-			return real
+			if copyDirStable(t, real, filepath.Join(fixtureDir, "dist-copy")) {
+				realAdminDist = true
+				return filepath.Join(fixtureDir, "dist-copy")
+			}
+			t.Log("frontend/dist/admin 在复制期间持续变化（并发的前端构建？）：改用夹具；本次不覆盖真实 Admin 构建")
 		}
 	}
 	return frontendFixture(fixtureDir, comp)
+}
+
+// copyDirStable 把 src 复制到 dst，并核对复制前、复制后、拷贝三者的目录摘要一致；最多重试 5 次。成功返回 true。
+func copyDirStable(t testing.TB, src, dst string) bool {
+	t.Helper()
+	for i := 0; i < 5; i++ {
+		_ = os.RemoveAll(dst)
+		before := dirDigest(src)
+		copyDir(t, src, dst)
+		after, copied := dirDigest(src), dirDigest(dst)
+		if before != "" && before == after && before == copied {
+			return true
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return false
+}
+
+// dirDigest 是目录树（相对路径 + 内容 SHA256）的摘要；目录不可读返回空串。
+func dirDigest(dir string) string {
+	var lines []string
+	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.Type().IsRegular() {
+			return nil
+		}
+		b, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(dir, p)
+		lines = append(lines, sha256Hex(b)+"  "+filepath.ToSlash(rel))
+		return nil
+	})
+	if err != nil || len(lines) == 0 {
+		return ""
+	}
+	sort.Strings(lines)
+	return sha256Hex([]byte(strings.Join(lines, "\n")))
 }

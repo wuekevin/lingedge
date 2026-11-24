@@ -39,6 +39,7 @@ case "$1" in
   disable) shift; for u in "$@"; do rm -f "$ST/enabled-$u"; done;;
   start) [ -e "$ST/fail-start" ] && { echo "Job failed" >&2; exit 1; }; shift; for u in "$@"; do : > "$ST/active-$u"; done;;
   stop) shift; for u in "$@"; do rm -f "$ST/active-$u"; done;;
+  show) for last; do :; done; if [ -e "$ST/show-$last" ]; then cat "$ST/show-$last"; else printf 'LoadState=loaded\nActiveState=inactive\nSubState=dead\nUnitFileState=disabled\nResult=success\nMainPID=0\nNRestarts=0\nActiveEnterTimestamp=\n'; fi;;
   restart|daemon-reload) ;;
   *) echo "unknown verb $1" >&2; exit 2;;
 esac

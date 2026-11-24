@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/wuekevin/lingedge/internal/tools/security/safeexec"
@@ -246,5 +247,70 @@ func TestRunnerAllowlist(t *testing.T) {
 	}
 	if len(Allowed) != 6 {
 		t.Errorf("白名单应恰为 6 项：%v", Allowed)
+	}
+}
+
+// Show：固定属性集（--property=…），解析为 UnitProps；argv 里没有调用方可控的属性名。
+func TestSystemctlShow(t *testing.T) {
+	e := newFakeEnv(t)
+	s := e.systemctl(t)
+	ctx := context.Background()
+	p, err := s.Show(ctx, UnitServer)
+	if err != nil || p.ActiveState != "inactive" || p.LoadState != "loaded" || p.NRestarts != 0 {
+		t.Fatalf("%+v %v", p, err)
+	}
+	e.set(t, "show-lingedge-server.service", "LoadState=loaded\nActiveState=active\nSubState=running\nUnitFileState=enabled\nResult=success\nMainPID=4242\nNRestarts=3\nActiveEnterTimestamp=Tue 2026-11-24 12:00:00 UTC\nExtra=ignored\n")
+	p, err = s.Show(ctx, UnitServer)
+	if err != nil || p.ActiveState != "active" || p.MainPID != 4242 || p.NRestarts != 3 || p.UnitFileState != "enabled" || p.ActiveEnterTimestamp == "" {
+		t.Fatalf("%+v %v", p, err)
+	}
+	got := e.calls(t)
+	want := "systemctl [show] [--no-pager] [--property=" + showProps + "] [lingedge-server.service]"
+	if got[len(got)-1] != want {
+		t.Errorf("argv：%q", got[len(got)-1])
+	}
+	if _, err := s.Show(ctx, UnitName("evil.service")); err == nil {
+		t.Error("未知单元必须在执行前被拒绝")
+	}
+	if _, err := (&Systemctl{Run: s.Run, Booted: func() bool { return false }}).Show(ctx, UnitServer); err == nil {
+		t.Error("非 systemd 主机应拒绝")
+	}
+}
+
+func TestParseShowRejectsGarbage(t *testing.T) {
+	good := "LoadState=loaded\nActiveState=active\nSubState=running\nUnitFileState=enabled\nMainPID=1\nNRestarts=0\n"
+	if _, err := parseShow(good); err != nil {
+		t.Fatal(err)
+	}
+	for name, in := range map[string]string{
+		"空输出":            "",
+		"没有 ActiveState": "LoadState=loaded\n",
+		"状态词含空白与分号":      "ActiveState=active; rm -rf /\n",
+		"MainPID 非数字":    good + "MainPID=abc\n",
+		"MainPID 为负":     good + "MainPID=-1\n",
+		"NRestarts 巨大":   good + "NRestarts=99999999999\n",
+		"时间戳含控制字符":       good + "ActiveEnterTimestamp=a\x01b\n",
+		"状态词过长":          "ActiveState=" + strings.Repeat("a", 200) + "\n",
+	} {
+		if _, err := parseShow(in); err == nil {
+			t.Errorf("%s：应被拒绝", name)
+		}
+	}
+}
+
+func TestRunUnitsMapping(t *testing.T) {
+	if got := RunUnits("server"); len(got) != 1 || got[0] != UnitServer {
+		t.Errorf("server：%v", got)
+	}
+	if got := RunUnits("node"); len(got) != 1 || got[0] != UnitNode {
+		t.Errorf("node 的启停只作用于 Agent（数据面自治，ADR-020）：%v", got)
+	}
+	if len(StatusUnits("node")) != 4 || len(LogUnits("node")) != 2 {
+		t.Errorf("node 的观察/日志单元：%v %v", StatusUnits("node"), LogUnits("node"))
+	}
+	for _, c := range []string{"admin-web", "console", "docs", "status", "website", "dns", "reporter", "nope"} {
+		if RunUnits(c) != nil || StatusUnits(c) != nil || LogUnits(c) != nil {
+			t.Errorf("%s 没有 Tools 管理的服务单元", c)
+		}
 	}
 }

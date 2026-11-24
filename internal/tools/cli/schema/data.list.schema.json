@@ -1,22 +1,240 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "list 的 data（tools-design §6）",
+  "title": "list 的 data（tools-design §6；Story 1.42 起带进程归属 process 与静态前端 site，--available 另附 available/manifest）",
   "type": "object",
   "additionalProperties": false,
-  "required": ["components"],
+  "required": [
+    "components"
+  ],
   "properties": {
     "components": {
       "type": "array",
       "items": {
-        "type": "object", "additionalProperties": false,
-        "required": ["name", "version", "state", "unit", "run_user", "ports", "release_dir", "config_dir", "data_dir", "installed_at"],
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "version",
+          "state",
+          "unit",
+          "run_user",
+          "ports",
+          "release_dir",
+          "config_dir",
+          "data_dir",
+          "installed_at"
+        ],
         "properties": {
-          "name": {"type": "string"}, "version": {"type": "string"}, "state": {"type": "string"}, "unit": {"type": "string"},
-          "run_user": {"type": "string"}, "ports": {"type": "array", "items": {"type": "integer", "minimum": 1}},
-          "release_dir": {"type": "string"}, "config_dir": {"type": "string"}, "data_dir": {"type": "string"},
-          "installed_at": {"type": "string"}, "prev_version": {"type": "string"},
-          "setup": {"type": "object", "additionalProperties": false, "required": ["phase", "install_lock", "detail"],
-            "properties": {"phase": {"enum": ["wizard_pending", "initialized", "unknown"]}, "install_lock": {"type": "boolean"}, "detail": {"type": "string"}}}
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "run_user": {
+            "type": "string"
+          },
+          "ports": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "release_dir": {
+            "type": "string"
+          },
+          "config_dir": {
+            "type": "string"
+          },
+          "data_dir": {
+            "type": "string"
+          },
+          "installed_at": {
+            "type": "string"
+          },
+          "prev_version": {
+            "type": "string"
+          },
+          "setup": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "phase",
+              "install_lock",
+              "detail"
+            ],
+            "properties": {
+              "phase": {
+                "enum": [
+                  "wizard_pending",
+                  "initialized",
+                  "unknown"
+                ]
+              },
+              "install_lock": {
+                "type": "boolean"
+              },
+              "detail": {
+                "type": "string"
+              }
+            }
+          },
+          "process": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "run_user",
+              "main_pid",
+              "listeners"
+            ],
+            "properties": {
+              "run_user": {
+                "type": "string"
+              },
+              "main_pid": {
+                "type": "integer"
+              },
+              "note": {
+                "type": "string"
+              },
+              "listeners": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "proto",
+                    "addr",
+                    "port",
+                    "pid",
+                    "process",
+                    "user",
+                    "ours"
+                  ],
+                  "properties": {
+                    "proto": {
+                      "type": "string"
+                    },
+                    "addr": {
+                      "type": "string"
+                    },
+                    "port": {
+                      "type": "integer"
+                    },
+                    "pid": {
+                      "type": "integer"
+                    },
+                    "process": {
+                      "type": "string"
+                    },
+                    "user": {
+                      "type": "string"
+                    },
+                    "ours": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "site": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "root",
+              "nginx_conf",
+              "conf_d_link"
+            ],
+            "properties": {
+              "host": {
+                "type": "string"
+              },
+              "root": {
+                "type": "string"
+              },
+              "nginx_conf": {
+                "type": "string"
+              },
+              "conf_d_link": {
+                "enum": [
+                  "ours",
+                  "absent",
+                  "foreign",
+                  "unknown"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "available": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "component",
+          "status",
+          "versions"
+        ],
+        "properties": {
+          "component": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "latest": {
+            "type": "string"
+          },
+          "versions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "installed": {
+            "type": "string"
+          },
+          "internal": {
+            "type": "boolean"
+          },
+          "builtin_in": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "channel",
+        "sequence",
+        "generated_at",
+        "valid_until"
+      ],
+      "properties": {
+        "channel": {
+          "type": "string"
+        },
+        "sequence": {
+          "type": "integer"
+        },
+        "generated_at": {
+          "type": "string"
+        },
+        "valid_until": {
+          "type": "string"
         }
       }
     }

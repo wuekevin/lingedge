@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "config edit 的 data（Story 1.42）",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "target",
+    "file"
+  ],
+  "properties": {
+    "target": {
+      "type": "string"
+    },
+    "file": {
+      "type": "string"
+    },
+    "changed": {
+      "type": "boolean"
+    },
+    "backup": {
+      "type": "string"
+    },
+    "restarted": {
+      "type": "boolean"
+    },
+    "partial_validation": {
+      "type": "boolean"
+    },
+    "dry_run": {
+      "type": "boolean"
+    },
+    "plan": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

@@ -97,6 +97,10 @@ func (o *buildOpts) stagePackage(c compDef, plat, buildDir string, commitTime ti
 		if len(links) > 0 {
 			return nil, nil, nil, fmt.Errorf("前端构建输出 %s 含符号链接（%d 个）：生产构建不应产生链接，请检查构建", frontendDir, len(links))
 		}
+		// 纵深防御：入口页必须真的进了包（校验是在更早的步骤做的；这里确认被打包的字节仍然满足它，缺失则失败而不是发出残缺的包）。
+		if st, err := os.Lstat(filepath.Join(payload, "public", "index.html")); err != nil || !st.Mode().IsRegular() || st.Size() == 0 {
+			return nil, nil, nil, fmt.Errorf("前端包 %s 的 payload/public/index.html 缺失或为空（前端目录在校验之后被改动？）", c.Name)
+		}
 		gz, err := precompress(filepath.Join(payload, "public"))
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("预压缩 %s: %w", c.Name, err)

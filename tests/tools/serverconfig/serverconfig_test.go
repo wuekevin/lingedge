@@ -6,10 +6,13 @@ package serverconfig
 import (
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
 	"github.com/wuekevin/lingedge/internal/platform/config"
+	"github.com/wuekevin/lingedge/internal/tools/cfgcheck"
 	"github.com/wuekevin/lingedge/internal/tools/installer"
 	"github.com/wuekevin/lingedge/internal/tools/resolver"
 	"github.com/wuekevin/lingedge/internal/tools/service"
@@ -140,5 +143,74 @@ func TestServerYAMLFollowsPlanPortsAndLoadsInRealConfig(t *testing.T) {
 	yml, _ := installer.RenderServerYAML(p)
 	if _, err := config.Parse([]byte(strings.Replace(string(yml), "listen: 127.0.0.1:19180", "listen: 0.0.0.0:19180", 1)), config.Options{}); err == nil {
 		t.Error("Server 应拒绝非回环的 metrics.listen")
+	}
+}
+
+// Story 1.42：Tools 的 server.yaml 结构校验（cfgcheck.CheckServerShape，Server 二进制不可用时的退路）必须与 Server 的真实 config.Config 保持同一个键集合——
+// 新增配置键而忘了同步 cfgcheck 会让本测试失败（Tools 不能 import Server 的 internal 包，对照只能放在 tests/）。
+func configLeafKeys() []string {
+	var out []string
+	var walk func(t reflect.Type, prefix string)
+	walk = func(t reflect.Type, prefix string) {
+		for i := 0; i < t.NumField(); i++ {
+			f := t.Field(i)
+			tag := strings.Split(f.Tag.Get("yaml"), ",")[0]
+			if !f.IsExported() || tag == "" || tag == "-" {
+				continue
+			}
+			p := tag
+			if prefix != "" {
+				p = prefix + "." + tag
+			}
+			if f.Type.Kind() == reflect.Struct && f.Type != reflect.TypeOf(config.Secret{}) {
+				walk(f.Type, p)
+				continue
+			}
+			out = append(out, p)
+		}
+	}
+	walk(reflect.TypeOf(config.Config{}), "")
+	sort.Strings(out)
+	return out
+}
+
+func TestCfgcheckServerKeySetMatchesRealConfig(t *testing.T) {
+	got, want := cfgcheck.ServerShapeKeys(), configLeafKeys()
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("cfgcheck 的 server.yaml 键集合与 internal/platform/config.Config 不一致：\n  cfgcheck=%v\n  config  =%v", got, want)
+	}
+}
+
+// 结构校验与真实 config.Parse 在「结构性」问题上给出一致的接受/拒绝（未知键、类型、口令写进文件、监听地址形态）；
+// 取值类规则（metrics 回环、argon2 下限、口令文件权限…）只有真实 Parse 才完整——这正是 Tools 优先调用 lingedge-server config check 的原因，
+// 退路只标注「部分校验」。这里同时锁定：真实 Parse 拒绝的结构性输入，退路不会放行。
+func TestCfgcheckShapeAgreesWithRealParseOnStructuralBreakage(t *testing.T) {
+	cases := []struct {
+		name, yaml string
+	}{
+		{"合法", "server:\n  env: prod\nhttp:\n  listen: 127.0.0.1:8080\n"},
+		{"空", ""},
+		{"未知顶层键", "server:\n  env: prod\nbogus: 1\n"},
+		{"节内未知键", "server:\n  env: prod\n  enviroment: x\n"},
+		{"整数字段给文本", "database:\n  port: many\n"},
+		{"列表字段给标量", "server:\n  trusted_proxies: 127.0.0.1\n"},
+		{"节给标量", "server: 1\n"},
+		{"口令写进文件", "database:\n  password: x\n"},
+		{"maint 口令写进文件", "database:\n  maint:\n    password: x\n"},
+		{"redis 口令写进文件", "redis:\n  password: x\n"},
+		{"监听地址不是 host:port", "http:\n  listen: nope\n"},
+		{"多文档", "server:\n  env: prod\n---\nhttp:\n  listen: 127.0.0.1:8080\n"},
+		{"重复键", "server:\n  env: prod\n  env: dev\n"},
+		{"语法错误", "server: [oops\n"},
+	}
+	for _, c := range cases {
+		_, perr := config.Parse([]byte(c.yaml), config.Options{Environ: []string{}})
+		shape := cfgcheck.CheckServerShape([]byte(c.yaml))
+		if perr != nil && len(shape) == 0 {
+			t.Errorf("%s：真实 Parse 拒绝（%v），但结构校验放行了", c.name, strings.SplitN(perr.Error(), "\n", 2)[0])
+		}
+		if perr == nil && len(shape) != 0 {
+			t.Errorf("%s：真实 Parse 接受，结构校验却报告了问题：%+v", c.name, shape)
+		}
 	}
 }

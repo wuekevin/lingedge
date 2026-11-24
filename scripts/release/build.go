@@ -204,10 +204,17 @@ func (o *buildOpts) build() error {
 			names = append(names, n)
 		}
 		sort.Strings(names)
+		// 先快照、再校验快照、之后只用快照打包（根因与理由见 snapshotFrontend）。
 		for _, n := range names {
-			if err := checkFrontendDist(o.src, n, o.frontendDirs[n]); err != nil {
+			shown := o.frontendDirs[n]
+			snap, err := snapshotFrontend(o.out, n, shown)
+			if err != nil {
 				return err
 			}
+			if err := checkFrontendDist(o.src, n, shown, snap); err != nil {
+				return err
+			}
+			o.frontendDirs[n] = snap
 		}
 	}
 	o.lockSHA = lockSHA

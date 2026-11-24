@@ -5,6 +5,7 @@
 //	lingedge-server --config FILE [--roles=api,grpc,scheduler,worker]   运行 Server（systemd Type=notify；默认全开）
 //	lingedge-server migrate plan|up|down|status|recover|lint ...         迁移框架（Story 1.6）
 //	lingedge-server healthz [--config FILE | --addr HOST:PORT] [--ready] 探测本机 Server 的 /healthz（/healthz/ready）
+//	lingedge-server config check [--config FILE] [--json]                用 config.Parse 校验 server.yaml（Story 1.42；Tools config validate/doctor cfg.validate 调用）
 //	lingedge-server lineage show|bump --config FILE                      部署谱系（ADR-002 §12；备份恢复后、启动 Server 前执行 bump）
 //	lingedge-server routes [-o FILE]                                     导出 REST 路由清单（Story 1.12，make openapi-check 使用）
 //	lingedge-server setup --from-file FILE [--config FILE] [--json]      无头安装（Story 1.24，ADR-026 §7）；Web 向导在无 install.lock 启动时自动进入 setup mode
@@ -37,7 +38,7 @@ const usageText = `用法:
   lingedge-server --config FILE [--roles=api,grpc,scheduler,worker]
   lingedge-server <子命令> [选项]
 
-子命令: migrate  healthz  lineage  routes  setup  db  version
+子命令: migrate  config  healthz  lineage  routes  setup  db  version
 `
 
 // run 是可测试的入口，返回进程退出码（0 成功；1 运行失败；2 用法错误）。
@@ -66,6 +67,8 @@ func run(args []string, stdout, stderr io.Writer, environ []string) int {
 		return setupMain(args[1:], stdout, stderr, environ)
 	case "db":
 		return dbMain(args[1:], stdout, stderr, environ)
+	case "config":
+		return configMain(args[1:], stdout, stderr, environ)
 	case "healthz":
 		return healthzMain(args[1:], stdout, stderr, environ)
 	case "lineage":

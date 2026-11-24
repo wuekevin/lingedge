@@ -242,9 +242,9 @@ func (f fixedState) Components(context.Context) ([]ComponentInfo, error) { retur
 func TestNonEmptyStateRendering(t *testing.T) {
 	src := fixedState{{Name: "node", Version: "1.0.0", State: "running", Unit: "lingedge-node.service", RunUser: "lingedge-node",
 		Ports: []int{80, 443}, ReleaseDir: "/opt/lingedge/node/releases/1.0.0", ConfigDir: "/etc/lingedge/node", DataDir: "/var/lib/lingedge-node",
-		InstalledAt: "2026-11-21T12:00:00.000Z"}, {Name: "docs", Version: "1.0.0", State: "installed"}}
+		InstalledAt: "2026-11-21T12:00:00.000Z"}, {Name: "reporter", Version: "1.0.0", State: "installed"}}
 	for _, c := range []string{"version", "list", "status"} {
-		h := newHarness(t, withState(src))
+		h := newHarness(t, withState(src), noSystemd())
 		if code := h.run(c, "--json"); code != 0 {
 			t.Fatalf("%s 退出码 %d", c, code)
 		}
@@ -255,7 +255,7 @@ func TestNonEmptyStateRendering(t *testing.T) {
 		if n := len(env["data"].(map[string]any)["components"].([]any)); n != 2 {
 			t.Errorf("%s: 组件数 %d", c, n)
 		}
-		h = newHarness(t, withState(src))
+		h = newHarness(t, withState(src), noSystemd())
 		h.run(c)
 		if !strings.Contains(h.stdout.String(), "node") || !strings.Contains(h.stdout.String(), "1.0.0") {
 			t.Errorf("%s 人类输出缺内容: %s", c, h.stdout)
@@ -270,23 +270,22 @@ func TestHiddenCommandsAndNoFakeSuccess(t *testing.T) {
 		t.Fatalf("退出码 %d", code)
 	}
 	out := h.stdout.String()
-	for _, vis := range []string{"version", "list", "status", "install", "recover", "config", "backup", "uninstall"} { // install/recover 自 Story 1.33、config setup-token 自 Story 1.35、backup/uninstall 自 Story 1.41 起已交付
+	for _, vis := range []string{"version", "list", "status", "install", "recover", "config", "backup", "uninstall", "service", "logs", "doctor"} { // install/recover 自 Story 1.33、config setup-token 自 Story 1.35、backup/uninstall 自 Story 1.41、service/logs/doctor/config validate|show|edit 自 Story 1.42 起已交付
 		if !regexp.MustCompile(`(?m)^\s+` + vis + `\s`).MatchString(out) {
 			t.Errorf("--help 应列出已交付命令 %s:\n%s", vis, out)
 		}
 	}
-	for _, hid := range []string{"update", "service", "logs", "doctor", "node", "rollback"} {
+	for _, hid := range []string{"update", "node", "rollback"} {
 		if regexp.MustCompile(`(?m)^\s+` + hid + `\s`).MatchString(out) {
 			t.Errorf("未实现命令 %s 不应出现在 --help", hid)
 		}
 	}
 	// 全部未实现的叶子命令（root 身份、满足其校验与确认）都不得以 0 退出。
 	for _, args := range [][]string{
-		{"update", "node"}, {"update", "check"}, {"update", "self"}, {"service", "status"}, {"service", "start", "node"},
-		{"logs", "node"}, {"doctor"}, {"config", "validate"}, {"config", "show", "server"}, {"config", "edit", "server"},
+		{"update", "node"}, {"update", "check"}, {"update", "self"},
 		{"node", "enroll"},
 		{"rollback", "node", "--yes"},
-		{"version", "--check"}, {"list", "--available"},
+		{"version", "--check"},
 	} {
 		h := newHarness(t, asRoot())
 		code := h.run(append(args, "--json", "--yes")...)

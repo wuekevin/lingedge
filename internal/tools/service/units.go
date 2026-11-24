@@ -138,3 +138,38 @@ func EnableTargets(component string) []UnitName {
 	}
 	return nil
 }
+
+// RunUnits 返回 `service start|stop|restart` 的作用对象：组件自己的服务单元。
+// node 只含 Agent（lingedge-node.service）：OpenResty 数据面按 ADR-020「节点自治」独立于 Agent 运行，Tools 不会因为停止 Agent 而停掉数据面。
+// 没有服务单元的组件（静态前端、尚未交付的组件）返回 nil。
+func RunUnits(component string) []UnitName {
+	switch component {
+	case "server":
+		return []UnitName{UnitServer}
+	case "node":
+		return []UnitName{UnitNode}
+	}
+	return nil
+}
+
+// StatusUnits 返回 `status`/`service status`/`doctor` 观察的全部单元（含 node 的 OpenResty 与 path 单元）。
+func StatusUnits(component string) []UnitName {
+	switch component {
+	case "server":
+		return []UnitName{UnitServer}
+	case "node":
+		return []UnitName{UnitNode, UnitOpenresty, UnitOpenrestyPath, UnitUpgradePath}
+	}
+	return nil
+}
+
+// LogUnits 返回 `logs` 读取的单元：Agent 与它的数据面（OpenResty 的 stdout/stderr 在 journal 里）。
+func LogUnits(component string) []UnitName {
+	switch component {
+	case "server":
+		return []UnitName{UnitServer}
+	case "node":
+		return []UnitName{UnitNode, UnitOpenresty}
+	}
+	return nil
+}
