@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -42,6 +43,8 @@ type Env struct {
 	BuiltinKeys func() ([]byte, error)
 	// State 缺省为读取 StatePath 的 FileState（见 state.go）。
 	State StateSource
+	// Backup 是备份/恢复/卸载外部依赖的装配；零值 = 生产（真实 mysqldump/mysql 与 lingedge-server 经 safeexec，终端口令输入）。
+	Backup BackupEnv
 	// Install 是安装编排（install/recover）的外部依赖装配；零值 = 生产：真实系统、真实探测、installer.ProductionSpecs()（当前只有 server，
 	// 所以 install 对尚未交付规格的其他组件以明确的错误失败）。测试注入临时根目录、伪二进制 Runner 与（只存在于 _test.go 的）假组件。
 	Install InstallEnv
@@ -64,7 +67,24 @@ func DefaultEnv() Env {
 		DefaultLogFile: DefaultLogPath,
 		TrustDir:       DefaultTrustDir,
 		BuiltinKeys:    manifest.BuiltinKeys,
+		Backup:         BackupEnv{ReadSecret: readSecretFromTerminal},
 	}
+}
+
+// readSecretFromTerminal 在 stderr 提示并从终端无回显读取一行（仅在交互时被调用）。
+func readSecretFromTerminal(label string) (string, error) {
+	_, _ = fmt.Fprint(os.Stderr, label)
+	b, err := term.ReadPassword(int(os.Stdin.Fd()))
+	_, _ = fmt.Fprintln(os.Stderr)
+	if err != nil {
+		return "", err
+	}
+	defer func() {
+		for i := range b {
+			b[i] = 0
+		}
+	}()
+	return string(b), nil
 }
 
 func (e Env) withDefaults() Env {

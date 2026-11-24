@@ -380,6 +380,15 @@ func mysqldPIDsFor(d string) []int {
 // Host 返回 TCP 连接目标主机（回环）；端口见 Port 字段。
 func (in *Instance) Host() string { return "127.0.0.1" }
 
+// BinDir 返回 mysqld 所在目录（同一发行版的 mysqldump/mysql 客户端与它同目录；Tools 的备份/恢复联调用它们对临时实例做真实的转储与导入）。
+func (in *Instance) BinDir() string {
+	real, err := filepath.EvalSymlinks(in.mysqld)
+	if err != nil {
+		real = in.mysqld
+	}
+	return filepath.Dir(real)
+}
+
 // Admin 返回以 root（无口令，仅限本临时实例的 Unix socket）连接的 *sql.DB，测试结束自动关闭。
 func (in *Instance) Admin(t testing.TB) *sql.DB {
 	t.Helper()

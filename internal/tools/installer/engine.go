@@ -118,7 +118,7 @@ type execution struct {
 
 func (x *execution) init() {
 	svc := &service.Undoer{Root: x.in.d.Root, Prov: x.in.prov, Sys: x.in.sys}
-	var u UndoApplier = &Undoer{Root: x.in.d.Root, Reg: x.in.d.Reg, Svc: svc, Web: x.in.webRunnerOrNil(),
+	var u UndoApplier = &Undoer{Root: x.in.d.Root, Reg: x.in.d.Reg, Svc: svc, Web: x.in.webRunnerOrNil(), Safety: x.in.d.RestoreSafety,
 		Notice: func(code, msg string) { x.warn(Warning{Code: code, Step: StepStart, Message: msg}) }}
 	if x.in.d.WrapUndoer != nil {
 		u = x.in.d.WrapUndoer(u)

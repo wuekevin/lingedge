@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "backup verify 的 data（只读校验；Story 1.41）",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["path", "ok", "encrypted", "component", "version", "host", "created_at", "purpose", "files", "bytes", "schema_version", "deploy_lineage", "kek_ids_required", "key_included"],
+  "properties": {
+    "path": {"type": "string"}, "ok": {"const": true}, "encrypted": {"type": "boolean"}, "component": {"enum": ["server", "node"]}, "version": {"type": "string"},
+    "host": {"type": "string"}, "created_at": {"type": "string"}, "purpose": {"enum": ["manual", "pre-restore"]}, "files": {"type": "integer", "minimum": 0},
+    "bytes": {"type": "integer", "minimum": 0}, "schema_version": {"type": "integer"}, "deploy_lineage": {"type": ["integer", "null"]},
+    "key_fingerprint": {"type": "string"}, "kek_ids_required": {"type": "array", "items": {"type": "string"}}, "key_included": {"type": "boolean"}
+  }
+}

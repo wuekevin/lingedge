@@ -93,12 +93,12 @@ func TestConfirmationRules(t *testing.T) {
 			t.Fatalf("update 退出码 %d", code)
 		}
 		h = newHarness(t, asRoot(), withTTY(), withStdin("y\n"))
-		if code := h.run("backup", "restore", "x.tar", "--non-interactive=false"); code != 1 {
+		if code := h.run("rollback", "node", "--non-interactive=false"); code != 1 { // 1.41 起 backup restore 已实现，占位改用仍未实现的 rollback（Story 1.43）
 			t.Fatalf("交互 y 后应落到未实现(1)，得 %d\n%s", code, h.stderr)
 		}
 		h = newHarness(t, asRoot(), withTTY(), withStdin("n\n"))
 		// 交互模式下未实现命令不征求确认（无意义的提问），直接说明尚未实现。
-		if code := h.run("backup", "restore", "x.tar"); code != 1 || strings.Contains(h.stderr.String(), "[y/N]") {
+		if code := h.run("rollback", "node"); code != 1 || strings.Contains(h.stderr.String(), "[y/N]") {
 			t.Fatalf("交互未实现命令不应提问，得 %d\n%s", code, h.stderr)
 		}
 	})
@@ -112,7 +112,7 @@ func TestConfirmationRules(t *testing.T) {
 			{"非交互无 confirm-name", []hopt{asRoot()}, []string{"uninstall", "node", "--purge", "--yes"}, 9},
 			{"非交互名字不符", []hopt{asRoot()}, []string{"uninstall", "node", "--purge", "--yes", "--confirm-name", "other"}, 9},
 			{"非交互仅 confirm-name 无 --yes", []hopt{asRoot()}, []string{"uninstall", "node", "--purge", "--confirm-name", "edge-host-1"}, 9},
-			{"非交互 --yes + 正确主机名", []hopt{asRoot()}, []string{"uninstall", "node", "--purge", "--yes", "--confirm-name", "edge-host-1"}, 1},
+			{"非交互 --yes + 正确主机名（确认通过，落到命令本身：node 未安装 → 14，Story 1.41 起 uninstall 已实现）", []hopt{asRoot()}, []string{"uninstall", "node", "--purge", "--yes", "--confirm-name", "edge-host-1"}, 14},
 			{"--confirm-name 无 --purge", []hopt{asRoot()}, []string{"uninstall", "node", "--confirm-name", "edge-host-1"}, 2},
 		}
 		for _, c := range cases {
@@ -270,12 +270,12 @@ func TestHiddenCommandsAndNoFakeSuccess(t *testing.T) {
 		t.Fatalf("退出码 %d", code)
 	}
 	out := h.stdout.String()
-	for _, vis := range []string{"version", "list", "status", "install", "recover", "config"} { // install/recover 自 Story 1.33、config setup-token 自 Story 1.35 起已交付
+	for _, vis := range []string{"version", "list", "status", "install", "recover", "config", "backup", "uninstall"} { // install/recover 自 Story 1.33、config setup-token 自 Story 1.35、backup/uninstall 自 Story 1.41 起已交付
 		if !regexp.MustCompile(`(?m)^\s+` + vis + `\s`).MatchString(out) {
 			t.Errorf("--help 应列出已交付命令 %s:\n%s", vis, out)
 		}
 	}
-	for _, hid := range []string{"update", "service", "logs", "doctor", "node", "backup", "rollback", "uninstall"} {
+	for _, hid := range []string{"update", "service", "logs", "doctor", "node", "rollback"} {
 		if regexp.MustCompile(`(?m)^\s+` + hid + `\s`).MatchString(out) {
 			t.Errorf("未实现命令 %s 不应出现在 --help", hid)
 		}
@@ -284,8 +284,8 @@ func TestHiddenCommandsAndNoFakeSuccess(t *testing.T) {
 	for _, args := range [][]string{
 		{"update", "node"}, {"update", "check"}, {"update", "self"}, {"service", "status"}, {"service", "start", "node"},
 		{"logs", "node"}, {"doctor"}, {"config", "validate"}, {"config", "show", "server"}, {"config", "edit", "server"},
-		{"node", "enroll"}, {"backup", "create"}, {"backup", "list"}, {"backup", "verify", "f"}, {"backup", "restore", "f", "--yes"},
-		{"rollback", "node", "--yes"}, {"uninstall", "node", "--yes"},
+		{"node", "enroll"},
+		{"rollback", "node", "--yes"},
 		{"version", "--check"}, {"list", "--available"},
 	} {
 		h := newHarness(t, asRoot())

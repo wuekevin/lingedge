@@ -146,9 +146,12 @@ lingedge config edit <component>      # 编辑副本 → 校验 → 原子替换
 
 lingedge node enroll [--token-file <f> | 交互输入 | stdin] [--token <t>（不推荐：进 ps/shell 历史）] [--server <url>] [--force-reenroll]
 
-lingedge backup create [--component server|node] [--output <dir>] [--encrypt] [--include-logs] [--include-master-key]
-lingedge backup list | verify <file>
-lingedge backup restore <file> [--component …] [--replace]
+lingedge backup create [--component server|node] [--output <dir>] [--encrypt] [--passphrase-file <f>] [--include-logs]
+                       [--include-master-key | --include-migrate-credential | --include-identity]（三者都必须同时 --encrypt）
+                       [--db-host/--db-port/--db-socket/--db-name/--db-user/--db-tls] [--mysql-bin-dir <dir>]
+lingedge backup list [--dir <dir>] | verify <file> [--passphrase-file <f>]
+lingedge backup restore <file> [--component …] [--replace --confirm-name <hostname>] [--master-key-file <f> | --use-backup-master-key]
+                        [--passphrase-file <f>] [--db-…] [--mysql-bin-dir <dir>]
 
 lingedge rollback <component> [--to <version>] [--from-backup <file>]
 lingedge uninstall <component> [--purge --confirm-name <hostname>]
@@ -633,7 +636,7 @@ Node 独占 80/443（R-10）。若宝塔 Nginx 占用：预检在步骤 4/5 停�
 - **conf.d 软链（AC2）**：仅「非宝塔 + 系统 Nginx 的主配置在 `/etc/nginx` 且 include 了 `conf.d/*.conf`」时可选；**询问**（交互），或 `--set nginx-link=yes`（非交互显式启用；`--yes` 只用于确认冲突，**不会**隐式创建软链/reload；非交互默认不创建）。第 19 步：先记 journal undo → 创建软链 → `nginx -t` → `nginx -s reload`（经只允许 `nginx`/`openresty` 的独立 safeexec Runner，`service.NewWebServerRunner`，不放宽 `safeexec.DefaultAllowed` 与 service 的白名单）；`-t` 或 reload 失败 → 立即撤销软链并告警（带 nginx 自己的输出），静态文件与片段已就位，安装仍完成；同名项已存在（含计划之后才出现）→ 绝不覆盖。事务回滚（如第 20 步失败）按 undo 摘除软链并再 reload 一次。宝塔环境一律只打印指引（FR-7）；宝塔/不支持时给 `nginx-link=yes` → 退出码 2。
 - **片段与安全头**：`/etc/lingedge/nginx/<c>.conf`（server 块）与 `<c>-security-headers.conf`（每条 `always`：nosniff、X-Frame-Options、Referrer-Policy、Permissions-Policy、COOP、CSP；TLS 时加 HSTS）。**每个含 `add_header` 的 location 显式 `include` 头文件，server 级不出现 `add_header`**。`LintNginxSnippet`/`LintSecurityHeaders` 做静态检查（含：不得 `proxy_cookie_domain` 改写、不得自行下发 `Set-Cookie`），渲染器自检不通过则不写出；CI 入口 `tests/security/nginxsnippet`（随 `make security`）对 5 组件 × 设置组合与 golden 检查，并带变异负向样本。
 - **站点根缓存策略**：SPA 入口 `no-store`；哈希资源 `public, max-age=31536000, immutable`（`try_files $uri =404`，缺失不回落入口页）；非 SPA 页面 `no-cache`；点文件（`/.well-known/` 除外）404。CSP 与 Admin 的 E2E 服务一致（`default-src 'none'`，样式 `'unsafe-inline'` 仅因 Arco）。
-- **未做/属他处**：`uninstall` 保留数据（Story 1.41）；升级前端（1.43）；真实宝塔面板与真实 Linux 发行版 Nginx 的 `-t`/reload/HTTPS 验证（ENV-LNX/ENV-BT，1.45）。本机用真实 nginx（`tests/release/frontend_test.go`）验证片段被 `nginx -t` 接受并以 HTTP/HTTPS 提供预期响应。
+- **未做/属他处**：`uninstall`（Story 1.41 已交付，见 §17.6：静态前端没有数据目录，只摘除软链并删除 release 树）；升级前端（1.43）；真实宝塔面板与真实 Linux 发行版 Nginx 的 `-t`/reload/HTTPS 验证（ENV-LNX/ENV-BT，1.45）。本机用真实 nginx（`tests/release/frontend_test.go`）验证片段被 `nginx -t` 接受并以 HTTP/HTTPS 提供预期响应。
 
 ## 12. 安装状态机与事务日志（journal）
 
@@ -1093,6 +1096,26 @@ LockPersonality=yes
 
 校验备份（哈希、可选解密、`master_key_fingerprint` 比对）；拒绝恢复来自**更新 schema** 的备份到旧二进制（先升级二进制）；先为当前状态自动创建「恢复前安全备份」；停止服务；DB 恢复**默认要求目标库为空**，`--replace` 才允许清空重建（交互二次确认主机名）；恢复配置与数据；**在启动 Server 之前**执行 `lingedge-server lineage bump`（IMP-07/H6）：`deploy.lineage = max(恢复后 DB 中的值 + 1, 当前 UNIX 秒)`，使恢复后产生的修订、站点 epoch、URL 失效标记在节点侧按 `(lineage, seq/epoch/marker)` 字典序**严格大于**已应用值，节点不会因 DB 回到较早状态而永久拒绝新修订或吞掉失效标记（`doctor` 检查系统时钟是否倒退）；随后启动并健康检查；失败则回滚到恢复前安全备份。**验收（AC-J-5 扩展）**：备份 → 发布若干修订推进节点 → 恢复备份 → `lineage bump` → 发布新修订，节点（含已应用更高 seq 者）仍能接受并生效；恢复前下发的 URL 失效标记/站点 epoch 不会使恢复后的新标记被 `max()` 吞掉。rollup `generation` 与日志偏移无需特殊处理（ADR-002 §12）。
 
+### 17.6 实现口径（Story 1.41：backup / restore / uninstall）
+
+> 以下是落地时补齐的、§17.1/§17.5 原文没有写明（或需要消歧）的决定；原有条文**未删改**。代码：`internal/tools/backup/`（`crypt.go`、`archive.go`、`manifest.go`、`keyfile.go`、`cred.go`、`mysql.go`、`dbmeta.go`、`service.go`、`restore*.go`）、`internal/tools/installer/uninstall.go`、`internal/tools/cli/cmd_backup.go|cmd_uninstall.go`、`internal/tools/security/tarstream.go`。
+
+**数据库访问与凭据（原文缺口）。** §17.1 只说 `mysqldump` 的凭据走 0600 的 `--defaults-extra-file`，没有说凭据从哪来。备份/恢复用**迁移账号 `lingedge_migrate`**（`mysqldump` 需要 SELECT/SHOW VIEW/TRIGGER/EVENT，恢复需要 DDL 与 `SET_USER_ID`——binlog 下建触发器；`lingedge_app`/`lingedge_maint` 刻意没有这些权限），来源与优先级同 §13.1：环境变量 `LINGEDGE_MIGRATE_DB_PASSWORD` ＞ `LINGEDGE_MIGRATE_DB_PASSWORD_FILE` ＞ `/etc/lingedge/server/migrate.yaml`（root:root 0400）＞ 交互输入（仅 TTY、无回显）；非交互且都没有 → 退出码 3 且**此时尚未改动任何东西**。连接目标：命令行 `--db-*` ＞ 环境变量 `LINGEDGE_MIGRATE_DB_HOST/PORT/SOCKET/NAME`（给没有命令行标志的 `recover` 用）＞ `migrate.yaml` ＞ root 属主的 `server.yaml` 的 `database` 段；**绝不读取 `runtime-credentials.json`**（ADR-026 §4 的信任规则）。Tools 不用 Go 的 MySQL 驱动（架构门禁只允许 `internal/platform` 的 db/migrate/repository 包 import 它），所有查询经 `mysql --batch` 客户端（SQL 全是常量，唯一插值是经正则校验的库名）。`mysqldump`/`mysql` 经 `backup.NewMySQLRunner`（只允许这两个名字的独立 safeexec Runner，不放宽 `safeexec.DefaultAllowed`）；`--mysql-bin-dir` 覆盖查找目录（宝塔 `/www/server/mysql/bin`，ENV-BT 验证）。选项文件：暂存目录 0700 + `O_EXCL` 0600、**第一个参数**、口令只在文件里（`"…"` 转义，含控制字符的口令拒绝）、用后清零覆盖并删除，删除失败本身就是错误；命令行与环境变量里没有口令。转储用 `--single-transaction --routines --triggers --events --hex-blob --set-gtid-purged=OFF --result-file=<0600 文件>`。
+
+**备份内容与格式。** `tar.gz`：`BACKUP.json` 在最前，其后是 `files/NNNNNN`（包内名与恢复目标解耦，目标只在清单里并经 `validDest` 限定在该组件的目录前缀内）与 `db/dump.sql`；只含普通文件（符号链接跳过并警告）。默认排除：`master.key`、`migrate.yaml`、`setup-token.hash`（一次性）、node 的 `identity/`（私钥）与 `staging/`。`--include-master-key`/`--include-migrate-credential`/`--include-identity` 必须同时 `--encrypt`（用法错误，退出码 2；清单校验也拒绝「未加密备份含这些条目」，即使清单被改写）。`state.json` 以只读参考副本入备份（`tools_state`），**恢复不覆盖它**（它反映本机已装的二进制与版本，覆盖会让「状态」与磁盘上的 release 脱节）；恢复只覆盖备份里有的文件，不删除备份里没有的文件。加密：argon2id（缺省 64 MiB/3 轮/4 线程，读取时对头部参数设上限防资源耗尽）+ AES-256-GCM 分块（64 KiB），nonce = 前缀‖分块序号，AAD = 整个头部‖final 标志（截断、重排、重复分块、伪造 final、篡改头部都认证失败）；头部带不含机密的 `meta`（组件、版本、`kek_ids_required`、指纹…），随头部一起被认证，使 `backup list` 与「移除 KEK 前的核对」无需口令即可读取（解密校验之前它只是展示用，列表里标 `meta_authenticated:false`）。口令来源：`--passphrase-file`（root 属主 0400/0600）＞ 环境变量 `LINGEDGE_BACKUP_PASSPHRASE_FILE` ＞ 交互输入（创建时两次）；至少 10 个字符。输出目录缺省 `/var/lib/lingedge/backups`（0700）；`--output` 指到对 group/other 开放的目录时，未加密备份拒绝（退出码 3），加密备份只告警。备份写完立即回读校验，失败则删除该备份。
+
+**主密钥指纹（F-7）。** `BACKUP.json` 记录两种指纹：`master_key_fingerprint` = `master.key` 文件内容的 SHA-256（与 `lingedge install server` 输出的「主密钥指纹（sha256 前 8 字节）」同源同格式，可用 `sha256sum` 目视核对）；`kek_fingerprints` = 每个 `kek_id` 的 SHA-256(域分隔前缀‖kek_id‖0x00‖密钥字节)（与注释、行序、`@current` 无关）。`kek_ids_required` = 库内 `certificates.private_key_enc`、`signing_keys.private_key_enc`、`system_settings.value_enc`、`users.totp_secret_enc` 与 `runtime-credentials.json` 里全部密文的 `kek_id` 并集（清单由 `TestEncTargetsMatchMigrations` 对照迁移里的 `*_enc` 列）。**恢复比对规则**（`CheckKeyMatch`）：整体指纹相同直接通过；否则逐个核对所需 `kek_id`：必须在当前 `master.key` 里且单键指纹相同——备份之后新增了 KEK（轮换）仍可恢复旧备份；缺失或同名不同密钥 → 拒绝并说明（退出码 3，**尚未改动任何东西**）。灾后重装（新机器的 `master.key` 是新生成的）用 `--master-key-file <备份对应的 master.key>`（指纹匹配才安装，本机旧文件保留为 `master.key.pre-restore-<tx>` 0400，**Tools 绝不删除主密钥**）或 `--use-backup-master-key`（备份以 `--include-master-key` 创建）。本机 `master.key` 不可用（格式/权限/属主不符）按「缺失」处理。
+
+**恢复事务（§17.5 的步骤即 journal 步骤号）。** 校验备份（完整读取、哈希、解密）并解到暂存区 → 只读前置检查（二进制内嵌的最新迁移版本来自 `lingedge-server migrate plan --offline`，备份的 `schema_version` 更大 → 退出码 3 `precondition.schema_newer`；主密钥；目标库为空，非空且无 `--replace` → 退出码 3；`--replace` 的确认走 `confirmHostname`：交互键入主机名，或 `--yes --confirm-name <主机名>`，否则退出码 9）→ **此后才打开 journal**（被前置检查拒绝的恢复不留任何事务记录）→ ① 请求记录 ② **恢复前安全备份**（同口令加密/不加密，写完回读校验，失败则中止、系统未改动）③ 停服务（本步 undo = `restore_safety_backup`：恢复文件、清空并重灌数据库、按恢复前状态重启服务）④ 安装主密钥（本步 undo = `restore_master_key`）⑤ 恢复文件 ⑥ 恢复数据库（`--replace` 先 `Wipe`：删除库内全部表/视图/例程/事件但保留库及其授权，再灌入转储）⑦ **探针解密**（对 `kek_ids_required` 的每个 `kek_id` 找一条仍以它包装的密文——数据库优先、其次运行期凭据文件——用当前主密钥解开；任何一个失败即失败；备份里没有任何密文则跳过并说明）⑧ `lingedge-server lineage bump`（**启动 Server 之前**；输出的 `after` 必须严格大于 `before` 与备份记录的 `deploy_lineage`）⑨ 启动并健康检查（server：`/healthz`，备份含 `install.lock` 时再要求 `/healthz/ready`；node：单元 active，Agent 心跳检查属 Epic 3，等待环境验证）。③ 之后任何一步失败 → 进程内回滚（主密钥 → 安全备份），journal 以 abort 归档，退出码 10；回滚也失败 → 退出码 12 并保留 journal，`recover --rollback` 经同一份实现重试（需要同样的数据库凭据通道，取不到则明确失败，绝不假装成功）。`recover --resume` 对 restore/uninstall 事务一律拒绝并给出指引。`runtime-credentials.json`：本机已有且其 `kek_id` 全部能被（最终的）主密钥解开时**保留本机文件**（它与当前 MySQL 账号口令一致，用备份里较旧的会让 `lineage bump` 连不上库），否则才用备份里的。**取舍（须披露）**：恢复不支持从中途续跑（`--resume`）；恢复前安全备份会随每次恢复增加一份，Tools 不自动清理（`backup list` 可见，确认无误后由运维删除）。
+
+**KEK 移除前核对（MIN-05）。** `backup.Service.RequiredKEKs(dir)` 汇总保留备份（含安全备份）的 `kek_ids_required`（无法解析的备份文件不被忽略，记入 `unreadable`）；`GuardKEKRemoval(dir, kekID, dropCompat)`：被某个保留备份需要 → 返回包装了 `secretbox.ErrKEKRequiredByBackup` 的错误并点名备份文件，**存在无法解析的备份时同样保守拒绝**，除非显式 `--drop-backup-compat`；返回值直接填入 `secretbox.RemovalCheck.BackupRequired`。**接线说明**：真正「移除 KEK」的命令（`secrets.rewrap` 的任务与 `master.key` 编辑）属 Story 6.18，本 Story 交付数据源与守卫函数（含与 `secretbox.CheckKEKRemovable` 的联动测试），不伪造调用方。
+
+**卸载（FR-9）。** `uninstall <c>`：计划（= `--dry-run`）与执行同源。默认**保留**配置、数据与备份：只停止并停用单元、删除单元文件并 `daemon-reload`、摘除 conf.d 软链（仅当它确实指向 Tools 片段；`nginx -t` 通过才 reload，失败只告警）、删除 `/opt/lingedge/<c>`、从 `state.json` 移除该组件（最后一步，即提交点）。运行用户与数据库永不删除（输出明确列为保留）。`--purge`（`--yes --confirm-name <主机名>` 或交互键入主机名，否则退出码 9）另外删除：server 的 `/etc/lingedge/server`、`/var/lib/lingedge/server`；node 的 `/etc/lingedge/node`、`/var/lib/lingedge-node`、升级结果目录与日志；该组件的备份文件；静态前端的 `/etc/lingedge/nginx/<c>.conf` 与 `<c>-security-headers.conf`（该目录由多个前端共用，只删本组件的两个文件）。静态前端**没有数据目录**，计划里如实标注。purge 目标取固定常量而非 `state.json`（状态被改动不应让 purge 指向别处），且逐项确认不是符号链接。server 的 `--purge` 在计划里**醒目警告** `master.key` 将被删除（附指纹）。步骤都是幂等的「向前」操作（卸载不可撤销）：失败时事务 abort、报告 `partial` 并提示重跑；崩溃后 `recover --rollback` 只结束事务记录并说明「卸载不可撤销、重新运行 uninstall 完成」。目标组件未安装 → 退出码 14。
+
+**退出码映射。** 备份损坏/哈希不符/口令错误 → 5；主密钥不匹配、schema 过新、目标库非空、缺口令/凭据、需要 root → 3；用法（`--include-master-key` 无 `--encrypt` 等）→ 2；缺确认 → 9；恢复失败已回滚 → 10；回滚失败 → 12；存在未完成事务 → 13；未安装 → 14。
+
+**等待环境验证（ENV-LNX/ENV-BT，1.45）。** 真实 systemd 下的服务停启与 `Pdeathsig`、root 属主的真实 chown 与 0400 文件属主检查、真实宝塔 MySQL 的 `mysqldump`/`mysql` 路径与权限、node 组件的真实数据布局与 Agent 心跳、全新机器上的灾后重装恢复演练。本机以真实 MySQL 8.0（临时实例）与本机构建的真实 `lingedge-server` 验证了其余全部逻辑。
+
 ## 18. 安全（FR-9、NFR-9/11/12/15）
 
 ### 18.1 安全解压算法（`security.SafeExtract`）
@@ -1274,3 +1297,11 @@ LockPersonality=yes
 - **§11.3 实现口径**：见 §11.3「实现（Story 1.40）」——五个静态前端共用一个生产 `ComponentSpec`、站点片段与安全头渲染、独立主机名强制（退出码 2、无绕过开关）、同域名站点/同名 conf 冲突、conf.d 软链（询问 + `nginx -t && reload` + 失败撤销 + 回滚摘除）、宝塔只打印指引、片段静态检查。`§11.3` 原有条文**未改**，其中「官网 `/api/` 反代范围」补充了一条原文没有写明的事实：`/api/v1/public/setup/*` 位于 `/api/v1/public/` 前缀之内，需显式 404 才能使向导接口在官网公网域不可达（已实现并经真实 nginx 验证）。
 - **§9 发行**：静态前端包为平台 `any`、`payload/public/**`（含确定性预压缩 `.gz`）；`scripts/release` 新增 `-frontend-dist <组件>=<目录>`（见 `docs/operations/release.md` §12）。**无迁移/OpenAPI/proto/CF-6/contract-v1 变更。**
 - **取舍（须披露）**：① nginx `-t`/reload 失败不使安装失败（撤销软链 + 告警 + 指引），因为静态文件与片段本身已就位且无法由 Tools 判断 nginx 失败是否由无关配置引起；② `--yes` 不隐式启用软链/reload，需显式 `--set nginx-link=yes`（reload 影响线上流量，不应夹带在「确认冲突」的同意里）；③ docs/status 也纳入独立主机名规则；④ website 的 ssr 变体、runtime-config.js、`/pricing` 404、媒体目录留给 Story 2.14/2.5。
+
+## 修订记录 2026-11-24（Story 1.41：backup / restore / uninstall）
+
+- **§17.1/§17.5 实现口径**：见 §17.6。原有条文未删改；补齐了原文的缺口：① 备份/恢复的数据库凭据与连接目标来源（迁移账号、§13.1 的优先级、绝不读 `runtime-credentials.json`）；② `master_key_fingerprint` 的定义（`master.key` 文件内容 SHA-256，与 install 输出同源）与逐 KEK 比对规则（备份之后轮换新增 KEK 不阻碍恢复旧备份）；③ 灾后重装如何提供主密钥（`--master-key-file`/`--use-backup-master-key`，旧文件保留不删）；④ 恢复前安全备份的加密与回滚入口（`recover --rollback` 经 journal 里的 `restore_safety_backup`）；⑤ `state.json` 在备份里只作参考、恢复不覆盖；⑥ `runtime-credentials.json` 的保留规则；⑦ 加密头部明文 `meta`（供 `backup list` 与 KEK 守卫在无口令时使用）。
+- **§17.1 与 §18.2 的白名单**：§18.2 列出的 `mysqldump`/`mysql` 已在 `safeexec.DefaultAllowed`；本 Story 另建只含 `mysqldump|mysql` 的 Runner 与只含 `lingedge-server` 的 Runner（`migrate plan --offline`、`lineage bump`），**未放宽** `DefaultAllowed` 与 service/web 的白名单。
+- **G-4 与备份归档**：备份归档的 tar.gz 读写放进 `internal/tools/security/tarstream.go`（类型/名称规则同 SafeExtract，只收普通文件、拒绝稀疏），`archive/tar` 仍只出现在 security 包内，**门禁未改**。
+- **§3 命令树**：`backup create|restore` 新增 `--passphrase-file`、`--include-migrate-credential`、`--include-identity`、`--db-*`、`--mysql-bin-dir`，`restore` 新增 `--confirm-name`、`--master-key-file`、`--use-backup-master-key`；`backup list` 新增 `--dir`。均为加法，退出码表未变。
+- **无迁移/OpenAPI/proto/CF-6/contract-v1 变更，无 CC-14。**

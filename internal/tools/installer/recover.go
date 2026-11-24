@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/wuekevin/lingedge/internal/tools/backup"
 	"github.com/wuekevin/lingedge/internal/tools/registry"
 	"github.com/wuekevin/lingedge/internal/tools/service"
 )
@@ -50,7 +51,7 @@ func (in *Installer) Unfinished(ctx context.Context) ([]registry.TxInfo, error) 
 
 func (in *Installer) newUndoer() UndoApplier {
 	svc := &service.Undoer{Root: in.d.Root, Prov: in.prov, Sys: in.sys}
-	var u UndoApplier = &Undoer{Root: in.d.Root, Reg: in.d.Reg, Svc: svc, Web: in.webRunnerOrNil(),
+	var u UndoApplier = &Undoer{Root: in.d.Root, Reg: in.d.Reg, Svc: svc, Web: in.webRunnerOrNil(), Safety: in.d.RestoreSafety,
 		Notice: func(code, msg string) { in.ev.emit(Event{Type: EventWarning, Code: code, Message: msg}) }}
 	if in.d.WrapUndoer != nil {
 		u = in.d.WrapUndoer(u)
@@ -122,7 +123,20 @@ func (in *Installer) recoverOne(ctx context.Context, info registry.TxInfo, opt R
 		}
 		removeStaging(in, info.ID, info.Components)
 		out.Action, out.Steps, out.Message = "rolled_back", n, "已按 journal 逆序撤销，系统恢复到事务开始前"
+		switch txKind(tx) {
+		case "uninstall":
+			out.Message = "卸载不可撤销：已结束这条事务记录，系统可能处于部分卸载状态；重新运行 lingedge uninstall <组件> 即可完成（各步骤幂等，组件仍在 state.json 里说明尚未完成）"
+		case "restore":
+			out.Message = "已按 journal 把系统回滚到恢复前安全备份的状态（文件、数据库、master.key），并按需重启了服务"
+		}
 		return out, nil
+	}
+	if k := txKind(tx); k != "" {
+		return out, &Error{Kind: KindRecover, Msg: "这是一条 " + k + " 事务，不能续跑", SystemState: "partial", Details: map[string]any{"tx": tx.ID},
+			Hint: map[string]string{
+				"uninstall": "卸载的步骤都是幂等的：先 lingedge recover --rollback 结束这条事务记录，再重新运行 lingedge uninstall <组件>",
+				"restore":   "恢复不能从中途续跑：lingedge recover --rollback 回到恢复前安全备份的状态，排查原因后重新运行 lingedge backup restore",
+			}[k]}
 	}
 	return in.resume(ctx, task, j, tx, udo, opt, out)
 }
@@ -268,4 +282,22 @@ func finalizeCommit(j Journal, tx *registry.Tx, steps map[int]registry.StepState
 		return err
 	}
 	return j.Archive()
+}
+
+// txKind 判断事务是否是 uninstall 或 restore（第一步 undo 里的请求记录）；install/update 返回空串。
+func txKind(tx *registry.Tx) string {
+	for _, s := range tx.Steps {
+		if s.Undo == nil {
+			continue
+		}
+		for _, a := range s.Undo.Actions {
+			switch a.Action {
+			case ActUninstallRequest:
+				return "uninstall"
+			case backup.ActRestoreRequest:
+				return "restore"
+			}
+		}
+	}
+	return ""
 }

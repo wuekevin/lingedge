@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "backup create 的 data（tools-design §17.1；Story 1.41）",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["component", "dry_run", "size", "encrypted", "kek_ids_required", "deploy_lineage", "schema_version", "file_count", "files"],
+  "properties": {
+    "component": {"enum": ["server", "node"]},
+    "dry_run": {"type": "boolean"},
+    "path": {"type": "string"},
+    "size": {"type": "integer", "minimum": 0},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "encrypted": {"type": "boolean"},
+    "database": {"type": "string"},
+    "key_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "kek_ids_required": {"type": "array", "items": {"type": "string"}},
+    "deploy_lineage": {"type": ["integer", "null"]},
+    "schema_version": {"type": "integer", "minimum": 0},
+    "file_count": {"type": "integer", "minimum": 0},
+    "files": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["dest", "kind", "size"],
+      "properties": {"dest": {"type": "string"}, "kind": {"type": "string"}, "size": {"type": "integer", "minimum": 0}}}},
+    "notice": {"type": "string"}
+  }
+}

@@ -38,6 +38,8 @@ const (
 	KindInterrupted Kind = "interrupted"
 	// KindRecover：recover 的前置不满足（没有未完成事务、不可续跑、事务已提交…）。退出码 3（无事务时 recover 返回成功结果而非错误）。
 	KindRecover Kind = "recover"
+	// KindNotInstalled：目标组件未安装（state.json 里没有它）。退出码 14（uninstall 等）。
+	KindNotInstalled Kind = "not_installed"
 	// KindInternal：不应发生的内部错误（程序缺陷）。退出码 1。
 	KindInternal Kind = "internal"
 )
@@ -101,5 +103,5 @@ func KindOf(err error) Kind {
 // Kinds 返回全部分类（cli 映射表的穷尽性测试用）。
 func Kinds() []Kind {
 	return []Kind{KindSpecMissing, KindSettings, KindUpgradeRequired, KindConfirmRequired, KindPortUnverified, KindPrecondition, KindConfig,
-		KindStepFailed, KindRolledBack, KindHealthFailed, KindRollbackFailed, KindInterrupted, KindRecover, KindInternal}
+		KindStepFailed, KindRolledBack, KindHealthFailed, KindRollbackFailed, KindInterrupted, KindRecover, KindNotInstalled, KindInternal}
 }

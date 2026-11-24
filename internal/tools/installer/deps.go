@@ -68,6 +68,10 @@ type Deps struct {
 	// Events 接收进度事件；可为 nil。发送是非阻塞的：通道满/被关闭都不影响安装。
 	Events chan<- Event
 
+	// RestoreSafety 执行 journal 里的 restore_safety_backup 撤销动作（恢复到「恢复前安全备份」：文件、数据库、按需重启服务）。
+	// 它需要数据库凭据与（安全备份加密时的）口令，由 cli 以交互/环境变量取得后装配；nil 时该撤销以明确的错误失败并给出手工恢复指引，绝不假装成功。
+	RestoreSafety func(ctx context.Context, a registry.UndoAction) (service.UndoResult, error)
+
 	// Hook 在每个步骤的四个点被同步调用："before:N"（Begin 之前）、"begun:N"（begin 已落盘、尚未动手）、"effect:N"（副作用已完成、done 未写）、
 	// "done:N"（done 已落盘）。仅供测试在这些点 kill -9 / 注入故障；生产为 nil。
 	Hook func(point string)

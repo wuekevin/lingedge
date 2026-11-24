@@ -85,7 +85,7 @@ func (r *Run) newInstaller(events chan<- installer.Event, req installer.Request)
 	return installer.New(installer.Deps{
 		Root: ie.Root, Reg: reg, Verifier: r.env.NewVerifier, Config: cfg, Specs: specs, Collect: collect, FS: ie.FS,
 		Runner: runner, WebRunner: ie.WebRunner, Own: own, Booted: ie.Booted, Geteuid: r.env.Geteuid, Now: r.env.Now, NewClient: ie.NewClient,
-		Confirm: r.confirmPrompt, Events: events, Hook: ie.Hook, WrapJournal: ie.WrapJournal, WrapUndoer: ie.WrapUndoer,
+		Confirm: r.confirmPrompt, Events: events, RestoreSafety: r.restoreSafety, Hook: ie.Hook, WrapJournal: ie.WrapJournal, WrapUndoer: ie.WrapUndoer,
 	})
 }
 

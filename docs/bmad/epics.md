@@ -1816,6 +1816,7 @@ created: 2026-11-16
 - **需求**：实现 FR-10、NFR-18；验证/支撑 FR-9、NFR-12
 - **关联**：架构反馈：F-7；架构评审项：IMP-07、MIN-05、IMP-16（见 `docs/bmad/review-architecture*.md`）
 - **修订（2026-11-16）**：AC7 由「提升计数或引入 lineage」改为已采用的 lineage 方案（`lineage bump`、严格大于字典序、`kek_ids_required`/`--drop-backup-compat`）。
+- **实现澄清（2026-11-24，Story 1.41 落地时发现原文缺口；ACs 语义未改）**：① AC1/AC4 没有说数据库凭据从哪来——备份/恢复用迁移账号，来源与优先级同 tools-design §13.1（环境变量 ＞ 口令文件 ＞ `migrate.yaml` ＞ 交互），绝不读 `runtime-credentials.json`；② AC1/AC4 的 `master_key_fingerprint` 定义为 `master.key` 文件内容 SHA-256（与 install 输出同源），并按所需 `kek_id` 逐个比对单键指纹（备份之后轮换新增 KEK 不阻碍旧备份恢复）；③ AC4 灾后重装的主密钥来源：`--master-key-file`/`--use-backup-master-key`，被替换的旧主密钥保留不删；④ `state.json` 随备份只作参考，恢复不覆盖；⑤ AC7 的「移除 KEK 前核对」交付数据源与守卫函数（`GuardKEKRemoval`），执行移除的命令属 Story 6.18；⑥ AC5 `--purge` 同时删除该组件的备份，静态前端只删本组件的两个 Nginx 片段文件。详见 tools-design §17.6 与 `docs/bmad/stories/1-41-*.md`。
 - **参考**：tools-design §17.1,§17.5；ADR-011 §8；ADR-013 §4
 - **环境依赖**：本机 MySQL（restore 逻辑）；完整路径需 ENV-LNX
 - **等待环境验证条件**：备份/恢复逻辑与加密本机以真实 MySQL 验证；真实 root 目录/服务停启与恢复演练在 ENV-LNX 验证前标「等待环境验证」。

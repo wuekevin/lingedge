@@ -11,6 +11,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/wuekevin/lingedge/internal/tools/backup"
 	"github.com/wuekevin/lingedge/internal/tools/registry"
 	"github.com/wuekevin/lingedge/internal/tools/service"
 )
@@ -46,6 +47,8 @@ type Undoer struct {
 	// Web 执行 nginx/openresty（撤销 conf.d 软链后 reload）；nil = 只摘软链不 reload。Notice 接收撤销过程中的非致命提示。
 	Web    service.Runner
 	Notice func(code, msg string)
+	// Safety 执行 backup.ActRestoreSafety（见 Deps.RestoreSafety）。
+	Safety func(ctx context.Context, a registry.UndoAction) (service.UndoResult, error)
 }
 
 func (u *Undoer) host(virtual string) string {
@@ -75,6 +78,18 @@ func (u *Undoer) Apply(ctx context.Context, a registry.UndoAction) (service.Undo
 		return u.stateForget(ctx, a)
 	case actNginxLink:
 		return u.unlinkNginx(ctx, a)
+	case backup.ActRestoreRequest, ActUninstallRequest:
+		return service.UndoResult{Outcome: service.OutcomeNoop}, nil
+	case backup.ActRestoreMasterKey:
+		if !strings.HasSuffix(a.Path, service.ServerConfigDir+"/master.key") || filepath.Clean(a.Path) != a.Path {
+			return service.UndoResult{}, fmt.Errorf("撤销路径 %s 不是 server 的 master.key，拒绝", a.Path)
+		}
+		return backup.UndoMasterKey(a)
+	case backup.ActRestoreSafety:
+		if u.Safety == nil {
+			return service.UndoResult{}, fmt.Errorf("无法自动回滚恢复：本次调用没有装配数据库凭据通道。请手工执行：lingedge backup restore %s --replace（恢复前安全备份，加密时附 --passphrase-file）", a.Path)
+		}
+		return u.Safety(ctx, a)
 	}
 	return service.UndoResult{}, fmt.Errorf("未知的撤销动作 %q（journal 来自更新版本或被改动）", a.Action)
 }

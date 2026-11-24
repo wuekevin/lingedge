@@ -47,9 +47,11 @@ k2:<base64url 无填充，32 字节随机值>
 - **租户范围**：`certificates` 是租户表而重包装是跨租户批处理，仓储每个方法与 `NewRecordStore` 都要求平台范围 Scope（`PlatformForJob`；租户范围/零值被拒绝，不能用平台表豁免）。`PlatformForJob` 调用点受 `[tenantscope-mint]` 白名单约束，须登记于 Story 1.14/1.15 的作业清单。
 - **真实环境验证**：`tests/integration/secrets`（独立临时 mysqld、全部 13 个内嵌迁移、真实 `lingedge_app` 账号、真实 `FileKeyProvider`）：端到端轮换（52 条/4 表，小批量游标）、移除 KEK 的拒绝/放行、仅含新 KEK 的主密钥解全部、nonce/ct 段不变、CAS 并发冲突（真实并发写入者）、CAS 大小写敏感（变异验证）、AAD 搬迁、中断后续跑、NULL/软删除、kek_id 非通配符。
 
-### 3.2 备份 `kek_ids_required`（依赖后续 Story，未伪造）
+### 3.2 备份 `kek_ids_required`（Story 1.41 已交付数据源与守卫）
 
-`RemovalCheck.BackupRequired` 保持为接口输入：保留备份清单（`BACKUP.json` 的 `kek_ids_required`，tools-design §17）由 **Story 1.41（backup / restore / uninstall）** 生成，`lingedge … backup list` 读取后传入。当前仓库没有真实的备份清单表/文件，因此**本 Story 不提供也不模拟其数据源**；在 1.41 落地前，`CheckKEKRemovable` 的备份维度只由调用方显式传入的清单决定（测试中以显式输入验证拒绝与 `--drop-backup-compat` 放行语义）。**运维上在 1.41 完成前，移除 KEK 前须人工确认没有仍需该 KEK 的保留备份。**
+`RemovalCheck.BackupRequired` 的数据源现在是真实的：每份备份的 `BACKUP.json` 记录 `kek_ids_required`（库内四个密文列与运行期凭据文件里全部密文涉及的 `kek_id`），`lingedge backup list` 展示每个保留备份所需的 `kek_id`（加密备份无需口令即可读取，头部明文 `meta` 随头部一起被认证）。移除 KEK 的流程在调用 `secretbox.CheckKEKRemovable` 之前，先用 `backup.Service.GuardKEKRemoval(备份目录, kek_id, dropCompat)`：被某个保留备份需要（含恢复前安全备份）→ 拒绝并点名备份，**存在无法解析的备份时同样保守拒绝**，除非显式 `--drop-backup-compat`（此后这些备份在不带旧主密钥时无法解密，必须同时告知运维）；它返回的清单直接填入 `RemovalCheck.BackupRequired`。
+
+**接线边界**：真正执行「移除 KEK」的命令（`secrets.rewrap` 任务与 `master.key` 编辑）属 Story 6.18，本 Story 不伪造调用方；在它交付之前，移除 KEK 仍是运维手工编辑 `master.key`，**须先运行 `lingedge backup list` 核对所需 `kek_id`**（工具不会替你拦截手工编辑）。恢复旧备份时的主密钥比对见 `docs/operations/backup-restore.md`。
 
 ## 4. 进程内保护
 

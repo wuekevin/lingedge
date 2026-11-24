@@ -21,6 +21,7 @@ import (
 //	rollback_failed    → 12  install.rollback_failed          撤销失败，journal 保留（lingedge recover --rollback 重试）
 //	interrupted        → 130 interrupt.sigint                 SIGINT：当前步骤完成后已回滚
 //	recover            → 3   recover.not_possible             recover 的前置不满足
+//	not_installed      → 14  not_installed                    uninstall 的目标组件未安装（Story 1.41）
 //	step_failed        → 沿 Cause 的映射（校验失败 5、传输失败 1、systemd 3…），并补上失败步骤与系统状态（rolled_back）
 //	internal           → 1   install.internal
 //
@@ -72,6 +73,8 @@ func InstallError(err error) *Error {
 		e.Exit, e.Code = ExitSigint, "interrupt.sigint"
 	case installer.KindRecover:
 		e.Exit, e.Code = ExitPrecondition, "recover.not_possible"
+	case installer.KindNotInstalled:
+		e.Exit, e.Code = ExitNotInstalled, "not_installed"
 	case installer.KindStepFailed:
 		inner := ie.Cause
 		if c, ok := classify(inner); ok && c != nil {

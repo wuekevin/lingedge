@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "uninstall 的 data（Story 1.41；默认保留配置/数据/备份，--purge 才删除）",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["component", "outcome", "purge", "dry_run", "items"],
+  "properties": {
+    "component": {"type": "string"},
+    "outcome": {"enum": ["planned", "uninstalled"]},
+    "tx": {"type": "string"},
+    "purge": {"type": "boolean"},
+    "dry_run": {"type": "boolean"},
+    "items": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["kind", "action"],
+      "properties": {"kind": {"enum": ["unit", "unit_file", "nginx_link", "release", "config", "data", "backup", "nginx_snippet", "state", "user", "database", "note"]},
+        "path": {"type": "string"}, "action": {"enum": ["remove", "keep", "absent", "skip"]}, "note": {"type": "string"}}}}
+  }
+}

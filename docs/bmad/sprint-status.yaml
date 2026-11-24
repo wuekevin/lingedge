@@ -82,7 +82,7 @@ development_status:
   1-39-admin-系统管理页-系统设置-用户与角色-api-token-审计: review   # 开发完成，见 docs/bmad/stories/1-39-*.md：12 个登记页面（3 个别名）、L2/L3 对话框 + L4 再认证（后端 /auth/reauth 现成，无 CC-14、无后端/OpenAPI 改动）、一次性明文、游标分页与过滤、UX-27 静态检查；vitest admin 130 + Playwright 16 项（真实 server/MySQL/Redis/Chromium）；等待环境验证：真机/Safari/真实 Nginx+HTTPS（1.40/1.45）；后续：官网读取品牌（2.4/2.6）、权限集缓存 token:manage 回填缺陷（1.18/1.19）
   1-39b-权限集缓存回填缺陷修复: review   # 1.39 遗留缺陷修复（清理型，见 docs/bmad/stories/1-39b-*.md）：token:manage/credential:read/credential:write 被 redact.String 误判致 auth:perms 缓存无法回填；redisx 新增 StructuredGuard 路径（SetStructured/GetOrLoadStructured），权限缓存走 schema+权限目录白名单，pkg/redact 与普通 Set 门禁不变；真实 Redis/MySQL 回归 + 22 个负向用例；删除 1.18 遗留的 rbac_perm_test.go.bak
   1-40-静态前端安装器-admin-web-docs-status-console-website-static: review   # 开发完成，见 docs/bmad/stories/1-40-*.md：五个静态前端共用生产 ComponentSpec（admin-web/console/docs/status/website static）；站点片段+安全头渲染（纯函数、严格字符集、每个含 add_header 的 location 显式 include、CI 静态检查 tests/security/nginxsnippet）；独立主机名强制（退出码 2、无绕过开关）；同名 conf/同域名站点不覆盖（9）；原生 Nginx conf.d 软链（询问/--set nginx-link=yes，nginx -t && reload，失败与回滚撤销）、宝塔只打印指引；发行流水线 -frontend-dist（预压缩 .gz、mock 检查、pnpm-lock 哈希）；真实 nginx 加载安装器生成的片段并服务（真实 frontend/dist/admin 经 流水线→验签→安装→nginx）；发现并修复 tools-design 原文漏洞（/public/setup 在 /public/ 前缀内需显式 404）；清理：Dependabot #2 minimatch + glob 经 pnpm overrides 钉到已修复精确版本，make vuln 增 pnpm audit；无 CC-14/迁移/OpenAPI 变更
-  1-41-backup-restore-uninstall-含主密钥指纹与加密: backlog
+  1-41-backup-restore-uninstall-含主密钥指纹与加密: review   # 开发完成，见 docs/bmad/stories/1-41-*.md：internal/tools/backup（备份格式 BACKUP.json + argon2id/AES-256-GCM 分块加密 + 主密钥指纹（文件 SHA-256，与 install 输出同源）与逐 kek_id 比对 + 凭据经 0600 临时 defaults-extra-file 用后清零删除、命令行/环境变量无口令）+ 恢复事务（完整校验→只读前置检查→恢复前安全备份→停服务→主密钥→文件→数据库(--replace 先清空)→探针解密每个 kek_id→lingedge-server lineage bump(启动前)→启动与健康检查；失败回滚到安全备份，退出码 10/12，recover --rollback 经 journal 重试）+ 卸载（默认保留配置/数据/备份，--purge 需主机名确认，静态前端无数据目录，软链摘除 nginx -t && reload）；KEK 移除前核对的数据源与守卫（GuardKEKRemoval，与 CheckKEKRemovable 联动）；真实临时 MySQL 8.0 + 真实 lingedge-server + 真实 mysqldump/mysql 联调（备份→清空→恢复一致、7 个故障注入点回滚、主密钥门禁、探针失败回滚、崩溃后 recover）；变异验证 26 条全部检出（5 条初次存活后补强）；发现并修正 10 处原文缺口/矛盾（tools-design §17.6、epics 实现澄清、docs/operations/backup-restore.md）；G-4 门禁未放宽（tar.gz 读写进 security/tarstream.go）；无 CC-14/迁移/OpenAPI 变更
   1-42-doctor-config-service-logs-status-list-完整: backlog
   1-43-升级与回滚-update-check-升级编排-迁移决策表-rollback-update-self: backlog
   1-44-tui-主菜单-多选安装-计划确认-进度-不可逆确认: backlog
@@ -852,7 +852,15 @@ environment_verification:   # 『等待环境验证』登记（验证人/日期�
     required_env: "ENV-LNX（Debian/Ubuntu 与 RHEL 系的系统 Nginx reload 与 gzip_static/http2）、ENV-BT（真实宝塔面板）、真实公网证书与浏览器"
     condition: "全部功能代码与测试本机完成并真跑（真实 nginx 加载生成片段并服务 HTTP/HTTPS、发行流水线→验签→安装全链、伪的只有 OS）；仅真实发行版 Nginx 的 conf.d 软链 reload、真实宝塔手工接入、真实公网证书 HTTPS、浏览器经 Nginx 登录需真实环境"
     done_locally: "gofmt -l . 无输出；make lint security gate-selftest vuln（含 pnpm audit）contract-check build verify-build migrate-test frontend-check race e2e 全绿；真实 nginx 用例（tests/release/frontend_test.go）通过；变异验证全部检出：见 docs/bmad/stories/1-40-*.md。"
-    pending: "ENV-LNX/ENV-BT 真机验证（1.45）；uninstall 保留数据（1.41）；website ssr/runtime-config（2.5/2.14）。"
+    pending: "ENV-LNX/ENV-BT 真机验证（1.45）；（uninstall 保留数据已由 1.41 交付）；website ssr/runtime-config（2.5/2.14）。"
+    verified_by: ""
+    verified_on: ""
+  1-41-backup-restore-uninstall-含主密钥指纹与加密:
+    status: partial
+    required_env: "ENV-LNX（真实 systemd 停启、root 属主 chown/0400 属主检查、全新机器灾后重装演练）、ENV-BT（真实宝塔 MySQL 客户端路径与权限）、Epic 3 的真实节点（AC-J-5 恢复后节点接收新修订）"
+    condition: "全部功能代码与测试本机完成并真跑（真实 MySQL 8.0 临时实例 + 真实 mysqldump/mysql + 本机构建的真实 lingedge-server 的 lineage bump/migrate plan//healthz + 真实向导产生的加密数据；伪的只有 OS）；仅真实 systemd/root 属主/宝塔/真实节点需真实环境"
+    done_locally: "gofmt -l . 无输出；make lint security gate-selftest vuln contract-check build verify-build migrate-test frontend-check race e2e 全绿（退出码均为 0）；真实 MySQL 联调 tests/integration/toolsinstall/backup_test.go 通过；变异验证 26 条全部检出：见 docs/bmad/stories/1-41-*.md。"
+    pending: "ENV-LNX/ENV-BT 真机验证与灾后重装演练（1.45）；真实节点上的 AC-J-5（Epic 3/1.45）；KEK 移除命令与 secrets.rewrap 接线（6.18）；doctor 的 backup.* 与 sys.time_sync 检查（1.42）；升级前强制备份与 rollback --from-backup 编排（1.43）。"
     verified_by: ""
     verified_on: ""
 

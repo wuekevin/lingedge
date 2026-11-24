@@ -1,10 +1,13 @@
 package cli
 
 import (
+	"path/filepath"
 	"strconv"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+
+	"github.com/wuekevin/lingedge/internal/tools/backup"
 )
 
 // commandSpecs 是 tools-design §3 命令树的完整声明。已交付：version/list/status；其余保持 Hidden 直至其 Story 交付。
@@ -309,38 +312,99 @@ func commandSpecs() []*cmdSpec {
 		},
 	}
 
-	backup := &cmdSpec{
+	passFlag := func(fs *pflag.FlagSet) {
+		str(fs, "passphrase-file", "", "备份口令文件（绝对路径，root 属主 0400/0600；也可设环境变量 "+EnvBackupPassFile+"，缺省交互输入）")
+	}
+	encOnly := func(inv *invocation, flags ...string) *Error {
+		for _, f := range flags {
+			if inv.flag(f) && !inv.flag("encrypt") {
+				return usageErr("usage.flag_requires", "--"+f+" 必须同时使用 --encrypt", "主密钥、迁移凭据与节点身份只能放进加密备份")
+			}
+		}
+		return nil
+	}
+	dbPortCheck := func(inv *invocation) *Error {
+		if n, _ := inv.cmd.Flags().GetInt("db-port"); n < 0 || n > 65535 {
+			return usageErr("usage.invalid_flag", "--db-port 超出范围", "")
+		}
+		if inv.str("db-socket") != "" && (inv.str("db-host") != "" || inv.changed("db-port")) {
+			return conflict("db-socket", "db-host")
+		}
+		return nil
+	}
+	backupCmd := &cmdSpec{
 		Use: "backup", Short: "备份与恢复",
 		Sub: []*cmdSpec{
-			{Use: "create", Short: "创建备份", Story: "Story 1.41", Args: cobra.NoArgs, NeedsRoot: true, Locks: compFlagLocks,
+			{Use: "create", Short: "创建备份", Args: cobra.NoArgs, NeedsRoot: true, Locks: compFlagLocks, Run: runBackupCreate,
 				Flags: func(fs *pflag.FlagSet) {
 					str(fs, "component", "", "server|node")
-					str(fs, "output", "", "输出目录")
-					fs.Bool("encrypt", false, "加密备份")
+					str(fs, "output", "", "输出目录（缺省 "+backup.DefaultBackupDir+"，root 0700）")
+					fs.Bool("encrypt", false, "加密备份（argon2id + AES-256-GCM）")
 					fs.Bool("include-logs", false, "包含日志")
-					fs.Bool("include-master-key", false, "包含主密钥（需加密）")
+					fs.Bool("include-master-key", false, "包含主密钥（必须同时 --encrypt）")
+					fs.Bool("include-migrate-credential", false, "包含 migrate.yaml（必须同时 --encrypt）")
+					fs.Bool("include-identity", false, "包含 node 身份私钥（必须同时 --encrypt）")
+					passFlag(fs)
+					dbFlags(fs)
 				},
 				Validate: func(inv *invocation) *Error {
 					if inv.changed("component") {
-						return checkEnum("component", inv.str("component"), "server", "node")
+						if e := checkEnum("component", inv.str("component"), "server", "node"); e != nil {
+							return e
+						}
 					}
-					return nil
+					if e := encOnly(inv, "include-master-key", "include-migrate-credential", "include-identity"); e != nil {
+						return e
+					}
+					if inv.str("passphrase-file") != "" && !inv.flag("encrypt") {
+						return usageErr("usage.flag_requires", "--passphrase-file 只与 --encrypt 一起使用", "")
+					}
+					if inv.str("component") == "node" && (inv.flag("include-master-key") || inv.flag("include-migrate-credential")) {
+						return usageErr("usage.flag_not_applicable", "--include-master-key/--include-migrate-credential 只适用于 server", "")
+					}
+					if inv.str("component") == "server" && inv.flag("include-identity") {
+						return usageErr("usage.flag_not_applicable", "--include-identity 只适用于 node", "")
+					}
+					return dbPortCheck(inv)
 				}},
-			{Use: "list", Short: "列出备份", Story: "Story 1.41", Args: cobra.NoArgs},
-			{Use: "verify <文件>", Short: "校验备份", Story: "Story 1.41", Args: cobra.ExactArgs(1)},
-			{Use: "restore <文件>", Short: "从备份恢复", Story: "Story 1.41", Args: cobra.ExactArgs(1), NeedsRoot: true, Locks: compFlagLocks,
+			{Use: "list", Short: "列出备份（含每个备份所需的 kek_id）", Args: cobra.NoArgs, Run: runBackupList,
+				Flags: func(fs *pflag.FlagSet) { str(fs, "dir", "", "备份目录（缺省 "+backup.DefaultBackupDir+"）") }},
+			{Use: "verify <文件>", Short: "校验备份（结构、哈希、解密；只读）", Args: cobra.ExactArgs(1), Run: runBackupVerify, Flags: passFlag},
+			{Use: "restore <文件>", Short: "从备份恢复", Args: cobra.ExactArgs(1), NeedsRoot: true, Locks: compFlagLocks, Run: runBackupRestore,
 				Flags: func(fs *pflag.FlagSet) {
 					str(fs, "component", "", "server|node")
-					fs.Bool("replace", false, "替换现有数据")
+					fs.Bool("replace", false, "允许清空非空的目标库后恢复（需再确认主机名）")
+					str(fs, "confirm-name", "", "本机主机名（--replace 的非交互确认，需同时 --yes）")
+					str(fs, "master-key-file", "", "备份对应的 master.key（本机主密钥与备份不匹配时安装它；旧文件保留为 master.key.pre-restore-*）")
+					fs.Bool("use-backup-master-key", false, "安装备份自带的 master.key（备份须以 --include-master-key 创建）")
+					passFlag(fs)
+					dbFlags(fs)
 				},
 				Validate: func(inv *invocation) *Error {
 					if inv.changed("component") {
-						return checkEnum("component", inv.str("component"), "server", "node")
+						if e := checkEnum("component", inv.str("component"), "server", "node"); e != nil {
+							return e
+						}
 					}
-					return nil
+					if inv.changed("confirm-name") && !inv.flag("replace") {
+						return usageErr("usage.flag_not_applicable", "--confirm-name 仅与 --replace 一起使用", "")
+					}
+					if inv.str("master-key-file") != "" && inv.flag("use-backup-master-key") {
+						return conflict("master-key-file", "use-backup-master-key")
+					}
+					if p := inv.str("master-key-file"); p != "" && !filepath.IsAbs(p) {
+						return usageErr("usage.invalid_flag", "--master-key-file 必须是绝对路径", "")
+					}
+					return dbPortCheck(inv)
 				},
 				Confirm: func(inv *invocation) *Error {
-					return inv.r.confirmYes("恢复会覆盖当前数据")
+					if inv.r.opts.DryRun {
+						return nil
+					}
+					if inv.flag("replace") {
+						return inv.r.confirmHostname(inv.str("confirm-name"))
+					}
+					return inv.r.confirmYes("恢复会覆盖当前的配置与数据（恢复前会自动做一份安全备份）")
 				}},
 		},
 	}
@@ -356,7 +420,7 @@ func commandSpecs() []*cmdSpec {
 	}
 
 	uninstall := &cmdSpec{
-		Use: "uninstall <组件>", Short: "卸载组件（默认保留配置与数据）", Story: "Story 1.41", Args: cobra.ExactArgs(1), NeedsRoot: true, Locks: argLocks,
+		Use: "uninstall <组件>", Short: "卸载组件（默认保留配置与数据）", Args: cobra.ExactArgs(1), NeedsRoot: true, Locks: argLocks, Run: runUninstall,
 		Flags: func(fs *pflag.FlagSet) {
 			fs.Bool("purge", false, "同时删除配置、数据与备份（需 --confirm-name）")
 			str(fs, "confirm-name", "", "本机主机名（--purge 的非交互确认）")
@@ -371,6 +435,9 @@ func commandSpecs() []*cmdSpec {
 			return nil
 		},
 		Confirm: func(inv *invocation) *Error {
+			if inv.r.opts.DryRun {
+				return nil
+			}
 			if inv.flag("purge") {
 				return inv.r.confirmHostname(inv.str("confirm-name"))
 			}
@@ -392,7 +459,7 @@ func commandSpecs() []*cmdSpec {
 		},
 	}
 
-	return []*cmdSpec{versionSpec, listSpec, statusSpec, install, update, service, logs, doctor, config, node, backup, rollback, uninstall, recoverSpec}
+	return []*cmdSpec{versionSpec, listSpec, statusSpec, install, update, service, logs, doctor, config, node, backupCmd, rollback, uninstall, recoverSpec}
 }
 
 func hidden(_ *bool, fs *pflag.FlagSet, name string) { _ = fs.MarkHidden(name) }

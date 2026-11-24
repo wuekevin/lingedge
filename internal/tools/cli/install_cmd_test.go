@@ -300,7 +300,7 @@ func TestInstallErrorMappingIsExhaustive(t *testing.T) {
 		installer.KindSpecMissing: ExitGeneral, installer.KindSettings: ExitUsage, installer.KindUpgradeRequired: ExitPrecondition, installer.KindConfirmRequired: ExitConfirmRequired,
 		installer.KindPortUnverified: ExitPortConflict, installer.KindPrecondition: ExitPrecondition, installer.KindConfig: ExitUsage, installer.KindStepFailed: ExitGeneral,
 		installer.KindRolledBack: ExitRolledBack, installer.KindHealthFailed: ExitHealthFailed, installer.KindRollbackFailed: ExitRollbackFailed, installer.KindInterrupted: ExitSigint,
-		installer.KindRecover: ExitPrecondition, installer.KindInternal: ExitGeneral,
+		installer.KindRecover: ExitPrecondition, installer.KindNotInstalled: ExitNotInstalled, installer.KindInternal: ExitGeneral,
 	}
 	for _, k := range installer.Kinds() {
 		e := InstallError(&installer.Error{Kind: k, Msg: "m"})
