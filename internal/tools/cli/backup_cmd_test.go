@@ -339,7 +339,7 @@ func TestBackupCommandValidation(t *testing.T) {
 func TestUninstallCommand(t *testing.T) {
 	h, w := nodeBackupHarness(t)
 	// 未安装 → 14（--yes 通过确认之后）。
-	if code := h.run("uninstall", "server", "--yes", "--json", "--non-interactive"); code != 14 || errCode(h.envelope()) != "not_installed" {
+	if code := h.run("uninstall", "server", "--yes", "--json", "--non-interactive"); code != 14 || errCode(h.envelope()) != "not_installed.component" {
 		t.Fatalf("未安装: %d %s", code, h.stdout)
 	}
 	// --dry-run：计划（保留项与删除项），零改动，不需要确认。

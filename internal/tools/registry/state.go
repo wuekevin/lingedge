@@ -25,7 +25,11 @@ import (
 //
 // 版本 2（Story 1.31）：新增可选的顶层 host（host.baota：只读探测报告）。版本 1 的文件仍可读取（内存升级为 2，下次落盘时写成 2）；
 // 版本 1 的文件里若出现 host 则是损坏（该字段在版本 1 不存在）。已发布的 1.29 程序读到版本 2 会失败关闭（KindStateUnsupported）且不改写——这是版本规则的预期行为。
-const StateSchemaVersion = 2
+//
+// 版本 3（Story 1.43）：组件记录新增可选的 upgrade（最近一次成功升级：来源版本、迁移级别、备份文件、回滚路径），供 `rollback` 决定路径。
+// 版本 1/2 的文件仍可读取（内存升级为 3，下次落盘时写成 3）；版本 1/2 的组件记录里若出现 upgrade 则是损坏（该字段自版本 3 起）。
+// 已发布的 1.42 及更早程序读到版本 3 会失败关闭（KindStateUnsupported）且不改写——这是版本规则的预期行为。
+const StateSchemaVersion = 3
 
 const (
 	maxStateBytes = 4 << 20
@@ -46,6 +50,69 @@ type Component struct {
 	InstalledAt string `json:"installed_at"`
 	PrevVersion string `json:"prev_version,omitempty"`
 	LastTx      string `json:"last_tx,omitempty"` // 最近一次改动该组件的事务 ID
+	// Upgrade 是最近一次成功升级的记录（版本 3 起）；回滚成功或重新安装后清除。
+	Upgrade *UpgradeRecord `json:"upgrade,omitempty"`
+}
+
+// 升级后的回滚路径（UpgradeRecord.Path；tools-design §17.2 决策表）。
+const (
+	PathBinary        = "binary"         // 无迁移：切回旧 release
+	PathMigrateDown   = "migrate_down"   // 全部 reversible：migrate down 到升级前 schema，再切回旧 release
+	PathBinaryExpand  = "binary_expand"  // 含 expand（无不可逆）：只切回旧 release，不执行 down
+	PathRestoreBackup = "restore_backup" // 含 irreversible：恢复升级前备份 + 旧版本二进制
+)
+
+// UpgradeRecord 是一次成功升级留下的、回滚所需的事实。不含任何口令/密钥。
+type UpgradeRecord struct {
+	From         string   `json:"from"`
+	At           string   `json:"at"`
+	Tx           string   `json:"tx"`
+	Classes      []string `json:"classes"`
+	Irreversible bool     `json:"irreversible"`
+	Path         string   `json:"path"`
+	// SchemaFrom/SchemaTo 是升级前/后的数据库迁移版本（仅 server 且数据库已初始化时记录，否则为 0）。
+	SchemaFrom int64 `json:"schema_from,omitempty"`
+	SchemaTo   int64 `json:"schema_to,omitempty"`
+	// Backup 是升级前备份文件（server：含数据库；其他：空）；BackupEncrypted 标明恢复时需要口令。
+	Backup          string `json:"backup,omitempty"`
+	BackupEncrypted bool   `json:"backup_encrypted,omitempty"`
+}
+
+func (u *UpgradeRecord) validate(name string) error {
+	bad := func(f, why string) error {
+		return newErr(KindStateInvalid, "组件 %s 的 upgrade.%s %s", name, f, why)
+	}
+	if !semverRE.MatchString(u.From) {
+		return bad("from", "不是 semver: "+quote(u.From))
+	}
+	if err := requireTime("upgrade.at", u.At); err != nil {
+		return err
+	}
+	if !ValidTxID(u.Tx) {
+		return bad("tx", "不是合法的事务 ID")
+	}
+	switch u.Path {
+	case PathBinary, PathMigrateDown, PathBinaryExpand, PathRestoreBackup:
+	default:
+		return bad("path", "不在 binary|migrate_down|binary_expand|restore_backup 之内: "+quote(u.Path))
+	}
+	for _, c := range u.Classes {
+		if c != "reversible" && c != "expand" && c != "irreversible" {
+			return bad("classes", "含未知迁移级别: "+quote(c))
+		}
+	}
+	if u.SchemaFrom < 0 || u.SchemaTo < 0 {
+		return bad("schema_from/schema_to", "不得为负")
+	}
+	if u.Backup != "" && (!filepath.IsAbs(u.Backup) || filepath.Clean(u.Backup) != u.Backup) {
+		return bad("backup", "必须是规范的绝对路径: "+quote(u.Backup))
+	}
+	for f, v := range map[string]string{"from": u.From, "at": u.At, "tx": u.Tx, "path": u.Path, "backup": u.Backup} {
+		if err := requireClean("组件 "+name+" 的 upgrade."+f, v); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // State 是 state.json 的内容。
@@ -157,6 +224,11 @@ func (c Component) validate(name string) error {
 	if c.LastTx != "" && !ValidTxID(c.LastTx) {
 		return bad("last_tx", "不是合法的事务 ID")
 	}
+	if c.Upgrade != nil {
+		if err := c.Upgrade.validate(name); err != nil {
+			return err
+		}
+	}
 	// 泄漏检查：逐个字符串值。路径/版本/时间戳这类值经脱敏后应当不变。
 	for f, v := range map[string]string{
 		"version": c.Version, "prev_version": c.PrevVersion, "state": c.State, "unit": c.Unit, "run_user": c.RunUser,
@@ -187,7 +259,7 @@ func requireTime(field, v string) error {
 // ParseState 解析并校验 state.json 的字节。
 //
 // 版本处理：先只取 schema_version——缺失/非整数/小于 1 → KindStateCorrupt；大于 StateSchemaVersion → KindStateUnsupported（不尝试解析其余内容）；
-// 等于当前版本 → 严格解析（未知字段、尾随数据都是损坏）。更低的旧版本经 migrateState 升到当前（目前只有 1，没有旧版本）。
+// 等于当前版本 → 严格解析（未知字段、尾随数据都是损坏）。更低的旧版本经 migrateState 升到当前。
 func ParseState(b []byte) (State, error) {
 	var head struct {
 		SchemaVersion *int `json:"schema_version"`
@@ -239,6 +311,28 @@ func migrateState(from int, b []byte) ([]byte, error) {
 				return nil, newErr(KindStateCorrupt, "schema_version=1 的 state.json 不应含 host（该字段自版本 2 起）")
 			}
 			m["schema_version"] = json.RawMessage("2")
+			nb, err := json.Marshal(m)
+			if err != nil {
+				return nil, wrapErr(KindStateCorrupt, err, "无法迁移 state.json")
+			}
+			b = nb
+		case 2: // 2 → 3：只是组件记录加了可选的 upgrade；版本 2 的组件记录不应含 upgrade。
+			var m map[string]json.RawMessage
+			if err := json.Unmarshal(b, &m); err != nil {
+				return nil, wrapErr(KindStateCorrupt, err, "state.json 不是 JSON 对象")
+			}
+			var comps map[string]map[string]json.RawMessage
+			if raw, ok := m["components"]; ok {
+				if err := json.Unmarshal(raw, &comps); err != nil {
+					return nil, wrapErr(KindStateCorrupt, err, "state.json 的 components 不是对象")
+				}
+			}
+			for name, c := range comps {
+				if _, has := c["upgrade"]; has {
+					return nil, newErr(KindStateCorrupt, "schema_version<3 的 state.json 里组件 %s 不应含 upgrade（该字段自版本 3 起）", name)
+				}
+			}
+			m["schema_version"] = json.RawMessage("3")
 			nb, err := json.Marshal(m)
 			if err != nil {
 				return nil, wrapErr(KindStateCorrupt, err, "无法迁移 state.json")

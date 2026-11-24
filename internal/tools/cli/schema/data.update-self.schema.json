@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "update self 的 data（Story 1.43）",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "dry_run",
+    "result"
+  ],
+  "properties": {
+    "dry_run": {
+      "type": "boolean"
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "outcome",
+        "from",
+        "to",
+        "target",
+        "warnings"
+      ],
+      "properties": {
+        "outcome": {
+          "enum": [
+            "planned",
+            "updated",
+            "already_up_to_date"
+          ]
+        },
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "prev": {
+          "type": "string"
+        },
+        "self_check": {
+          "type": "string"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  }
+}

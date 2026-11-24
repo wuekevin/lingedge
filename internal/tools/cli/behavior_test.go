@@ -75,9 +75,9 @@ func TestConfirmationRules(t *testing.T) {
 			t.Errorf("应提示显式标志: %s", h.stderr)
 		}
 	})
-	t.Run("--yes 通过确认，落到未实现 → 1", func(t *testing.T) {
+	t.Run("--yes 通过确认，落到命令本身（node 未安装 → 14；Story 1.43 起 rollback 已实现）", func(t *testing.T) {
 		h := newHarness(t, asRoot())
-		if code := h.run("rollback", "node", "--yes"); code != 1 {
+		if code := h.run("rollback", "node", "--yes"); code != 14 {
 			t.Fatalf("退出码 %d\n%s", code, h.stderr)
 		}
 	})
@@ -89,17 +89,17 @@ func TestConfirmationRules(t *testing.T) {
 	})
 	t.Run("交互：y 通过 / n 拒绝（提问走 stderr）", func(t *testing.T) {
 		h := newHarness(t, asRoot(), withTTY(), withStdin("y\n"))
-		if code := h.run("update", "node"); code != 1 { // update node 无确认，作对照：交互模式不提问（Story 1.33 起 recover 已实现，改用仍未实现的 update）
-			t.Fatalf("update 退出码 %d", code)
+		if code := h.run("update", "node"); code != 14 || strings.Contains(h.stderr.String(), "[y/N]") { // update node 无确认，作对照：交互模式不提问；落到命令本身（node 未安装 → 14）
+			t.Fatalf("update 退出码 %d\n%s", code, h.stderr)
 		}
 		h = newHarness(t, asRoot(), withTTY(), withStdin("y\n"))
-		if code := h.run("rollback", "node", "--non-interactive=false"); code != 1 { // 1.41 起 backup restore 已实现，占位改用仍未实现的 rollback（Story 1.43）
-			t.Fatalf("交互 y 后应落到未实现(1)，得 %d\n%s", code, h.stderr)
+		if code := h.run("rollback", "node", "--non-interactive=false"); code != 14 { // Story 1.43 起 rollback 已实现：交互 y 通过确认后落到命令本身（node 未安装 → 14）
+			t.Fatalf("交互 y 后应落到命令本身(14)，得 %d\n%s", code, h.stderr)
 		}
 		h = newHarness(t, asRoot(), withTTY(), withStdin("n\n"))
-		// 交互模式下未实现命令不征求确认（无意义的提问），直接说明尚未实现。
-		if code := h.run("rollback", "node"); code != 1 || strings.Contains(h.stderr.String(), "[y/N]") {
-			t.Fatalf("交互未实现命令不应提问，得 %d\n%s", code, h.stderr)
+		// 已实现的命令在交互模式下提问；答 n → 退出码 9（未确认，已取消）。
+		if code := h.run("rollback", "node"); code != 9 || !strings.Contains(h.stderr.String(), "[y/N]") {
+			t.Fatalf("交互 n 应在提问后以 9 退出，得 %d\n%s", code, h.stderr)
 		}
 	})
 	t.Run("--purge 需要主机名", func(t *testing.T) {
@@ -270,22 +270,20 @@ func TestHiddenCommandsAndNoFakeSuccess(t *testing.T) {
 		t.Fatalf("退出码 %d", code)
 	}
 	out := h.stdout.String()
-	for _, vis := range []string{"version", "list", "status", "install", "recover", "config", "backup", "uninstall", "service", "logs", "doctor"} { // install/recover 自 Story 1.33、config setup-token 自 Story 1.35、backup/uninstall 自 Story 1.41、service/logs/doctor/config validate|show|edit 自 Story 1.42 起已交付
+	for _, vis := range []string{"version", "list", "status", "install", "recover", "config", "backup", "uninstall", "service", "logs", "doctor", "update", "rollback"} { // install/recover 自 Story 1.33、config setup-token 自 Story 1.35、backup/uninstall 自 Story 1.41、service/logs/doctor/config validate|show|edit 自 Story 1.42、update/rollback 自 Story 1.43 起已交付
 		if !regexp.MustCompile(`(?m)^\s+` + vis + `\s`).MatchString(out) {
 			t.Errorf("--help 应列出已交付命令 %s:\n%s", vis, out)
 		}
 	}
-	for _, hid := range []string{"update", "node", "rollback"} {
+	for _, hid := range []string{"node"} {
 		if regexp.MustCompile(`(?m)^\s+` + hid + `\s`).MatchString(out) {
 			t.Errorf("未实现命令 %s 不应出现在 --help", hid)
 		}
 	}
 	// 全部未实现的叶子命令（root 身份、满足其校验与确认）都不得以 0 退出。
 	for _, args := range [][]string{
-		{"update", "node"}, {"update", "check"}, {"update", "self"},
+		{"update", "node", "--apply-staged"}, // 节点升级路径（ADR-024）属 Epic 3
 		{"node", "enroll"},
-		{"rollback", "node", "--yes"},
-		{"version", "--check"},
 	} {
 		h := newHarness(t, asRoot())
 		code := h.run(append(args, "--json", "--yes")...)

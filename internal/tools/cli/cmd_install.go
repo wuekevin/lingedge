@@ -37,6 +37,10 @@ type InstallEnv struct {
 	FS        baota.FS
 	// NewClient 构造 HTTPS 客户端；nil = downloader.New。
 	NewClient func(cfg downloader.Config) (*downloader.Client, error)
+	// SelfPath/SelfRun/ToolsVersion 是 `update self` 的接缝：替换目标路径、新版本 --version 自检的执行器、当前 Tools 版本（nil/空 = 生产：os.Executable、lingedge.new 白名单 Runner、pkg/version）。
+	SelfPath     func() (string, error)
+	SelfRun      service.Runner
+	ToolsVersion string
 	// Hook/WrapJournal/WrapUndoer 是故障注入与 kill 挂钩（仅测试；生产为 nil）。
 	Hook        func(point string)
 	WrapJournal func(installer.Journal) installer.Journal
@@ -52,6 +56,16 @@ func (r *Run) hostPath(p string) string {
 
 // newInstaller 装配 installer：tools.yaml（release.base_url/ca_file/proxy/resume_dir、install.health_*）、registry、验证器、探测、执行器。
 func (r *Run) newInstaller(events chan<- installer.Event, req installer.Request) (*installer.Installer, error) {
+	// recover 要能撤销升级/手动回滚事务：这里尽力装配升级依赖（失败不影响 install 等不需要它的命令）。
+	var upd *installer.UpdateEnv
+	if e, ce := r.updateEnv(nil); ce == nil {
+		upd = e
+	}
+	return r.newInstallerWith(events, req, upd)
+}
+
+// newInstallerWith 装配 installer（upd 非 nil 时带升级/回滚依赖）。
+func (r *Run) newInstallerWith(events chan<- installer.Event, req installer.Request, upd *installer.UpdateEnv) (*installer.Installer, error) {
 	ie := r.env.Install
 	cfgPath, explicit := r.opts.Config, r.opts.Config != ""
 	if !explicit {
@@ -86,6 +100,7 @@ func (r *Run) newInstaller(events chan<- installer.Event, req installer.Request)
 		Root: ie.Root, Reg: reg, Verifier: r.env.NewVerifier, Config: cfg, Specs: specs, Collect: collect, FS: ie.FS,
 		Runner: runner, WebRunner: ie.WebRunner, Own: own, Booted: ie.Booted, Geteuid: r.env.Geteuid, Now: r.env.Now, NewClient: ie.NewClient,
 		Confirm: r.confirmPrompt, Events: events, RestoreSafety: r.restoreSafety, Hook: ie.Hook, WrapJournal: ie.WrapJournal, WrapUndoer: ie.WrapUndoer,
+		Update: upd, SelfPath: ie.SelfPath, SelfRun: ie.SelfRun,
 	})
 }
 
@@ -133,9 +148,9 @@ func (r *Run) progress() (chan installer.Event, func()) {
 			default:
 				switch ev.Type {
 				case installer.EventStepStart:
-					wf(w, "[%2d/22] %s…\n", ev.Step, redactText(ev.Message))
+					wf(w, "[%2d/%d] %s…\n", ev.Step, totalOf(ev), redactText(ev.Message))
 				case installer.EventStepFailed:
-					wf(w, "[%2d/22] 失败：%s\n", ev.Step, redactText(ev.Message))
+					wf(w, "[%2d/%d] 失败：%s\n", ev.Step, totalOf(ev), redactText(ev.Message))
 				case installer.EventRollback:
 					wf(w, "回滚：撤销第 %d 步 %s\n", ev.Step, ev.Name)
 				case installer.EventWarning:
@@ -149,6 +164,13 @@ func (r *Run) progress() (chan installer.Event, func()) {
 		}
 	}()
 	return ch, func() { close(ch); <-done }
+}
+
+func totalOf(ev installer.Event) int {
+	if ev.Total > 0 {
+		return ev.Total
+	}
+	return installer.TotalSteps
 }
 
 func toWarnings(ws []installer.Warning) []Warning {

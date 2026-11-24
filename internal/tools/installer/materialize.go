@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/wuekevin/lingedge/internal/tools/downloader"
 	"github.com/wuekevin/lingedge/internal/tools/registry"
 	"github.com/wuekevin/lingedge/internal/tools/resolver"
 	"github.com/wuekevin/lingedge/internal/tools/security"
@@ -69,45 +70,55 @@ func (x *execution) doExtract(ctx context.Context) error {
 		if a == nil {
 			return fmt.Errorf("组件 %s 没有已校验的包（内部错误）", c.Name)
 		}
-		for _, d := range []string{optRoot, optRoot + "/" + c.Name, optRoot + "/" + c.Name + "/releases"} {
-			if _, err := registry.EnsureDirAll(x.hp(d), 0o755); err != nil {
-				return err
-			}
-		}
-		rel := releaseDir(c)
-		sums, err := loadSums(a.PkgDir)
-		if err != nil {
+		if err := x.in.extractRelease(c.Name, c.Version, a); err != nil {
 			return err
-		}
-		if pv, ok := x.in.d.Specs[c.Name].(payloadValidator); ok {
-			// 组件对包布局有要求（静态前端：public/index.html）：落地之前校验，不合格则第 14 步失败，不会写入任何 release 内容。
-			if err := pv.ValidatePayload(filepath.Join(a.PkgDir, "payload")); err != nil {
-				return &Error{Kind: KindPrecondition, Step: StepExtract, Msg: "组件 " + c.Name + " 的包布局不符合要求：" + err.Error(), SystemState: "unchanged"}
-			}
-		}
-		if _, err := os.Lstat(x.hp(rel)); err == nil {
-			// 目标 release 已存在：只有与已验证的包逐文件一致才算幂等完成，否则绝不覆盖。
-			if err := verifyTree(x.hp(rel), filepath.Join(a.PkgDir, "payload"), sums); err != nil {
-				return &Error{Kind: KindPrecondition, Step: StepExtract, Msg: "目标 release 目录 " + rel + " 已存在且内容与已验证的包不一致，不会覆盖：" + err.Error(),
-					Hint: "确认它是遗留物后手工删除，或安装其他版本", SystemState: "unchanged"}
-			}
-		} else {
-			partial := x.hp(rel + ".partial")
-			if err := os.RemoveAll(partial); err != nil {
-				return err
-			}
-			if err := copyVerified(filepath.Join(a.PkgDir, "payload"), partial, sums); err != nil {
-				return err
-			}
-			if err := os.Rename(partial, x.hp(rel)); err != nil {
-				return err
-			}
-			syncDir(filepath.Dir(x.hp(rel)))
 		}
 		if _, err := registry.EnsureSymlink(x.hp(optRoot+"/"+c.Name+"/current"), "releases/"+c.Version); err != nil {
 			return err
 		}
 	}
+	return nil
+}
+
+// extractRelease 把已验证的包（staging 里的 payload）落地为 /opt/lingedge/<c>/releases/<v>（先写 .partial 再 rename；目标已存在时只有与包逐文件一致才算幂等完成，绝不覆盖）。
+// install（第 14 步）与 update（第 5 步）共用；不创建/切换 current 链接。
+func (in *Installer) extractRelease(name, version string, a *downloader.Acquired) error {
+	hp := in.d.hostPath
+	for _, d := range []string{optRoot, optRoot + "/" + name, optRoot + "/" + name + "/releases"} {
+		if _, err := registry.EnsureDirAll(hp(d), 0o755); err != nil {
+			return err
+		}
+	}
+	rel := optRoot + "/" + name + "/releases/" + version
+	sums, err := loadSums(a.PkgDir)
+	if err != nil {
+		return err
+	}
+	if pv, ok := in.d.Specs[name].(payloadValidator); ok {
+		// 组件对包布局有要求（静态前端：public/index.html）：落地之前校验，不合格则失败，不会写入任何 release 内容。
+		if err := pv.ValidatePayload(filepath.Join(a.PkgDir, "payload")); err != nil {
+			return &Error{Kind: KindPrecondition, Step: StepExtract, Msg: "组件 " + name + " 的包布局不符合要求：" + err.Error(), SystemState: "unchanged"}
+		}
+	}
+	if _, err := os.Lstat(hp(rel)); err == nil {
+		// 目标 release 已存在：只有与已验证的包逐文件一致才算幂等完成，否则绝不覆盖。
+		if err := verifyTree(hp(rel), filepath.Join(a.PkgDir, "payload"), sums); err != nil {
+			return &Error{Kind: KindPrecondition, Step: StepExtract, Msg: "目标 release 目录 " + rel + " 已存在且内容与已验证的包不一致，不会覆盖：" + err.Error(),
+				Hint: "确认它是遗留物后手工删除，或安装其他版本", SystemState: "unchanged"}
+		}
+		return nil
+	}
+	partial := hp(rel + ".partial")
+	if err := os.RemoveAll(partial); err != nil {
+		return err
+	}
+	if err := copyVerified(filepath.Join(a.PkgDir, "payload"), partial, sums); err != nil {
+		return err
+	}
+	if err := os.Rename(partial, hp(rel)); err != nil {
+		return err
+	}
+	syncDir(filepath.Dir(hp(rel)))
 	return nil
 }
 

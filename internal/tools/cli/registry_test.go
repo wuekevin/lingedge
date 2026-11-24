@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/wuekevin/lingedge/internal/tools/registry"
 )
 
@@ -88,8 +90,8 @@ func TestWriteCommandLockedExit6AndKill9Releases(t *testing.T) {
 	if code := h.run("install", "server", "--non-interactive"); code != 6 || !strings.Contains(h.stderr.String(), "run-holder-1") || !strings.Contains(h.stderr.String(), "LOCKED") {
 		t.Fatalf("人类输出: %d %s", code, h.stderr)
 	}
-	// 不同组件不受影响（走到「尚未实现」= 1，而不是 6）。Story 1.33 起 install 已实现，改用仍是桩的 update 作为「写命令桩」。
-	if code := h.run("update", "node", "--non-interactive"); code != 1 {
+	// 不同组件不受影响（走到命令本身 = node 未安装 14，而不是 6）。Story 1.43 起 update 已实现，「走到命令本身」以其真实结果 14 为证。
+	if code := h.run("update", "node", "--non-interactive"); code != 14 {
 		t.Fatalf("不同组件应不被锁拦：%d", code)
 	}
 	// 读命令永不取锁。
@@ -107,8 +109,8 @@ func TestWriteCommandLockedExit6AndKill9Releases(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = holder.Wait()
-	if code := h.run("update", "server", "--non-interactive"); code != 1 {
-		t.Fatalf("kill -9 之后锁应已被内核释放（期望走到尚未实现=1），得到 %d\n%s", code, h.stderr)
+	if code := h.run("update", "server", "--non-interactive"); code != 14 {
+		t.Fatalf("kill -9 之后锁应已被内核释放（期望走到命令本身：server 未安装 14），得到 %d\n%s", code, h.stderr)
 	}
 }
 
@@ -117,8 +119,8 @@ func TestWriteCommandUnfinishedExit13(t *testing.T) {
 	h := newHarness(t, asRoot())
 	holder := startHolder(t, toolsRoot(h), "node", true) // 持有 node 并打开了 journal
 	// 事务仍活着：另一个组件的写命令不被拦（它是合法的并行操作）。
-	if code := h.run("update", "server", "--non-interactive"); code != 1 {
-		t.Fatalf("活事务不应让无关组件的写命令得 13: %d", code)
+	if code := h.run("update", "server", "--non-interactive"); code != 14 {
+		t.Fatalf("活事务不应让无关组件的写命令得 13（期望走到命令本身：server 未安装 14）: %d", code)
 	}
 	if err := holder.Process.Signal(syscall.SIGKILL); err != nil {
 		t.Fatal(err)
@@ -170,15 +172,21 @@ func TestWriteCommandUnfinishedExit13(t *testing.T) {
 		t.Fatal(err)
 	}
 	rt.Release()
-	if code := h.run("update", "server", "--non-interactive"); code != 1 {
-		t.Fatalf("事务结束后应放行（走到尚未实现=1）: %d", code)
+	if code := h.run("update", "server", "--non-interactive"); code != 14 {
+		t.Fatalf("事务结束后应放行（走到命令本身：server 未安装 14）: %d", code)
 	}
 }
 
 // 尚无状态目录（从未安装过）的机器：未实现的写命令保持 1.25 的行为，且不会为了「假装检查」创建目录。
 func TestWriteCommandStubDoesNotCreateStateDir(t *testing.T) {
+	// Story 1.43 之后真实命令树里没有「尚未实现的写命令」了：用合成的桩命令覆盖 gate 对它的行为（Run=nil + Locks）。
+	commandSpecsHook = func(s []*cmdSpec) []*cmdSpec {
+		return append(s, &cmdSpec{Use: "stubwrite <组件>", Short: "合成桩", Story: "test", Args: cobra.ExactArgs(1), NeedsRoot: true,
+			Locks: func(inv *invocation) ([]string, *Error) { return append([]string(nil), inv.args...), nil }})
+	}
+	t.Cleanup(func() { commandSpecsHook = nil })
 	h := newHarness(t, asRoot())
-	if code := h.run("update", "server", "--non-interactive"); code != 1 {
+	if code := h.run("stubwrite", "server", "--non-interactive"); code != 1 {
 		t.Fatalf("退出码 %d", code)
 	}
 	if _, err := os.Stat(toolsRoot(h)); !os.IsNotExist(err) {
@@ -247,7 +255,7 @@ func TestStateErrorsMapToExitCodes(t *testing.T) {
 		exit          int
 		code          string
 	}{
-		{"未来 schema", `{"schema_version":3,"components":{}}`, 0o644, 3, "state.unsupported_schema"},
+		{"未来 schema", `{"schema_version":4,"components":{}}`, 0o644, 3, "state.unsupported_schema"},
 		{"损坏", `{"schema_version":1,`, 0o644, 1, "state.corrupt"},
 		{"内容非法", `{"schema_version":1,"components":{"server":{"version":"x","state":"running","ports":[]}}}`, 0o644, 1, "state.invalid"},
 		{"他人可写", `{"schema_version":1,"components":{}}`, 0o666, 3, "state.unsafe_permissions"},

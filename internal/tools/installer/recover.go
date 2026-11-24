@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 
 	"github.com/wuekevin/lingedge/internal/tools/backup"
 	"github.com/wuekevin/lingedge/internal/tools/registry"
@@ -51,7 +52,7 @@ func (in *Installer) Unfinished(ctx context.Context) ([]registry.TxInfo, error) 
 
 func (in *Installer) newUndoer() UndoApplier {
 	svc := &service.Undoer{Root: in.d.Root, Prov: in.prov, Sys: in.sys}
-	var u UndoApplier = &Undoer{Root: in.d.Root, Reg: in.d.Reg, Svc: svc, Web: in.webRunnerOrNil(), Safety: in.d.RestoreSafety,
+	var u UndoApplier = &Undoer{Root: in.d.Root, Reg: in.d.Reg, Svc: svc, Web: in.webRunnerOrNil(), Safety: in.d.RestoreSafety, Update: in.d.Update, Sys: in.sys,
 		Notice: func(code, msg string) { in.ev.emit(Event{Type: EventWarning, Code: code, Message: msg}) }}
 	if in.d.WrapUndoer != nil {
 		u = in.d.WrapUndoer(u)
@@ -115,6 +116,9 @@ func (in *Installer) recoverOne(ctx context.Context, info registry.TxInfo, opt R
 	udo := in.newUndoer()
 	rctx := context.WithoutCancel(ctx)
 
+	if k := txKind(tx); k == "update" || k == "rollback" {
+		return in.recoverUpdate(rctx, j, tx, udo, opt, out, k)
+	}
 	if opt.Mode == RecoverRollback {
 		n := len(tx.UndoPlan())
 		if err := in.rollbackJournal(rctx, j, info.ID, udo, "recover --rollback", func(c context.Context) error { return in.sys.DaemonReload(c) }); err != nil {
@@ -296,8 +300,119 @@ func txKind(tx *registry.Tx) string {
 				return "uninstall"
 			case backup.ActRestoreRequest:
 				return "restore"
+			case ActUpdateRequest:
+				return "update"
+			case ActRollbackRequest:
+				return "rollback"
 			}
 		}
 	}
 	return ""
+}
+
+// recoverUpdate 处理被中断的升级/手动回滚事务（Story 1.43）：
+//   - 提交点（state.json 已写入本事务的记录）之后被中断：升级/回滚实际已完成，两种模式都只补写 journal 的收尾（done/commit）并归档——绝不回滚已提交的升级；
+//   - 提交点之前：--rollback 按 journal 逆序撤销（切回旧版本、回退数据库、重启旧版本）并复核；--resume 不可行（服务/数据库状态不确定），拒绝并指引 --rollback。
+func (in *Installer) recoverUpdate(ctx context.Context, j Journal, tx *registry.Tx, udo UndoApplier, opt RecoverOptions, out TxRecovery, kind string) (TxRecovery, error) {
+	f, ok := factsFromTx(tx)
+	if !ok {
+		return out, &Error{Kind: KindRecover, Msg: "事务日志里没有完整的" + kind + "请求记录，无法自动恢复", SystemState: "needs_manual", Details: map[string]any{"tx": tx.ID},
+			Hint: "不要删除 journal：保留它并联系支持；journal 路径 " + in.journalPath(tx.ID)}
+	}
+	steps, _ := stepSet(tx)
+	commitStep := UpStepCommit
+	if kind == "rollback" {
+		commitStep = RbStepCommit
+	}
+	if _, begun := steps[commitStep]; begun && in.stateRecordedTx(f.Component, tx.ID) {
+		if s := steps[commitStep]; s.Phase != registry.PhaseDone {
+			if err := j.Done(commitStep); err != nil {
+				return out, wrap(KindStepFailed, err, "收尾失败")
+			}
+		}
+		if err := j.Commit(); err != nil {
+			return out, wrap(KindStepFailed, err, "收尾失败")
+		}
+		if err := j.Archive(); err != nil {
+			return out, wrap(KindStepFailed, err, "归档失败")
+		}
+		removeStaging(in, tx.ID, out.Components)
+		out.Action, out.Message = "finalized", "状态早已原子提交（"+map[string]string{"update": "升级", "rollback": "回滚"}[kind]+"已完成），仅补写 journal 的收尾记录并归档；不会回滚已提交的结果"
+		return out, nil
+	}
+	if opt.Mode == RecoverResume {
+		return out, &Error{Kind: KindRecover, Msg: "这是一条" + map[string]string{"update": "升级", "rollback": "回滚"}[kind] + "事务，提交点之前不能续跑（服务与数据库状态不确定）", SystemState: "partial",
+			Hint: "lingedge recover --rollback 回到事务开始前的状态（切回旧版本、回退数据库、重启服务），排查原因后重新运行", Details: map[string]any{"tx": tx.ID}}
+	}
+	n := len(tx.UndoPlan())
+	var rep RollbackReport
+	verify := func(context.Context) error { return nil }
+	if in.d.Update != nil {
+		verify = func(vc context.Context) error {
+			// 撤销动作可能在上一次失败的回滚里已全部标记为 undone（只是复核没通过）：这里向「升级前的状态」收敛——升级前在运行的服务必须在运行（幂等）。
+			if f.WasActive && len(f.Units) > 0 {
+				if _, err := in.sys.Start(vc, f.Units...); err != nil {
+					return fmt.Errorf("重新启动旧版本服务失败：%w", err)
+				}
+			}
+			return in.verifyRolledBack(vc, f, &rep)
+		}
+	}
+	if err := in.rollbackJournalV(ctx, j, tx.ID, udo, "recover --rollback", func(c context.Context) error { return in.sys.DaemonReload(c) }, verify); err != nil {
+		return out, &Error{Kind: KindRollbackFailed, Msg: "回滚未完成，事务日志已保留：" + err.Error(), Cause: err, SystemState: "needs_manual",
+			Hint: "排查原因后重新运行 lingedge recover --rollback（撤销是幂等的，会从未完成处继续；数据库回退需要迁移账号凭据：环境变量 " + backup.EnvDBPass + " 或 " + backup.EnvPassFile + "、migrate.yaml）", Details: map[string]any{"tx": tx.ID}}
+	}
+	removeStaging(in, tx.ID, out.Components)
+	out.Action, out.Steps = "rolled_back", n
+	out.Message = "已按 journal 逆序撤销并复核（版本 " + rep.Version + "，健康：" + rep.Health + "），系统恢复到事务开始前"
+	return out, nil
+}
+
+// stateRecordedTx 报告 state.json 里该组件的最近事务是否就是 tx（升级/回滚的提交点已写入）。
+func (in *Installer) stateRecordedTx(comp, tx string) bool {
+	st, _, err := in.d.Reg.LoadState()
+	if err != nil {
+		return false
+	}
+	c, ok := st.Components[comp]
+	return ok && c.LastTx == tx
+}
+
+// factsFromTx 从 journal 还原复核回滚结果所需的事实。
+func factsFromTx(tx *registry.Tx) (rollbackFacts, bool) {
+	var f rollbackFacts
+	var found bool
+	for _, s := range tx.Steps {
+		if s.Undo == nil {
+			continue
+		}
+		for _, a := range s.Undo.Actions {
+			x := a.Extra
+			switch a.Action {
+			case ActUpdateRequest:
+				units, err := parseUnitNames(x["units"])
+				if err != nil {
+					return f, false
+				}
+				f.Component, f.Version, f.NewVersion, f.Units, f.DB, found = x["component"], x["from"], x["to"], units, x["db"] == "true", true
+			case ActRollbackRequest:
+				units, err := parseUnitNames(x["units"])
+				if err != nil {
+					return f, false
+				}
+				f.Component, f.Version, f.NewVersion, f.Units, f.DB, found = x["component"], x["restore_version"], x["other_version"], units, x["db"] == "true", true
+				f.PreSchema, _ = strconv.ParseInt(x["pre_schema"], 10, 64)
+			case ActUpdateStartUnits:
+				f.WasActive = x["was_active"] == "true"
+			case backup.ActRestoreSafety:
+				f.WasActive = x[backup.ExtraWasActive] == "true"
+			case ActUpdateDBRevert:
+				f.PreSchema, _ = strconv.ParseInt(x["pre"], 10, 64)
+				if x["path"] == registry.PathBinaryExpand {
+					f.AltSchema, _ = strconv.ParseInt(x["target"], 10, 64)
+				}
+			}
+		}
+	}
+	return f, found && registry.ValidComponent(f.Component) && f.Version != ""
 }

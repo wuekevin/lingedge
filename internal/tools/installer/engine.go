@@ -118,7 +118,7 @@ type execution struct {
 
 func (x *execution) init() {
 	svc := &service.Undoer{Root: x.in.d.Root, Prov: x.in.prov, Sys: x.in.sys}
-	var u UndoApplier = &Undoer{Root: x.in.d.Root, Reg: x.in.d.Reg, Svc: svc, Web: x.in.webRunnerOrNil(), Safety: x.in.d.RestoreSafety,
+	var u UndoApplier = &Undoer{Root: x.in.d.Root, Reg: x.in.d.Reg, Svc: svc, Web: x.in.webRunnerOrNil(), Safety: x.in.d.RestoreSafety, Update: x.in.d.Update, Sys: x.in.sys,
 		Notice: func(code, msg string) { x.warn(Warning{Code: code, Step: StepStart, Message: msg}) }}
 	if x.in.d.WrapUndoer != nil {
 		u = x.in.d.WrapUndoer(u)
@@ -332,6 +332,12 @@ func (x *execution) sysUnitsTouched(ctx context.Context) error { return x.in.sys
 // rollbackJournal 逆序执行 journal 的撤销计划：每撤销一步记 undone（撤销本身幂等，被中断后可续做），全部成功后以 abort 结束并归档。
 // 撤销失败 → 立即返回错误（journal 保留）；journal 写入失败 → 其余步骤仍尽力撤销，最后返回错误（journal 保留，recover 会复核）。
 func (in *Installer) rollbackJournal(ctx context.Context, j Journal, tx string, udo UndoApplier, reason string, reload func(context.Context) error) error {
+	return in.rollbackJournalV(ctx, j, tx, udo, reason, reload, nil)
+}
+
+// rollbackJournalV 同 rollbackJournal；verify 非 nil 时在全部撤销完成之后、abort 之前执行回滚结果复核（升级/手动回滚：版本、schema、健康检查）——
+// 复核失败按撤销失败处理（journal 保留，recover --rollback 可重试）。
+func (in *Installer) rollbackJournalV(ctx context.Context, j Journal, tx string, udo UndoApplier, reason string, reload func(context.Context) error, verify func(context.Context) error) error {
 	t, err := in.d.Reg.ReadTx(tx)
 	if err != nil {
 		return err
@@ -339,7 +345,11 @@ func (in *Installer) rollbackJournal(ctx context.Context, j Journal, tx string, 
 	var jerr error
 	reloadNeeded := false
 	for _, st := range t.UndoPlan() {
-		in.ev.emit(Event{Type: EventRollback, Step: st.Step, Name: st.Name, Phase: PhaseOf(st.Step), Message: "撤销"})
+		ph := PhaseOf(st.Step)
+		if StepName(st.Step) != st.Name { // 升级/回滚事务的步骤号与安装的 22 步不同：阶段只对安装事务有意义
+			ph = ""
+		}
+		in.ev.emit(Event{Type: EventRollback, Step: st.Step, Name: st.Name, Phase: ph, Message: "撤销"})
 		if st.Undo != nil {
 			// 一步内的撤销动作按记录顺序依次执行（与 registry/service 的约定一致：记录者负责把它们排成「先依赖者、后被依赖者」的撤销顺序）。
 			for _, a := range st.Undo.Actions {
@@ -362,6 +372,11 @@ func (in *Installer) rollbackJournal(ctx context.Context, j Journal, tx string, 
 	}
 	if jerr != nil {
 		return fmt.Errorf("事务日志无法记录撤销进度: %w", jerr)
+	}
+	if verify != nil {
+		if err := verify(ctx); err != nil {
+			return fmt.Errorf("回滚结果复核未通过: %w", err)
+		}
 	}
 	if err := j.Abort(reason); err != nil {
 		return fmt.Errorf("事务日志无法以 abort 结束: %w", err)

@@ -39,8 +39,16 @@ func notYet(_ *invocation, flag, story string) *Error {
 
 // version：Tools 版本 + 已装组件（来自 state.json；无文件则为空）。
 func runVersion(inv *invocation) (*Result, error) {
+	var chk *updateCheckData
 	if inv.flag("check") {
-		return nil, notYet(inv, "check", "Story 1.43（update check 的清单比对）")
+		channel := "stable"
+		if inv.changed("channel") {
+			channel = inv.str("channel")
+		}
+		var cerr error
+		if chk, cerr = inv.r.updateCheck(channel); cerr != nil {
+			return nil, cerr
+		}
 	}
 	comps, err := inv.r.env.State.Components(inv.r.ctx)
 	if err != nil {
@@ -54,17 +62,25 @@ func runVersion(inv *invocation) (*Result, error) {
 	for _, c := range comps {
 		list = append(list, vc{c.Name, c.Version})
 	}
+	data := map[string]any{"tools": toolsInfo(), "components": list}
+	if chk != nil {
+		data["check"] = chk
+	}
 	return &Result{
-		Data: map[string]any{"tools": toolsInfo(), "components": list},
+		Data: data,
 		Human: func(w io.Writer) {
 			wln(w, version.Info("lingedge"))
 			if len(list) == 0 {
 				wln(w, "已装组件：（无）")
-				return
+			} else {
+				wln(w, "已装组件：")
+				for _, c := range list {
+					wf(w, "  %-12s %s\n", c.Name, c.Version)
+				}
 			}
-			wln(w, "已装组件：")
-			for _, c := range list {
-				wf(w, "  %-12s %s\n", c.Name, c.Version)
+			if chk != nil {
+				wln(w)
+				renderCheck(w, chk)
 			}
 		},
 	}, nil

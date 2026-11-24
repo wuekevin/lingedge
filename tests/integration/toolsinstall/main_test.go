@@ -17,5 +17,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	os.Exit(redistest.MainWith(m, mysqltest.Main))
+	code := redistest.MainWith(m, mysqltest.Main)
+	cleanupBuilt() // 删除本包构建的 lingedge-server 二进制（带测试迁移的 overlay 构建每个约 40 MB）
+	os.Exit(code)
 }

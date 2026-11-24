@@ -417,3 +417,23 @@ func (m *MySQL) tableExists(ctx context.Context, conn DBConn, table string) (boo
 }
 
 func atoi64(s string) (int64, error) { return strconv.ParseInt(strings.TrimSpace(s), 10, 64) }
+
+// SchemaVersion 返回库已应用的最大迁移版本（经 mysql 客户端读 goose 版本表 schema_migrations；与具体 lingedge-server 二进制无关，旧二进制也能用来核对被新迁移推进过的库）。
+// 版本表不存在（库尚未初始化）返回 0。
+func (m *MySQL) SchemaVersion(ctx context.Context, conn DBConn) (int64, error) {
+	has, err := m.tableExists(ctx, conn, "schema_migrations")
+	if err != nil {
+		return 0, err
+	}
+	if !has {
+		return 0, nil
+	}
+	rows, err := m.Query(ctx, conn, "SELECT COALESCE(MAX(version_id), 0) FROM schema_migrations WHERE is_applied = 1")
+	if err != nil {
+		return 0, err
+	}
+	if len(rows) != 1 || len(rows[0]) != 1 {
+		return 0, errors.New("schema_migrations 的查询结果无法识别")
+	}
+	return atoi64(rows[0][0])
+}

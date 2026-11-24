@@ -72,6 +72,14 @@ type Deps struct {
 	// 它需要数据库凭据与（安全备份加密时的）口令，由 cli 以交互/环境变量取得后装配；nil 时该撤销以明确的错误失败并给出手工恢复指引，绝不假装成功。
 	RestoreSafety func(ctx context.Context, a registry.UndoAction) (service.UndoResult, error)
 
+	// Update 是升级/回滚（Story 1.43）的外部依赖装配；nil = 该调用不支持升级（install/uninstall/recover 的普通路径不需要它，但 recover 要撤销升级事务时需要）。
+	Update *UpdateEnv
+
+	// SelfPath 返回 Tools 自身可执行文件的真实路径（`update self` 的替换目标）；nil = os.Executable 并解析符号链接。
+	SelfPath func() (string, error)
+	// SelfRun 执行新版本的 `lingedge.new --version` 自检；nil = 只允许基名 lingedge.new 的 safeexec Runner。
+	SelfRun service.Runner
+
 	// Hook 在每个步骤的四个点被同步调用："before:N"（Begin 之前）、"begun:N"（begin 已落盘、尚未动手）、"effect:N"（副作用已完成、done 未写）、
 	// "done:N"（done 已落盘）。仅供测试在这些点 kill -9 / 注入故障；生产为 nil。
 	Hook func(point string)

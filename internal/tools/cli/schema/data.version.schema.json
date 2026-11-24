@@ -3,15 +3,275 @@
   "title": "version 的 data",
   "type": "object",
   "additionalProperties": false,
-  "required": ["tools", "components"],
+  "required": [
+    "tools",
+    "components"
+  ],
   "properties": {
     "tools": {
-      "type": "object", "additionalProperties": false, "required": ["version", "commit", "go", "os", "arch"],
-      "properties": {"version": {"type": "string"}, "commit": {"type": "string"}, "go": {"type": "string"}, "os": {"type": "string"}, "arch": {"type": "string"}}
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "commit",
+        "go",
+        "os",
+        "arch"
+      ],
+      "properties": {
+        "version": {
+          "type": "string"
+        },
+        "commit": {
+          "type": "string"
+        },
+        "go": {
+          "type": "string"
+        },
+        "os": {
+          "type": "string"
+        },
+        "arch": {
+          "type": "string"
+        }
+      }
     },
     "components": {
       "type": "array",
-      "items": {"type": "object", "additionalProperties": false, "required": ["name", "version"], "properties": {"name": {"type": "string"}, "version": {"type": "string"}}}
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "version"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "check": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "update check 的 data（Story 1.43；version --check 的 data.check 同形）",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "manifest",
+        "components",
+        "upgradable"
+      ],
+      "properties": {
+        "manifest": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "channel",
+            "sequence",
+            "generated_at",
+            "valid_until"
+          ],
+          "properties": {
+            "channel": {
+              "enum": [
+                "stable",
+                "beta"
+              ]
+            },
+            "sequence": {
+              "type": "integer"
+            },
+            "generated_at": {
+              "type": "string"
+            },
+            "valid_until": {
+              "type": "string"
+            }
+          }
+        },
+        "components": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "component",
+              "installed",
+              "status"
+            ],
+            "properties": {
+              "component": {
+                "type": "string"
+              },
+              "installed": {
+                "type": "string"
+              },
+              "latest": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "up_to_date",
+                  "upgrade_available",
+                  "blocked",
+                  "unreleased",
+                  "builtin",
+                  "not_in_manifest",
+                  "no_candidate"
+                ]
+              },
+              "min_upgrade_from": {
+                "type": "string"
+              },
+              "upgrade_path": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "migrations": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "classes",
+                  "has_irreversible",
+                  "irreversible_count",
+                  "backup_required"
+                ],
+                "properties": {
+                  "classes": {
+                    "type": "array",
+                    "items": {
+                      "enum": [
+                        "reversible",
+                        "expand",
+                        "irreversible"
+                      ]
+                    }
+                  },
+                  "has_irreversible": {
+                    "type": "boolean"
+                  },
+                  "irreversible_count": {
+                    "type": "integer"
+                  },
+                  "backup_required": {
+                    "type": "boolean"
+                  },
+                  "schema_from": {
+                    "type": "string"
+                  },
+                  "schema_to": {
+                    "type": "string"
+                  }
+                }
+              },
+              "notes_url": {
+                "type": "string"
+              },
+              "installed_revoked": {
+                "type": "boolean"
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "upgradable": {
+          "type": "integer"
+        },
+        "tools": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "component",
+            "installed",
+            "status"
+          ],
+          "properties": {
+            "component": {
+              "type": "string"
+            },
+            "installed": {
+              "type": "string"
+            },
+            "latest": {
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "up_to_date",
+                "upgrade_available",
+                "blocked",
+                "unreleased",
+                "builtin",
+                "not_in_manifest",
+                "no_candidate"
+              ]
+            },
+            "min_upgrade_from": {
+              "type": "string"
+            },
+            "upgrade_path": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "migrations": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "classes",
+                "has_irreversible",
+                "irreversible_count",
+                "backup_required"
+              ],
+              "properties": {
+                "classes": {
+                  "type": "array",
+                  "items": {
+                    "enum": [
+                      "reversible",
+                      "expand",
+                      "irreversible"
+                    ]
+                  }
+                },
+                "has_irreversible": {
+                  "type": "boolean"
+                },
+                "irreversible_count": {
+                  "type": "integer"
+                },
+                "backup_required": {
+                  "type": "boolean"
+                },
+                "schema_from": {
+                  "type": "string"
+                },
+                "schema_to": {
+                  "type": "string"
+                }
+              }
+            },
+            "notes_url": {
+              "type": "string"
+            },
+            "installed_revoked": {
+              "type": "boolean"
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        }
+      }
     }
   }
 }

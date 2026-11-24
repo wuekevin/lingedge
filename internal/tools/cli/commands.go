@@ -92,9 +92,18 @@ func commandSpecs() []*cmdSpec {
 
 	versionSpec := &cmdSpec{
 		Use: "version", Short: "显示 Tools 与各已装组件的版本",
-		Args:  cobra.NoArgs,
-		Flags: func(fs *pflag.FlagSet) { hidden(fs.Bool("check", false, "同时联网比对清单"), fs, "check") },
-		Run:   runVersion,
+		Args: cobra.NoArgs,
+		Flags: func(fs *pflag.FlagSet) {
+			fs.Bool("check", false, "同时联网比对清单（等价于 update check 的只读部分）")
+			str(fs, "channel", "stable", "仅与 --check 联用：发行通道 stable|beta")
+		},
+		Validate: chain(flagChecks, func(inv *invocation) *Error {
+			if inv.changed("channel") && !inv.flag("check") {
+				return usageErr("usage.flag_requires", "--channel 必须与 --check 一起使用", "")
+			}
+			return nil
+		}),
+		Run: runVersion,
 	}
 	listSpec := &cmdSpec{
 		Use: "list", Short: "列出已装组件",
@@ -162,9 +171,10 @@ func commandSpecs() []*cmdSpec {
 	}
 
 	update := &cmdSpec{
-		Use: "update [组件]", Short: "升级组件", Story: "Story 1.43",
-		Args: cobra.MaximumNArgs(1), NeedsRoot: true, Locks: updateLocks,
+		Use: "update [组件]", Short: "升级组件", Args: cobra.MaximumNArgs(1), NeedsRoot: true, Locks: updateLocks, Run: runUpdate,
 		Flags: func(fs *pflag.FlagSet) {
+			dbFlags(fs)
+			str(fs, "passphrase-file", "", "升级前备份的口令文件（给出则加密备份；缺省取环境变量 "+EnvBackupPassFile+"，都没有则不加密）")
 			fs.Bool("all", false, "升级全部已装组件")
 			str(fs, "version", "", "目标版本（semver）")
 			str(fs, "channel", "stable", "发行通道 stable|beta")
@@ -206,10 +216,18 @@ func commandSpecs() []*cmdSpec {
 			return nil
 		},
 		Sub: []*cmdSpec{
-			{Use: "check", Short: "获取签名清单，列出可升级组件", Story: "Story 1.43", Args: cobra.NoArgs,
+			{Use: "check", Short: "获取签名清单，列出可升级组件与迁移预告", Args: cobra.NoArgs, Run: runUpdateCheck,
 				Flags:    func(fs *pflag.FlagSet) { str(fs, "channel", "stable", "发行通道 stable|beta") },
 				Validate: flagChecks},
-			{Use: "self", Short: "升级 lingedge 自身", Story: "Story 1.43", Args: cobra.NoArgs, NeedsRoot: true},
+			{Use: "self", Short: "升级 lingedge 自身", Args: cobra.NoArgs, NeedsRoot: true, Run: runUpdateSelf,
+				Locks: func(*invocation) ([]string, *Error) { return []string{"tools"}, nil },
+				Flags: func(fs *pflag.FlagSet) {
+					str(fs, "version", "", "目标版本（semver）")
+					str(fs, "channel", "stable", "发行通道 stable|beta")
+					str(fs, "offline", "", "离线 bundle")
+					fs.Bool("allow-expired-manifest", false, "仅与 --offline 联用：放行已过 valid_until 的清单")
+				},
+				Validate: flagChecks},
 		},
 	}
 
@@ -433,13 +451,29 @@ func commandSpecs() []*cmdSpec {
 	}
 
 	rollback := &cmdSpec{
-		Use: "rollback <组件>", Short: "回滚组件", Story: "Story 1.43", Args: cobra.ExactArgs(1), NeedsRoot: true, Locks: argLocks,
+		Use: "rollback <组件>", Short: "回滚组件", Args: cobra.ExactArgs(1), NeedsRoot: true, Locks: argLocks, Run: runRollback,
 		Flags: func(fs *pflag.FlagSet) {
 			str(fs, "to", "", "回到指定版本（semver）")
 			str(fs, "from-backup", "", "从备份恢复（含不可逆迁移时必需）")
+			str(fs, "confirm-name", "", "本机主机名（--from-backup 会覆盖数据库，非交互确认用）")
+			str(fs, "passphrase-file", "", "加密备份的口令文件（缺省取环境变量 "+EnvBackupPassFile+"）")
+			dbFlags(fs)
 		},
-		Validate: chain(compArg(false), flagChecks),
-		Confirm:  func(inv *invocation) *Error { return inv.r.confirmYes("回滚将切换到旧版本") },
+		Validate: chain(compArg(false), flagChecks, func(inv *invocation) *Error {
+			if inv.changed("confirm-name") && inv.str("from-backup") == "" {
+				return usageErr("usage.flag_not_applicable", "--confirm-name 仅与 --from-backup 一起使用", "")
+			}
+			return nil
+		}),
+		Confirm: func(inv *invocation) *Error {
+			if inv.r.opts.DryRun {
+				return nil
+			}
+			if inv.str("from-backup") != "" {
+				return inv.r.confirmHostname(inv.str("confirm-name"))
+			}
+			return inv.r.confirmYes("回滚将切换到旧版本")
+		},
 	}
 
 	uninstall := &cmdSpec{
@@ -482,7 +516,14 @@ func commandSpecs() []*cmdSpec {
 		},
 	}
 
-	return []*cmdSpec{versionSpec, listSpec, statusSpec, install, update, service, logs, doctor, config, node, backupCmd, rollback, uninstall, recoverSpec}
+	specs := []*cmdSpec{versionSpec, listSpec, statusSpec, install, update, service, logs, doctor, config, node, backupCmd, rollback, uninstall, recoverSpec}
+	if commandSpecsHook != nil {
+		specs = commandSpecsHook(specs)
+	}
+	return specs
 }
+
+// commandSpecsHook 仅供测试追加合成命令（例如「尚未实现的写命令」——Story 1.43 之后真实命令树里已没有这样的命令，但 gate 对它的行为仍须被测试）；生产恒为 nil。
+var commandSpecsHook func([]*cmdSpec) []*cmdSpec
 
 func hidden(_ *bool, fs *pflag.FlagSet, name string) { _ = fs.MarkHidden(name) }

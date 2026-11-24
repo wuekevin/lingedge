@@ -49,6 +49,9 @@ type Undoer struct {
 	Notice func(code, msg string)
 	// Safety 执行 backup.ActRestoreSafety（见 Deps.RestoreSafety）。
 	Safety func(ctx context.Context, a registry.UndoAction) (service.UndoResult, error)
+	// Update 执行升级/回滚事务的撤销动作（Story 1.43）；Sys 用于重启/停止服务。
+	Update *UpdateEnv
+	Sys    *service.Systemctl
 }
 
 func (u *Undoer) host(virtual string) string {
@@ -78,8 +81,14 @@ func (u *Undoer) Apply(ctx context.Context, a registry.UndoAction) (service.Undo
 		return u.stateForget(ctx, a)
 	case actNginxLink:
 		return u.unlinkNginx(ctx, a)
-	case backup.ActRestoreRequest, ActUninstallRequest:
+	case backup.ActRestoreRequest, ActUninstallRequest, ActUpdateRequest, ActUpdateNoteBackup, ActRollbackRequest:
 		return service.UndoResult{Outcome: service.OutcomeNoop}, nil
+	case ActUpdateStartUnits:
+		return u.updStartUnits(ctx, a)
+	case ActUpdateDBRevert:
+		return u.updDBRevert(ctx, a)
+	case ActUpdateSwitchCurrent:
+		return u.updSwitchCurrent(a)
 	case backup.ActRestoreMasterKey:
 		if !strings.HasSuffix(a.Path, service.ServerConfigDir+"/master.key") || filepath.Clean(a.Path) != a.Path {
 			return service.UndoResult{}, fmt.Errorf("撤销路径 %s 不是 server 的 master.key，拒绝", a.Path)

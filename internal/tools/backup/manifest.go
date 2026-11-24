@@ -32,6 +32,9 @@ const (
 const (
 	PurposeManual     = "manual"
 	PurposePreRestore = "pre-restore"
+	// PurposePreUpgrade/PurposePreRollback 是 Story 1.43 的升级前备份与手动回滚前的安全备份（同样随 `backup list` 展示，Tools 不自动清理）。
+	PurposePreUpgrade  = "pre-upgrade"
+	PurposePreRollback = "pre-rollback"
 )
 
 // FileEntry 是清单里的一个文件。Archive 是包内路径（固定形态，与 Dest 无关，避免路径穿越）；Dest 是恢复时的绝对目标路径（虚拟根之内）。
@@ -138,7 +141,7 @@ func (m Manifest) Validate() error {
 	if m.FormatVersion != FormatVersion {
 		return bad("不支持的 format_version %d", m.FormatVersion)
 	}
-	if m.Purpose != PurposeManual && m.Purpose != PurposePreRestore {
+	if m.Purpose != PurposeManual && m.Purpose != PurposePreRestore && m.Purpose != PurposePreUpgrade && m.Purpose != PurposePreRollback {
 		return bad("purpose 非法")
 	}
 	if m.Component != "server" && m.Component != "node" {

@@ -75,7 +75,7 @@ func TestParseStateSchemaVersioning(t *testing.T) {
 		{"schema_version 为字符串", `{"schema_version":"1","components":{}}`, KindStateCorrupt},
 		{"schema_version=0", `{"schema_version":0,"components":{}}`, KindStateCorrupt},
 		{"schema_version 为负", `{"schema_version":-3,"components":{}}`, KindStateCorrupt},
-		{"未来版本 3：失败关闭，不尝试解析其余内容", `{"schema_version":3,"components":{"x":{"future":true}},"new_top":1}`, KindStateUnsupported},
+		{"未来版本 4：失败关闭，不尝试解析其余内容", `{"schema_version":4,"components":{"x":{"future":true}},"new_top":1}`, KindStateUnsupported},
 		{"巨大版本", `{"schema_version":99999999}`, KindStateUnsupported},
 		{"未知顶层字段（同版本内不允许）", `{"schema_version":1,"components":{},"extra":1}`, KindStateCorrupt},
 		{"未知组件字段", `{"schema_version":1,"components":{"server":{"version":"1.0.0","state":"running","ports":[],"extra_field":"x"}}}`, KindStateCorrupt},
@@ -116,7 +116,7 @@ func TestUnsupportedFutureVersionIsNeverRewritten(t *testing.T) {
 	if err := r.L.Ensure(); err != nil {
 		t.Fatal(err)
 	}
-	future := []byte(`{"schema_version":3,"components":{"server":{"v3_only":1}}}` + "\n")
+	future := []byte(`{"schema_version":4,"components":{"server":{"v4_only":1}}}` + "\n")
 	if err := os.WriteFile(r.L.StateFile(), future, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -431,7 +431,7 @@ func TestStateV1ReadsAndUpgradesToV2(t *testing.T) {
 	if err != nil {
 		t.Fatalf("版本 1 的文件必须仍可读取: %v", err)
 	}
-	if s.SchemaVersion != 2 || s.Host != nil || s.Components["server"].Version != "1.2.3" || s.UpdatedAt != "2026-11-01T00:00:00.000Z" {
+	if s.SchemaVersion != 3 || s.Host != nil || s.Components["server"].Version != "1.2.3" || s.UpdatedAt != "2026-11-01T00:00:00.000Z" {
 		t.Fatalf("迁移结果: %+v", s)
 	}
 	// 经真实文件：读旧文件 → 记录 host.baota → 落盘为版本 2，组件记录原样保留
@@ -446,7 +446,7 @@ func TestStateV1ReadsAndUpgradesToV2(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw, _ := os.ReadFile(r.L.StateFile())
-	if !bytes.Contains(raw, []byte(`"schema_version": 2`)) || !bytes.Contains(raw, []byte(`"host"`)) {
+	if !bytes.Contains(raw, []byte(`"schema_version": 3`)) || !bytes.Contains(raw, []byte(`"host"`)) {
 		t.Fatalf("应落盘为版本 2: %s", raw)
 	}
 	got, _, err := r.LoadState()
@@ -464,9 +464,9 @@ func TestStateV1ReadsAndUpgradesToV2(t *testing.T) {
 			t.Errorf("v%s 未知字段: %v", v, err)
 		}
 	}
-	// 版本 3 仍失败关闭
-	if _, err := ParseState([]byte(`{"schema_version":3,"components":{},"host":{"x":1}}`)); kindOfErrSoft(err) != KindStateUnsupported {
-		t.Errorf("v3: %v", err)
+	// 版本 4 仍失败关闭
+	if _, err := ParseState([]byte(`{"schema_version":4,"components":{},"host":{"x":1}}`)); kindOfErrSoft(err) != KindStateUnsupported {
+		t.Errorf("v4: %v", err)
 	}
 }
 
@@ -534,5 +534,40 @@ func TestHostBaotaValidationAndStrictness(t *testing.T) {
 	final, _, _ := r2.LoadState()
 	if len(final.Components) != 4 || final.Host == nil {
 		t.Errorf("并发后: %d 个组件，host=%v", len(final.Components), final.Host)
+	}
+}
+
+// ---- Story 1.43：schema 版本 3（components.<c>.upgrade）----
+
+func TestStateV3UpgradeRecord(t *testing.T) {
+	tx := "01JD5Y3C8Q5G7M0V1N2P3R4S5T"
+	good := `{"schema_version":3,"components":{"server":{"version":"1.3.0","state":"running","ports":[8080],"prev_version":"1.2.3","upgrade":{"from":"1.2.3","at":"2026-11-24T00:00:00.000Z","tx":"` + tx + `","classes":["reversible"],"irreversible":false,"path":"migrate_down","schema_from":18,"schema_to":19,"backup":"/var/lib/lingedge/backups/x.tar.gz"}}}}`
+	s, err := ParseState([]byte(good))
+	if err != nil || s.Components["server"].Upgrade == nil || s.Components["server"].Upgrade.Path != PathMigrateDown || s.Components["server"].Upgrade.SchemaTo != 19 {
+		t.Fatalf("v3 升级记录: %+v %v", s, err)
+	}
+	bads := map[string]string{
+		"未知路径":         strings.Replace(good, `"migrate_down"`, `"teleport"`, 1),
+		"未知级别":         strings.Replace(good, `["reversible"]`, `["nuclear"]`, 1),
+		"相对备份路径":       strings.Replace(good, `/var/lib/lingedge/backups/x.tar.gz`, `x.tar.gz`, 1),
+		"来源版本非 semver": strings.Replace(good, `"from":"1.2.3"`, `"from":"latest"`, 1),
+		"事务 ID 非法":     strings.Replace(good, tx, "../x", 1),
+		"负 schema":     strings.Replace(good, `"schema_from":18`, `"schema_from":-1`, 1),
+		"升级记录含疑似密钥":    strings.Replace(good, `"backup":"/var/lib/lingedge/backups/x.tar.gz"`, `"backup":"/x/password=hunter2hunter2"`, 1),
+	}
+	for name, doc := range bads {
+		if _, err := ParseState([]byte(doc)); err == nil {
+			t.Errorf("%s 应被拒绝", name)
+		}
+	}
+	// 版本 2 的组件记录里不应有 upgrade（该字段自版本 3 起）
+	v2 := strings.Replace(good, `"schema_version":3`, `"schema_version":2`, 1)
+	if _, err := ParseState([]byte(v2)); kindOfErrSoft(err) != KindStateCorrupt {
+		t.Errorf("v2 含 upgrade 应为损坏: %v", err)
+	}
+	// 版本 2 的正常文件可读并升级为 3
+	v2ok := `{"schema_version":2,"components":{"server":{"version":"1.2.3","state":"running","ports":[8080]}}}`
+	if s, err := ParseState([]byte(v2ok)); err != nil || s.SchemaVersion != 3 {
+		t.Errorf("v2 读取: %+v %v", s, err)
 	}
 }

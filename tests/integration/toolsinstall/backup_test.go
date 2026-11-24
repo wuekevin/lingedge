@@ -20,6 +20,7 @@ import (
 
 	"github.com/wuekevin/lingedge/internal/tools/backup"
 	"github.com/wuekevin/lingedge/internal/tools/cli"
+	"github.com/wuekevin/lingedge/internal/tools/installer"
 	"github.com/wuekevin/lingedge/internal/tools/probe"
 	"github.com/wuekevin/lingedge/internal/tools/service"
 	"github.com/wuekevin/lingedge/tests/toolsworld"
@@ -102,14 +103,17 @@ func (s *stack) runB(uid int, opt runOpt, args ...string) (code int, stdout, std
 		Geteuid: func() int { return uid }, Hostname: func() (string, error) { return migHost, nil },
 		Now: func() time.Time { return toolsworld.T0.Add(time.Duration(s.clock) * time.Second) }, NewRunID: func(time.Time) string { return "01JD5Y3C8Q5G7M0V1N2P3R4S5T" },
 		StatePath: s.w.Layout.StateFile(), BuiltinKeys: func() ([]byte, error) { return toolsworld.KeysJSON(), nil },
-		Install: cli.InstallEnv{Root: s.w.Root, Specs: s.w.Specs, Runner: r, Own: s.w.Own, Booted: func() bool { return true },
-			Collect: func(context.Context) (probe.Result, error) { return s.w.Probe, nil }},
+		Install: cli.InstallEnv{Root: s.w.Root, Specs: s.w.Specs, Runner: opt.wrapRunner(r), Own: s.w.Own, Booted: func() bool { return true },
+			Collect: func(context.Context) (probe.Result, error) { return s.w.Probe, nil }, WrapJournal: opt.wrapJournal, Hook: opt.hook},
 		Backup: cli.BackupEnv{
 			DumpBin: filepath.Join(s.bin, "mysqldump"), ClientBin: filepath.Join(s.bin, "mysql"),
 			ServerConfig: filepath.Join(s.w.Root, "run", "server-live.yaml"),
 			KDF:          backup.KDFParams{Time: 1, MemoryKiB: 64, Threads: 1},
-			FailAt:       opt.failAt, HealthTimeout: 30 * time.Second, HealthInterval: 100 * time.Millisecond,
+			FailAt:       opt.failAt, HealthTimeout: 30 * time.Second, HealthInterval: 100 * time.Millisecond, ReadSecret: opt.secret,
 		},
+	}
+	if opt.tty {
+		ev.StdinTTY, ev.StderrTTY = true, true
 	}
 	s.clock++
 	code = cli.Execute(context.Background(), ev, args)
@@ -121,6 +125,19 @@ type runOpt struct {
 	env        map[string]string
 	stdin      string
 	failAt     func(string) error
+	// 升级/回滚测试用：伪 systemd 包装（真实进程随 systemctl start/stop 启停）、journal 故障注入/崩溃模拟、步骤挂钩、交互口令与终端。
+	wrapRunnerFn func(service.Runner) service.Runner
+	wrapJournal  func(installer.Journal) installer.Journal
+	hook         func(string)
+	tty          bool
+	secret       func(label string) (string, error)
+}
+
+func (o runOpt) wrapRunner(r service.Runner) service.Runner {
+	if o.wrapRunnerFn == nil {
+		return r
+	}
+	return o.wrapRunnerFn(r)
 }
 
 func (s *stack) dbFlags() []string {

@@ -21,7 +21,7 @@ import (
 //	rollback_failed    → 12  install.rollback_failed          撤销失败，journal 保留（lingedge recover --rollback 重试）
 //	interrupted        → 130 interrupt.sigint                 SIGINT：当前步骤完成后已回滚
 //	recover            → 3   recover.not_possible             recover 的前置不满足
-//	not_installed      → 14  not_installed                    uninstall 的目标组件未安装（Story 1.41）
+//	not_installed      → 14  not_installed.component                   uninstall 的目标组件未安装（Story 1.41）
 //	step_failed        → 沿 Cause 的映射（校验失败 5、传输失败 1、systemd 3…），并补上失败步骤与系统状态（rolled_back）
 //	internal           → 1   install.internal
 //
@@ -35,11 +35,12 @@ func InstallError(err error) *Error {
 	if len(ie.Details) > 0 {
 		e.Details = map[string]any{}
 		for k, v := range ie.Details {
-			if k == "plan" {
+			switch v.(type) {
+			case string, int, int64, bool, nil:
+				e.Details[k] = v
+			default: // 结构体（plan、rollback 复核报告…）：转成通用 JSON 值，信封的脱敏只递归 map/slice
 				e.Details[k] = toAny(v)
-				continue
 			}
-			e.Details[k] = v
 		}
 	}
 	if len(ie.Conflicts) > 0 {
@@ -74,7 +75,7 @@ func InstallError(err error) *Error {
 	case installer.KindRecover:
 		e.Exit, e.Code = ExitPrecondition, "recover.not_possible"
 	case installer.KindNotInstalled:
-		e.Exit, e.Code = ExitNotInstalled, "not_installed"
+		e.Exit, e.Code = ExitNotInstalled, "not_installed.component"
 	case installer.KindStepFailed:
 		inner := ie.Cause
 		if c, ok := classify(inner); ok && c != nil {
@@ -100,6 +101,9 @@ func InstallError(err error) *Error {
 		}
 	default:
 		e.Exit, e.Code = ExitGeneral, "install.internal"
+	}
+	if c, ok := ie.Details["code"].(string); ok && c != "" { // 升级/回滚的前置失败带有更具体的错误码（precondition.db_credentials、confirm.irreversible…）
+		e.Code = c
 	}
 	if e.Hint == "" {
 		e.Hint = "详见日志与 details"

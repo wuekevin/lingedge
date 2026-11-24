@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "rollback 的 data（Story 1.43）",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "dry_run",
+    "plan",
+    "outcome"
+  ],
+  "properties": {
+    "dry_run": {
+      "type": "boolean"
+    },
+    "outcome": {
+      "enum": [
+        "planned",
+        "rolled_back"
+      ]
+    },
+    "tx": {
+      "type": "string"
+    },
+    "safety_backup": {
+      "type": "string"
+    },
+    "report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "health"
+      ],
+      "properties": {
+        "version": {
+          "type": "string"
+        },
+        "schema_version": {
+          "type": "integer"
+        },
+        "health": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "post_checks": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "pass",
+            "warn",
+            "fail",
+            "skip"
+          ],
+          "properties": {
+            "pass": {
+              "type": "integer"
+            },
+            "warn": {
+              "type": "integer"
+            },
+            "fail": {
+              "type": "integer"
+            },
+            "skip": {
+              "type": "integer"
+            },
+            "problems": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "component",
+        "from",
+        "to",
+        "path",
+        "source",
+        "irreversible",
+        "promise",
+        "safety_backup",
+        "destructive",
+        "warnings",
+        "steps"
+      ],
+      "properties": {
+        "component": {
+          "type": "string"
+        },
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        },
+        "path": {
+          "enum": [
+            "binary",
+            "migrate_down",
+            "binary_expand",
+            "restore_backup"
+          ]
+        },
+        "source": {
+          "enum": [
+            "upgrade_record",
+            "explicit_to",
+            "backup"
+          ]
+        },
+        "backup": {
+          "type": "string"
+        },
+        "schema_from": {
+          "type": "integer"
+        },
+        "schema_to": {
+          "type": "integer"
+        },
+        "irreversible": {
+          "type": "boolean"
+        },
+        "promise": {
+          "type": "string"
+        },
+        "safety_backup": {
+          "type": "boolean"
+        },
+        "destructive": {
+          "type": "boolean"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

@@ -153,8 +153,8 @@ func (r *Run) passphrase(inv *invocation, creating bool) ([]byte, *Error) {
 		"用 --passphrase-file <文件>（root 属主 0400/0600）或环境变量 "+EnvBackupPassFile+" 提供口令；口令不能出现在命令行里")
 }
 
-// dbConn 解析数据库连接（迁移账号；来源见 backup.ResolveDB）。
-func (r *Run) dbConn(inv *invocation) (*backup.DBConn, *Error) {
+// resolveDBRaw 解析数据库连接（迁移账号；来源优先级见 backup.ResolveDB：环境变量 ＞ 口令文件 ＞ migrate.yaml ＞ 交互输入）。interactive=false 时永不提示。返回原始错误。
+func (r *Run) resolveDBRaw(inv *invocation, interactive bool) (backup.DBConn, error) {
 	var t backup.DBTarget
 	if inv != nil && inv.cmd.Flags().Lookup("db-host") != nil {
 		port, _ := inv.cmd.Flags().GetInt("db-port")
@@ -166,10 +166,15 @@ func (r *Run) dbConn(inv *invocation) (*backup.DBConn, *Error) {
 	} else {
 		ce.MigrateYAML = r.hostPath(backup.DefaultMigrateYAML)
 	}
-	if r.interactive() {
+	if interactive && r.interactive() {
 		ce.ReadSecret = r.env.Backup.ReadSecret
 	}
-	conn, err := backup.ResolveDB(ce)
+	return backup.ResolveDB(ce)
+}
+
+// dbConn 解析数据库连接，把失败映射为 CLI 结构化错误。
+func (r *Run) dbConn(inv *invocation) (*backup.DBConn, *Error) {
+	conn, err := r.resolveDBRaw(inv, true)
 	if err != nil {
 		switch {
 		case errors.Is(err, backup.ErrNoCredentials):
@@ -194,7 +199,7 @@ func (r *Run) installedState() (registry.State, *Error) {
 }
 
 func notInstalled(c string) *Error {
-	return &Error{Exit: ExitNotInstalled, Code: "not_installed", Message: "组件 " + c + " 未安装", Hint: "先安装：lingedge install " + c + "；lingedge list 查看已安装的组件"}
+	return &Error{Exit: ExitNotInstalled, Code: "not_installed.component", Message: "组件 " + c + " 未安装", Hint: "先安装：lingedge install " + c + "；lingedge list 查看已安装的组件"}
 }
 
 func (r *Run) pickComponent(inv *invocation) (string, string, *Error) {
@@ -217,7 +222,7 @@ func (r *Run) pickComponent(inv *invocation) (string, string, *Error) {
 	}
 	switch len(have) {
 	case 0:
-		return "", "", &Error{Exit: ExitNotInstalled, Code: "not_installed", Message: "本机没有可备份的组件（server/node 都未安装）", Hint: "lingedge list 查看已安装的组件"}
+		return "", "", &Error{Exit: ExitNotInstalled, Code: "not_installed.component", Message: "本机没有可备份的组件（server/node 都未安装）", Hint: "lingedge list 查看已安装的组件"}
 	case 1:
 		return have[0], st.Components[have[0]].Version, nil
 	}

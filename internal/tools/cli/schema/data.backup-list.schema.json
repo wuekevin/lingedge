@@ -14,7 +14,7 @@
         "meta": {"type": "object", "additionalProperties": false,
           "required": ["format_version", "purpose", "component", "version", "host", "created_at", "schema_version", "deploy_lineage", "key_fingerprint", "kek_ids_required", "key_included"],
           "properties": {
-            "format_version": {"type": "integer"}, "purpose": {"enum": ["manual", "pre-restore"]}, "component": {"enum": ["server", "node"]}, "version": {"type": "string"},
+            "format_version": {"type": "integer"}, "purpose": {"enum": ["manual", "pre-restore", "pre-upgrade", "pre-rollback"]}, "component": {"enum": ["server", "node"]}, "version": {"type": "string"},
             "host": {"type": "string"}, "created_at": {"type": "string"}, "schema_version": {"type": "integer"}, "deploy_lineage": {"type": ["integer", "null"]},
             "key_fingerprint": {"type": "string"}, "kek_ids_required": {"type": "array", "items": {"type": "string"}}, "key_included": {"type": "boolean"}}}
       }}}

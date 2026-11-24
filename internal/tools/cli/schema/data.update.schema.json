@@ -1,0 +1,289 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "update <组件>|--all 的 data（Story 1.43；--dry-run/--plan-only 同一形状，outcome=planned）",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "dry_run",
+    "all",
+    "components"
+  ],
+  "properties": {
+    "dry_run": {
+      "type": "boolean"
+    },
+    "all": {
+      "type": "boolean"
+    },
+    "components": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "component",
+          "from",
+          "to",
+          "outcome",
+          "path",
+          "classes",
+          "has_irreversible",
+          "promise",
+          "backup_verified",
+          "pruned_releases",
+          "plan"
+        ],
+        "properties": {
+          "component": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "planned",
+              "updated",
+              "already_up_to_date",
+              "skipped_internal"
+            ]
+          },
+          "tx": {
+            "type": "string"
+          },
+          "path": {
+            "enum": [
+              "binary",
+              "migrate_down",
+              "binary_expand",
+              "restore_backup"
+            ]
+          },
+          "classes": {
+            "type": "array",
+            "items": {
+              "enum": [
+                "reversible",
+                "expand",
+                "irreversible"
+              ]
+            }
+          },
+          "has_irreversible": {
+            "type": "boolean"
+          },
+          "promise": {
+            "type": "string"
+          },
+          "backup": {
+            "type": "string"
+          },
+          "backup_verified": {
+            "type": "boolean"
+          },
+          "schema_from": {
+            "type": "integer"
+          },
+          "schema_to": {
+            "type": "integer"
+          },
+          "health": {
+            "type": "string"
+          },
+          "pruned_releases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "post_checks": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "pass",
+              "warn",
+              "fail",
+              "skip"
+            ],
+            "properties": {
+              "pass": {
+                "type": "integer"
+              },
+              "warn": {
+                "type": "integer"
+              },
+              "fail": {
+                "type": "integer"
+              },
+              "skip": {
+                "type": "integer"
+              },
+              "problems": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "plan": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "migrations",
+              "backup",
+              "units",
+              "steps",
+              "db_login",
+              "keep_releases",
+              "need_confirm",
+              "backup_forced"
+            ],
+            "properties": {
+              "migrations": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "source",
+                  "classes",
+                  "has_irreversible",
+                  "db_initialized"
+                ],
+                "properties": {
+                  "source": {
+                    "enum": [
+                      "manifest",
+                      "migrate_plan",
+                      "none"
+                    ]
+                  },
+                  "classes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "class": {
+                          "type": "string"
+                        },
+                        "has_down": {
+                          "type": "boolean"
+                        },
+                        "summary": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "schema_from": {
+                    "type": "integer"
+                  },
+                  "schema_to": {
+                    "type": "integer"
+                  },
+                  "has_irreversible": {
+                    "type": "boolean"
+                  },
+                  "db_initialized": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "backup": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "planned",
+                  "encrypted",
+                  "database",
+                  "verify"
+                ],
+                "properties": {
+                  "planned": {
+                    "type": "boolean"
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "dir": {
+                    "type": "string"
+                  },
+                  "encrypted": {
+                    "type": "boolean"
+                  },
+                  "database": {
+                    "type": "boolean"
+                  },
+                  "verify": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "units": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "n",
+                    "name",
+                    "title"
+                  ],
+                  "properties": {
+                    "n": {
+                      "type": "integer"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "db_login": {
+                "enum": [
+                  "not_required",
+                  "available",
+                  "missing_non_interactive",
+                  "interactive",
+                  "unavailable"
+                ]
+              },
+              "keep_releases": {
+                "type": "integer"
+              },
+              "need_confirm": {
+                "type": "boolean"
+              },
+              "backup_forced": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

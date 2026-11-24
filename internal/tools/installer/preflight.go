@@ -163,7 +163,7 @@ func (in *Installer) Plan(ctx context.Context, req Request) (*PreflightResult, e
 		return res, plan.Err()
 	}
 
-	// 已装组件的升级不属于 install（Story 1.43 的 update：备份、迁移决策、健康回滚）。
+	// 已装组件的升级不属于 install（lingedge update：备份、迁移决策、健康回滚）。
 	var up []string
 	for _, c := range plan.Components {
 		if c.Action == "upgrade" {
@@ -173,7 +173,7 @@ func (in *Installer) Plan(ctx context.Context, req Request) (*PreflightResult, e
 	if len(up) > 0 {
 		in.emitVerdicts(res.Steps)
 		e := &Error{Kind: KindUpgradeRequired, Step: StepDependencies, Msg: "本次安装需要升级已装组件：" + strings.Join(up, "；"),
-			Hint:    "先运行 lingedge update <组件>（升级含备份与迁移决策，Story 1.43），再重试安装；本命令不会在安装流程里升级已装组件",
+			Hint:    "先运行 lingedge update <组件>（升级含备份与迁移决策），再重试安装；本命令不会在安装流程里升级已装组件",
 			Details: map[string]any{"upgrades": up, "plan": plan}, SystemState: "unchanged"}
 		return res, e
 	}

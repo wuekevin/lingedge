@@ -53,14 +53,22 @@ func TestUsageErrors(t *testing.T) {
 	}
 	// 合法组合不被误伤（走到「尚未实现」= 1，而不是 2）。Story 1.33 起 install 已实现：其合法组合通过校验后进入清单验证，本构建未内置发行公钥 → 5（见下）。
 	for _, args := range [][]string{
-		{"update", "node", "--no-backup", "--yes"},
 		{"update", "node", "--apply-staged"},
 		{"node", "enroll", "--server", "https://panel.example.com:8443"},
-		{"update", "--all", "--plan-only"},
 	} {
 		h := newHarness(t, asRoot())
 		if code := h.run(append(args, "--non-interactive", "--yes")...); code != 1 {
 			t.Errorf("%v 应通过校验落到未实现(1)，得 %d\n%s", args, code, h.stderr)
+		}
+	}
+	// Story 1.43 起 update 已实现：合法组合通过校验后落到命令本身——目标未安装 → 14；--all 在没有任何已装组件时无事可做 → 0。
+	for _, c := range []struct {
+		args []string
+		want int
+	}{{[]string{"update", "node", "--no-backup", "--yes"}, 14}, {[]string{"update", "--all", "--plan-only"}, 0}} {
+		h := newHarness(t, asRoot())
+		if code := h.run(append(c.args, "--non-interactive", "--yes")...); code != c.want {
+			t.Errorf("%v 应通过校验落到命令本身（%d），得 %d\n%s", c.args, c.want, code, h.stderr)
 		}
 	}
 }

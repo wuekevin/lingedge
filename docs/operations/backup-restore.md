@@ -1,6 +1,6 @@
 # 备份、恢复与卸载运维手册（Story 1.41；FR-10、NFR-18）
 
-设计与取舍见 `docs/architecture/tools-design.md` §17.6；本文只讲怎么用、出错怎么办。命令都需要 root（`sudo lingedge …`，Tools 不自提权）。
+设计与取舍见 `docs/architecture/tools-design.md` §17.6；本文只讲怎么用、出错怎么办。升级前的强制备份、手动回滚与 `rollback --from-backup`（复用本文的备份/恢复实现）见 `docs/operations/upgrade-rollback.md`。命令都需要 root（`sudo lingedge …`，Tools 不自提权）。
 
 ## 1. 先记住两件事
 

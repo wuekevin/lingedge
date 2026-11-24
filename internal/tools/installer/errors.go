@@ -15,7 +15,7 @@ const (
 	KindSpecMissing Kind = "spec_missing"
 	// KindSettings：--set 的键/值不合法（组件的 schema 拒绝）。退出码 2。
 	KindSettings Kind = "settings"
-	// KindUpgradeRequired：计划含已装组件的升级（被动升级或版本变化），安装流程不执行升级，须走 lingedge update（Story 1.43）。退出码 3。
+	// KindUpgradeRequired：计划含已装组件的升级（被动升级或版本变化），安装流程不执行升级，须走 lingedge update。退出码 3。
 	KindUpgradeRequired Kind = "upgrade_required"
 	// KindConfirmRequired：存在需要显式确认的冲突（既有配置/单元/站点内容不同、目录权限不符），非交互且未 --yes。退出码 9。
 	KindConfirmRequired Kind = "confirm_required"

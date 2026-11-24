@@ -567,9 +567,13 @@ func (s *fakeSpec) Start(ctx context.Context, rt *installer.Runtime) error {
 	return rt.StartUnits(ctx)
 }
 
-func (s *fakeSpec) Health(context.Context, *installer.Runtime) error {
+func (s *fakeSpec) Health(_ context.Context, rt *installer.Runtime) error {
 	if s.w.CtlOn("fail-health-" + s.name) {
 		return errors.New("healthz 返回 503")
+	}
+	// 版本相关的健康失败（升级/回滚测试：新版本不健康、回滚后的旧版本健康）。
+	if rt != nil && rt.Version != "" && s.w.CtlOn("fail-health-"+s.name+"-"+rt.Version) {
+		return errors.New("healthz 返回 503（" + rt.Version + "）")
 	}
 	// 健康 = 组件的单元已被（伪）systemd 启动；没有单元的组件（openresty 由 node 的 path 单元拉起）以其 current 链接存在为准。
 	for _, u := range service.EnableTargets(s.name) {

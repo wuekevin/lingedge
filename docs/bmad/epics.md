@@ -1870,6 +1870,7 @@ created: 2026-11-16
 - **需求**：实现 FR-8、NFR-23；验证/支撑 FR-9
 - **关联**：闭环 AC：AC-J-1、AC-J-2、AC-J-3、AC-J-4、AC-J-5、AC-J-7；门禁/冻结点：G-8；架构评审项：IMP-07、MIN-05、MIN-04（见 `docs/bmad/review-architecture*.md`）
 - **修订（2026-11-16）**：AC8 明确回滚路径中的 `lineage bump` 前置步骤。**2026-11-21（AA-7 已解决）**：新增 AC9（迁移凭据来源）。
+- **实现澄清（2026-11-24，Story 1.43 落地时发现原文缺口/矛盾；ACs 语义未改）**：① AC4/AC9「此时尚未改动任何东西」精确化：9（含不可逆未确认）/3（无迁移凭据）时服务、数据库、`current`、配置、state、journal 均未改动；清单预告低估、`migrate plan` 才发现不可逆时，取包与备份已完成，撤销删除新 release 与 staging，**升级前备份保留**；② AC3 的「含 `expand`」路径：Server 就绪探针对「库里有二进制不认识的迁移」报告 `/healthz/ready` 503，tools-design §17.2「旧二进制与新增结构兼容」在现行 Server 上不成立——回滚后复核该路径只要求存活探针 + schema 等于升级后版本（`healthy_live_only`），N-1 就绪兼容属后续（Server 就绪探针/发布流程 N-1 测试）；③ AC2 的 `update` 一个事务只升级一个组件，`--all` 逐组件各一个事务，内部组件随依赖它的组件升级；`update node --apply-staged` 属 Epic 3（ADR-024）；④ AC6 `update self` 取清单里 `tools` 组件（包内 `payload/bin/lingedge`）；⑤ AC7 保留数配置键 `update.keep_releases`（缺省 2，不少于 2）；⑥ `secrets.rewrap` 与「移除 KEK」命令不属本 Story（6.18），升级编排不触碰 `master.key`；⑦ 为 `rollback` 的数据库路径新增 `--confirm-name`（`--from-backup` 覆盖数据库，`--yes` 不足以确认）与 `--db-*`/`--mysql-bin-dir`/`--passphrase-file`；state.json 升至 schema 3（`upgrade` 记录）。详见 tools-design §17.7 与 `docs/bmad/stories/1-43-*.md`。
 - **参考**：tools-design §17.2-17.4；ADR-013；ADR-016
 - **环境依赖**：ENV-LNX + 本机 MySQL
 - **等待环境验证条件**：编排、决策表、回滚逻辑本机以测试清单服务器 + 真实 SQL 迁移验证；真实 server 二进制升级/回滚/健康检查在 ENV-LNX 验证前标「等待环境验证」；闭环 J 不得整体标通过。

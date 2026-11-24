@@ -98,6 +98,7 @@ flowchart BT
   cli --> rollback
 ```
 
+- **Story 1.43 的落地口径（偏离上图，已修正）**：升级事务（13 步）与 22 步安装共用取包/journal/撤销/服务控制，因此编排落在 `installer`（与 `uninstall` 同处）；`updater` 只含不依赖事务机制的部分（`update check` 的清单比对、`update self` 的原子替换），`rollback` 含决策表与回滚路径执行器（切换 `current`、`migrate down`、恢复备份、保留策略），新增叶子包 `dbmigrate`（`lingedge-server migrate` 的调用封装）。依赖方向变为：`installer → rollback、updater、dbmigrate、backup`；`rollback → backup、dbmigrate、registry`；`updater → manifest、registry`；`cli → installer、updater`。详见 §17.7。
 - `security` 是叶子，**所有**子进程调用、归档解压、日志输出必须经它；CI 禁止在其他包里 `os/exec` 直接使用或调用 `sh -c`、`bash -c`。
 - `tui` 与 `cli` 只是消费者；业务包通过 `installer.Event` 通道输出进度（步骤开始/完成/警告），不依赖 UI。
 - Tools **不 import** `internal/` 下任何 Server 业务模块（architecture §5.3 规则 5）；与 Server 的协作仅通过：发行清单、`state.json`、`lingedge-server migrate|healthz|setup` 子命令、本机 HTTP `/healthz`。
@@ -111,7 +112,7 @@ flowchart BT
 ```
 lingedge                              # 交互菜单（§7）；非 TTY 时打印 help 并退出码 0
 lingedge --help | -h
-lingedge version [--check]            # Tools 与各已装组件版本；--check 同时联网比对清单
+lingedge version [--check [--channel stable|beta]]   # Tools 与各已装组件版本；--check 同时联网比对清单（Story 1.43：= update check 的只读部分，结果在 data.check）
 lingedge list [--available]           # 已装组件（版本/状态/端口/目录/用户）；--available 列出清单中可装版本
 lingedge status                       # 汇总：每个已装组件的 systemd 状态 + 健康探测结果
 
@@ -131,7 +132,9 @@ lingedge update check [--channel …]   # 获取签名清单，列出可升级�
 lingedge update <component>           # 例：update node、update server
 lingedge update --all
 lingedge update self                  # 升级 lingedge 自身（原子替换 /usr/local/bin/lingedge，保留 .prev）
-    通用标志：--version、--offline <bundle>、--allow-expired-manifest（仅与 --offline 联用）、--accept-irreversible（§17.3）、--no-backup（仅非 server 组件且需 --yes）、--plan-only（等价 --dry-run）
+    通用标志：--version、--offline <bundle>、--allow-expired-manifest（仅与 --offline 联用）、--accept-irreversible（§17.3）、--no-backup（仅非 server 组件且需 --yes）、--plan-only（等价 --dry-run）、--no-rollback
+    （Story 1.43 追加）--db-host/--db-port/--db-socket/--db-name/--db-user/--db-tls、--mysql-bin-dir、--passphrase-file（升级前备份的口令文件，给出则加密备份；缺省取环境变量 LINGEDGE_BACKUP_PASSPHRASE_FILE，都没有则不加密）；
+    update self 的标志：--version、--channel、--offline、--allow-expired-manifest
 lingedge update node --apply-staged
                                       # 【内部入口】仅 root；供 lingedge-node-upgrade.service 调用（§15.3），固定读取 staging 目录中的 upgrade.request
 
@@ -153,7 +156,7 @@ lingedge backup list [--dir <dir>] | verify <file> [--passphrase-file <f>]
 lingedge backup restore <file> [--component …] [--replace --confirm-name <hostname>] [--master-key-file <f> | --use-backup-master-key]
                         [--passphrase-file <f>] [--db-…] [--mysql-bin-dir <dir>]
 
-lingedge rollback <component> [--to <version>] [--from-backup <file>]
+lingedge rollback <component> [--to <version>] [--from-backup <file> --confirm-name <hostname>] [--passphrase-file <f>] [--db-…] [--mysql-bin-dir <dir>]
 lingedge uninstall <component> [--purge --confirm-name <hostname>]
 
 lingedge recover [--resume|--rollback]   # 处理被中断的事务（§12.3）；非交互且未给标志 → 退出码 9
@@ -1116,6 +1119,36 @@ LockPersonality=yes
 
 **等待环境验证（ENV-LNX/ENV-BT，1.45）。** 真实 systemd 下的服务停启与 `Pdeathsig`、root 属主的真实 chown 与 0400 文件属主检查、真实宝塔 MySQL 的 `mysqldump`/`mysql` 路径与权限、node 组件的真实数据布局与 Agent 心跳、全新机器上的灾后重装恢复演练。本机以真实 MySQL 8.0（临时实例）与本机构建的真实 `lingedge-server` 验证了其余全部逻辑。
 
+### 17.7 实现口径（Story 1.43：update check / 升级编排 / 迁移决策表 / rollback / update self）
+
+> 以下是落地时补齐的、§17.2–§17.4 原文没有写明（或需要消歧/修正）的决定；原有条文**未删改**。代码：`internal/tools/installer/{update_types,update_plan,update_run,update_fail,update_undo,rollback_run,self,recover}.go`、`internal/tools/rollback/`、`internal/tools/updater/`、`internal/tools/dbmigrate/`、`internal/tools/backup/apply.go`、`internal/tools/cli/cmd_update.go`、`internal/tools/registry/state.go`（state 版本 3）。
+
+**事务与 journal（§17.3 的 13 步即 journal 步骤号）。** `Installer.PlanUpdate`（`--dry-run`/`--plan-only`/`update check` 的升级项同源，零变化）做步骤 2–4：验签清单 → `resolver` 求解（`min_upgrade_from`/`requires`/`conflicts`/系统/端口/资源；目标已是最新 → `keep`，no-op；需要同时安装/升级别的组件 → 退出码 3，`update` 一个事务只升级一个组件）→ 迁移预告与决策表 → 备份计划。`Installer.Update` 持组件锁（cli 入口取得）后开 journal：1 请求记录（`update_request`，recover 据此识别事务并复核）→ 2/3/4 只读补记 → **5 下载并验证包到 staging，并落地为 `releases/<新版本>`（不切换 `current`；undo：删 staging、删新 release，仅 Created）** → 6 备份（server：含 DB 的 `backup.Service.Create`，目的 `pre-upgrade`，写完再独立 `Verify` 一次；node 同；静态前端等没有备份支持的组件，「快照」就是保留的旧 release）→ 7 `migrate plan`（新 release 里的二进制，对真实库只读）→ 8 停服务（undo `update_start_units`）→ 9 `migrate up`（undo `update_db_revert`）→ 10 原子切换 `current`（undo `update_switch_current`）→ 11 启动（undo `systemctl_stop`）→ 12 健康检查 → 13 写 `state.json`（**提交点**）。步骤 5–12 包在 `Acquired.Finish` 里：全部成功才推进信任库 sequence。失败 → `rollbackJournal` 逆序撤销（11 停 → 10 切回 → 9 回退库 → 8 重启旧版本 → 清理新 release/staging），随后**复核**（`verifyRolledBack`：`current` 与 `state.json` 的版本号、数据库 schema 版本、服务与健康检查、doctor 子集）；复核或撤销失败 → 退出码 12，journal 保留，`recover --rollback` 重试（撤销幂等；对「撤销已全部标记完成、只是复核没过」的事务，recover 会先把升级前在运行的服务拉起来再复核）。提交点之后的 journal 故障不回滚已提交的升级（与安装一致）；`recover` 对已提交的升级/回滚只补写收尾（`finalized`），对未提交的升级 `--resume` 一律拒绝。收到 SIGINT：8–11、13 是不可打断的原子段，其余步骤之间响应取消并回滚（130）。
+- **退出码**：成功回滚 10；回滚失败 12；含不可逆未确认 9；非交互且无迁移凭据 3（`precondition.db_credentials`）；清单/包被篡改 5；存在未完成事务 13；目标未安装 14；`--no-rollback` 且健康失败 → state 记为 `failed`，保留现场（命令成功返回，警告 `health.failed_kept`，可 `lingedge rollback`）。事件 `installer.Event` 增加 `op`（update|rollback）与 `total`（13/8），进度显示 `[n/13]`。
+- **「尚未改动任何东西」的精确含义（§17.3 步骤 7 与 AC4/AC9 的消歧）**：退出码 9（含不可逆未确认）与退出码 3（无迁移凭据）发生时，**服务、数据库、`current`、配置、state.json、journal 均未改动**。清单预告已含不可逆而未确认 → 在取包之前就以 9 拒绝（连 staging/备份都没有）；清单预告低估、`migrate plan` 才发现不可逆（以 `migrate plan` 的实际结果为准，取更严格者）→ 此时已完成取包与备份：撤销会删掉新 release 与 staging，**升级前备份保留**（证据，`backup list` 可见）。迁移凭据在开 journal 之前解析（不提示时无来源 → 3）。
+
+**迁移决策表的执行（`rollback.Decide`/`rollback.Executor`）。** 决策表按「升级所跨越的迁移级别集合」（清单预告 ∪ `migrate plan`）取最严格者：无迁移 → `binary`；全 `reversible` → `migrate_down`；含 `expand` → `binary_expand`；含 `irreversible` → `restore_backup`（强制备份、写完再 `Verify`、需确认；未知级别按 `irreversible`，失败关闭）。`RevertDB` 按**数据库现状**自适应（撤销可能发生在 `migrate up` 之前/之中/之后，recover 重试也如此）：库仍在升级前 schema → 什么都不做；`migrate_down` → 用**新**二进制 `migrate down --to <升级前>`，**down 失败（含 dirty）→ 升级为「恢复备份」（AC3）**；`binary_expand` → 库已完整升到目标 schema 且无 dirty → 只切回旧二进制，否则（中间状态/dirty）恢复备份；`restore_backup` → `backup.Service.ApplyBackup`（文件、清空并重灌库、探针解密、**启动旧版本 Server 之前**由已切回的旧二进制执行 `lineage bump`，`after` 必须严格大于 `before` 与备份记录的 `deploy_lineage`，IMP-07）。**手动 `rollback`（`AllowRestore=false`）里 down 失败/状态不符会明确失败，绝不静默改走会丢数据的恢复备份**。
+- **expand 回滚的已知缺口（原文矛盾，如实披露）**：§17.2 称含 `expand` 时「旧二进制与新增结构兼容，不执行 down」，但 Server 的就绪探针 `MigrationProbeFromApp` 在「库里有二进制不认识的迁移」时报告 `/healthz/ready` 503，`lingedge-server migrate status` 也以退出码 10 拒绝。所以 `binary_expand` 路径回滚后，旧二进制**进程存活（`/healthz` 200）但不就绪**。Tools 的口径：回滚后复核该路径只要求存活探针 + schema 等于升级后的版本，报告 `health: healthy_live_only`，并通过 `schema` 复核用 `backup.MySQL.SchemaVersion`（读 goose 版本表，不依赖任何二进制认识全部迁移）。真正的 N-1 兼容（旧二进制对 expand 迁移后的库就绪）需要 Server 侧探针改为「容忍已声明 expand 的未知迁移」并纳入发布流程的 N-1 测试（ADR-016 §10）——属后续（Epic 6 发布流程/Server 就绪探针），本 Story 不改 Server，测试 `TestUpdateHealthFailureAutoRollbackPerClass/expand` 会在该缺口被修复时提示把复核恢复为 ready。
+- **setup mode（向导未完成，无 `install.lock`）**：没有数据库可备份/迁移，只升级二进制：步骤 6/7/9 为空操作，回滚路径恒为 `binary`，健康检查只用 `/healthz`。
+
+**手动回滚 `rollback <组件> [--to V] [--from-backup F]`（§17.4）。** journal 步骤：1 请求 → 2 回滚前安全备份（会动数据库的路径：`migrate_down`/`restore_backup`，目的 `pre-rollback`，写完回读校验；其撤销＝`restore_safety_backup`，与 restore 同一实现）→ 3 停服务 → 4 切换 `current` → 5 回退数据库（`migrate down` 用**当前（将被离开的）**release 的二进制；`--from-backup` 恢复备份并 lineage bump）→ 6 启动 → 7 复核（版本、schema、健康、doctor 子集）→ 8 写 state（提交点：`version=目标`、`prev_version` 与 `upgrade` 清除）。默认目标 `prev_version`（其 release 目录须仍在）；上一次升级含不可逆迁移 → **拒绝简单回退**（退出码 3，`precondition.irreversible_rollback`，提示备份路径）；含 `expand` → 允许但警告（N-1 兼容性前提）；`--to` 指向不是上一次升级来源的版本且 server 有库 → 拒绝并要求 `--from-backup`（无法确认 schema 兼容）。`--from-backup` 覆盖数据库，`--yes` 不足以确认，须 `--confirm-name <主机名>`（或交互键入）。失败 → 撤销回到回滚之前（退出码 10/12，同升级）。回滚不清理 release（保留供取证与再次升级，下一次成功升级时才按保留策略清理）。
+
+**state.json 版本 3**：组件记录新增可选 `upgrade`（`from/at/tx/classes/irreversible/path/schema_from/schema_to/backup/backup_encrypted`，不含口令）；版本 1/2 仍可读（内存升级），版本 1/2 的组件里出现 `upgrade` 视为损坏；旧程序读到版本 3 失败关闭。`prev_version` 在升级时写入、回滚成功后清除。
+
+**迁移凭据（AC9，ADR-026 §4）。** 来源与优先级 `backup.ResolveDB`：环境变量 ＞ 口令文件 ＞ `migrate.yaml` ＞ 交互（仅 TTY，无回显；同一次命令内只提示一次——`resolveDBMemo` 在内存缓存，命令结束清零）。Tools 只经**环境变量** `LINGEDGE_MIGRATE_DB_PASSWORD` 传给 `migrate` 的直接子进程（safeexec 子进程不继承父环境），连接目标经命令行；口令不写入 journal/`state.json`/日志/systemd 环境/输出（测试对整棵根目录、journal 归档与 Tools 日志做全树扫描）；连接目标绝不取自 `runtime-credentials.json`；备份默认排除 `migrate.yaml`（1.41）。recover 撤销升级事务的数据库回退需要同样的凭据通道，取不到则明确失败并保留 journal。
+
+**保留策略（AC7）**：`tools.yaml` 新增 `update.keep_releases`（缺省 2，不得小于 2，≤64）。成功确认（提交点之后）才清理，保留语义版本最新的 N 个，`current` 与 `prev_version` 永远保留；只处理名字是严格 SemVer 的真实目录；失败的升级不清理。**`--offline`** 与在线走同一条验证链（同一 `downloader.Acquire`）。
+
+**`update check` / `version --check`**：`updater.Check`（纯函数，只读，不推进 sequence）按已装组件给出 `up_to_date|upgrade_available|blocked|unreleased|builtin|not_in_manifest|no_candidate`；`blocked`（不满足 `min_upgrade_from`）给出逐级升级路径，迁移预告取「下一步」的版本；`migrations.classes[]/has_irreversible/irreversible_count/backup_required/schema_from/schema_to` 来自清单预告（实际以升级时的 `migrate plan` 为准）；已装版本被吊销标 `installed_revoked`；`tools` 组件另列在 `data.tools`。
+
+**`update self`**：清单里的 `tools` 组件，包布局 `payload/bin/lingedge`；同一条验证链取包 → 写 `<目标>.new`（0755，同目录，fsync）→ 执行 `<目标>.new --version`（独立白名单 Runner，只允许基名 `lingedge.new`）并核对输出含目标版本 → 旧版本硬链接保留为 `<目标>.prev` → `rename(.new→目标)` 一次覆盖（任何时刻目标都是完整可执行文件）→ 提交 sequence。自检不符/包被篡改/低于当前（不降级）/不满足 `min_upgrade_from` → 目标原封不动、`.new` 删除、sequence 不推进。当前版本取自构建注入的版本（非 SemVer 的开发构建按最旧处理并告警）。只取 `tools` 组件锁（`locks/tools.lock`），不开 journal（单次原子 rename，失败即原样）。
+
+**`update --all`**：对 state 里已装且已登记规格的组件**逐个**升级，每个组件一个事务（释放上一个任务的锁再为下一个组件取锁并扫描 journal）；某个失败即停止，已成功的保持；内部组件（如 openresty）不能直接选择，输出 `skipped_internal`——它们随依赖它的组件升级（节点的升级路径 ADR-024 属 Epic 3）。`update node --apply-staged`（内部入口）保持「尚未实现」（Epic 3，退出码 1，校验后不改动任何东西）。
+
+**[ASSUMPTION] 清单**：① 升级不重新渲染/覆盖 systemd 单元与配置（`create_if_absent`/单元内容随 Tools 版本变化的漂移由 `doctor` 后续检测）；② `--all` 的逐个升级顺序为组件名字典序（现有可选组件之间没有互相依赖，依赖关系只有内部组件）；③ 升级前备份缺省不加密（`--passphrase-file`/`LINGEDGE_BACKUP_PASSPHRASE_FILE` 给出则加密）；④ `keep_releases` 缺省 2；⑤ `update` 对「node 的升级后 Agent 首次 Heartbeat / `openresty -t` / 配置代未受影响」的健康检查（§17.3 步骤 12）只做单元 active + 组件 Health（Epic 3 交付 node 规格后补全，等待环境验证）。
+
+**不属本 Story（明确写入遗留）**：`secrets.rewrap` 与移除 KEK 的执行命令（6.18；`GuardKEKRemoval` 已在 1.41）；节点升级路径 `lingedge-node-upgrade.path/.service` 与 `update node --apply-staged`（Epic 3，ADR-024）；Server 就绪探针对 expand 迁移的 N-1 兼容（见上，后续）；真实 Linux/systemd/root 属主/宝塔/真实发行源与真实发布密钥（UD-3）下的升级回滚演练（ENV-LNX/ENV-BT，Story 1.45）。
+
 ## 18. 安全（FR-9、NFR-9/11/12/15）
 
 ### 18.1 安全解压算法（`security.SafeExtract`）
@@ -1342,4 +1375,11 @@ LockPersonality=yes
 - **`tools.yaml` 新增节** `log`、`backup`、`doctor`；**行为变更**：此前（1.33）对 release/install 之外的顶层节「忽略」，现在全部严格校验并拒绝未知键。
 - **safeexec 新增流式入口** `Runner.Stream`（同一套白名单/解析/环境清洗，stdout 实时转发；用于 `logs -f` 与 `config edit`），`security.WriteFileAtomicPre`（先 chown 再写内容再 rename）；白名单未放宽（journalctl 本就在 `DefaultAllowed`；`timedatectl` 与编辑器各用独立 Runner）。
 - **发行流水线**：前端目录在 build 开始时快照并核对一致（见 `docs/operations/release.md` §12），修复并发 `vite build` 导致包内缺 `index.html` 的偶发问题。
+- **无迁移/OpenAPI/proto/CF-6/contract-v1 变更，无 CC-14。**
+
+## 修订记录 2026-11-24（Story 1.43：update / rollback / update self）
+
+- **§2** 依赖方向修正（升级编排落在 `installer`，新增 `dbmigrate` 叶子包，`rollback`/`updater` 的职责落地）；**§3** 为 `update`/`rollback` 追加 `--db-*`、`--mysql-bin-dir`、`--passphrase-file`、`rollback --confirm-name`，`version --check` 增 `--channel`；**§17.7** 新增（决策表执行、journal 步骤与撤销动作、expand 回滚缺口、手动回滚、凭据、保留策略、self、`--all`、[ASSUMPTION] 与遗留）。
+- **state.json schema_version 2 → 3**（`components.<c>.upgrade`，见 §17.7）；**`tools.yaml` 新增 `update` 节**（`keep_releases`）；**备份用途新增** `pre-upgrade`、`pre-rollback`；**错误码** `not_installed` 重命名为 `not_installed.component`（信封 schema 要求点分小写码，原值违反已发布的 envelope schema；退出码 14 不变）；`installer.Event` 增加 `op`/`total`。
+- **新增 JSON schema**：`data.update`、`data.update-check`、`data.update-self`、`data.rollback`；`data.version` 增 `check`；`data.backup-list|verify` 的 `purpose` 枚举追加两项。
 - **无迁移/OpenAPI/proto/CF-6/contract-v1 变更，无 CC-14。**

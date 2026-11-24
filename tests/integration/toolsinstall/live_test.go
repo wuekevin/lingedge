@@ -163,6 +163,10 @@ type liveServer struct {
 	w                       *toolsworld.World
 	crash                   bool
 	logs                    *syncBuf
+	// external 为 true：进程由伪 systemd（sysd 包装的 Runner）在 systemctl start/stop 时启停；Start 不再自己拉起进程（升级/回滚测试）。
+	external bool
+	// failVersions：current 指向这些 release 版本时，真实进程以读不到配置而启动失败（构造「健康检查失败的新版本」）。
+	failVersions map[string]bool
 
 	mu   sync.Mutex
 	cmd  *exec.Cmd
@@ -179,6 +183,20 @@ var (
 func (s *liveServer) Start(ctx context.Context, rt *installer.Runtime) error {
 	if err := s.ComponentSpec.Start(ctx, rt); err != nil {
 		return err
+	}
+	if s.external {
+		return nil
+	}
+	return s.launch()
+}
+
+// launch 按已安装的单元文件拉起真实 lingedge-server 进程。
+func (s *liveServer) launch() error {
+	// 与 systemctl start 一致：单元已在运行则什么都不做（幂等；绝不重复拉起第二个进程去抢端口）。
+	if s.cmd != nil {
+		if ex, _ := s.exited(); !ex {
+			return nil
+		}
 	}
 	unit, err := os.ReadFile(filepath.Join(s.w.Root, "etc/systemd/system/lingedge-server.service"))
 	if err != nil {
@@ -214,13 +232,14 @@ func (s *liveServer) Start(ctx context.Context, rt *installer.Runtime) error {
 		if err != nil {
 			return err
 		}
+		_ = os.Remove(filepath.Join(dir, "master.key")) // 重新拉起（升级/回滚）时覆盖上一次的 0400 文件
 		if err := os.WriteFile(filepath.Join(dir, "master.key"), key, 0o400); err != nil {
 			return err
 		}
 		env = append(env, "CREDENTIALS_DIRECTORY="+dir)
 	}
 	args := append([]string{"--config", live}, rest...)
-	if s.crash {
+	if tg, _ := os.Readlink(filepath.Join(s.w.Root, "opt/lingedge/server/current")); s.crash || s.failVersions[strings.TrimPrefix(tg, "releases/")] {
 		args[1] = filepath.Join(s.w.Root, "run", "does-not-exist.yaml") // 真实的启动失败：进程读不到配置，立即以非零退出
 	}
 	cmd := exec.Command(hostExec, args...)

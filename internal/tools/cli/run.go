@@ -54,6 +54,7 @@ type Run struct {
 	helpDone bool
 	warnings []Warning
 	cmdPath  string
+	dbm      *dbMemo
 }
 
 func (r *Run) jsonMode() bool { return r.opts.JSON || r.jsonPre }

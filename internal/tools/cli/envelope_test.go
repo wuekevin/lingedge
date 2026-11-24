@@ -32,7 +32,7 @@ func TestJSONSnapshotsAndSchemas(t *testing.T) {
 		{"err-root", []string{"install", "server", "--json"}, nil, 3, ""},
 		{"err-builtin", []string{"install", "scheduler", "--json"}, nil, 8, ""},
 		{"err-confirm", []string{"uninstall", "server", "--json"}, []hopt{asRoot()}, 9, ""},
-		{"err-not-implemented", []string{"update", "server", "--json", "--dry-run"}, []hopt{asRoot()}, 1, ""},
+		{"err-not-implemented", []string{"update", "node", "--apply-staged", "--json", "--dry-run"}, []hopt{asRoot()}, 1, ""},
 		{"err-install-no-keys", []string{"install", "server", "--json", "--dry-run"}, []hopt{asRoot()}, 5, ""}, // 本构建未内置发行公钥：安装/预检失败关闭
 	}
 	for _, c := range cases {
@@ -98,6 +98,19 @@ func replaceBetween(s, open, closeS, with string) string {
 func TestEverySchemaHasOwnerAndEveryVisibleCommandHasSchema(t *testing.T) {
 	r := &Run{env: newHarness(t).env.withDefaults(), ctx: t.Context()}
 	root := buildRoot(r)
+	// 可运行的父命令（既有 Run 又有子命令，如 update）同样必须有自己的 data schema。
+	runnable := map[string]bool{}
+	var collect func(specs []*cmdSpec, prefix string)
+	collect = func(specs []*cmdSpec, prefix string) {
+		for _, sp := range specs {
+			p := strings.TrimSpace(prefix + " " + sp.name())
+			if sp.Run != nil {
+				runnable[p] = true
+			}
+			collect(sp.Sub, p)
+		}
+	}
+	collect(commandSpecs(), "")
 	owners := map[string]bool{"envelope.schema.json": true, "data.help.schema.json": true, "data.exit-codes.schema.json": true, "data.root-version.schema.json": true}
 	var walk func(c *cobra.Command, path string)
 	walk = func(c *cobra.Command, path string) {
@@ -107,7 +120,7 @@ func TestEverySchemaHasOwnerAndEveryVisibleCommandHasSchema(t *testing.T) {
 			}
 			p := strings.TrimSpace(path + " " + sub.Name())
 			file := "data." + strings.ReplaceAll(p, " ", "-") + ".schema.json"
-			if len(sub.Commands()) == 0 {
+			if len(sub.Commands()) == 0 || runnable[p] {
 				if _, err := SchemaFS.ReadFile("schema/" + file); err != nil {
 					t.Errorf("已交付命令 %q 缺少 data schema %s", p, file)
 				}

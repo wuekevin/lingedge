@@ -23,7 +23,10 @@ const (
 // Event 是 installer 发给 UI（CLI 进度 NDJSON / 将来的 TUI）的进度事件。Detail 只含路径/计数等非敏感信息——
 // setup token、master.key 内容、口令绝不进入事件（测试以明文扫描断言）。
 type Event struct {
-	Type      EventType      `json:"type"`
+	Type EventType `json:"type"`
+	// Op 是产生事件的操作（update | rollback；install 为空）；Total 是该操作的总步数（install 为 22，缺省 0 即 22）。
+	Op        string         `json:"op,omitempty"`
+	Total     int            `json:"total,omitempty"`
 	Step      int            `json:"step,omitempty"`
 	Name      string         `json:"name,omitempty"`
 	Phase     Phase          `json:"phase,omitempty"`

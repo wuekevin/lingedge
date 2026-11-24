@@ -47,6 +47,8 @@ import (
 //	  time_sync_servers: [ntp.example.org:123] # 可选：SNTP 时间源（缺省不联网，只读 timedatectl）
 //	  restarts_warn: 3                         # svc.<c>.restarts：systemd NRestarts 告警阈值
 //	  offline: false                           # true = doctor/list --available 不做任何联网（清单、SNTP）
+//	update:
+//	  keep_releases: 2                         # 升级确认成功后保留的 release 数（缺省 2，不得小于 2；current 与 prev_version 永远保留，Story 1.43 AC7）
 //
 // 全部顶层节与键都由本结构严格校验：未知键、重复键、类型不符、取值非法一律拒绝（不静默忽略拼写错误；位置见 cfgcheck 的逐行报告）。
 type ToolsConfig struct {
@@ -55,6 +57,23 @@ type ToolsConfig struct {
 	Log     LogConfig     `yaml:"log"`
 	Backup  BackupConfig  `yaml:"backup"`
 	Doctor  DoctorConfig  `yaml:"doctor"`
+	Update  UpdateConfig  `yaml:"update"`
+}
+
+// UpdateConfig 是 update 节。
+type UpdateConfig struct {
+	KeepReleases int `yaml:"keep_releases"`
+}
+
+// DefaultKeepReleases 是升级后保留的 release 数缺省值（[ASSUMPTION]：AC7 给出「默认 2，不少于 2」）。
+const DefaultKeepReleases = 2
+
+// KeepReleases 返回保留数（缺省 2；配置值已由 Problems 保证 ≥2）。
+func (c ToolsConfig) KeepReleases() int {
+	if c.Update.KeepReleases < DefaultKeepReleases {
+		return DefaultKeepReleases
+	}
+	return c.Update.KeepReleases
 }
 
 // LogConfig 是 log 节。
@@ -136,13 +155,13 @@ func ParseToolsConfig(b []byte) (ToolsConfig, error) {
 	}
 	for k := range top {
 		if !ToolsConfigSections[k] {
-			return cfg, newErr(KindConfig, "tools.yaml 含未知的顶层节 %q（可用：release、install、log、backup、doctor）", k)
+			return cfg, newErr(KindConfig, "tools.yaml 含未知的顶层节 %q（可用：release、install、log、backup、doctor、update）", k)
 		}
 	}
 	for _, sec := range []struct {
 		name string
 		dst  any
-	}{{"release", &cfg.Release}, {"install", &cfg.Install}, {"log", &cfg.Log}, {"backup", &cfg.Backup}, {"doctor", &cfg.Doctor}} {
+	}{{"release", &cfg.Release}, {"install", &cfg.Install}, {"log", &cfg.Log}, {"backup", &cfg.Backup}, {"doctor", &cfg.Doctor}, {"update", &cfg.Update}} {
 		n, ok := top[sec.name]
 		if !ok {
 			continue
@@ -178,7 +197,7 @@ func sanitizeYAML(err error) string {
 }
 
 // ToolsConfigSections 是 tools.yaml 允许的顶层节。
-var ToolsConfigSections = map[string]bool{"release": true, "install": true, "log": true, "backup": true, "doctor": true}
+var ToolsConfigSections = map[string]bool{"release": true, "install": true, "log": true, "backup": true, "doctor": true, "update": true}
 
 // FieldProblem 是 tools.yaml 一个键的取值问题（Path 为点分键路径；Reason 不含任何取值）。
 type FieldProblem struct {
@@ -224,6 +243,9 @@ func (c ToolsConfig) Problems() []FieldProblem {
 	}
 	if v := c.Backup.CustodyFingerprint; v != "" && !reHexPrefix.MatchString(v) {
 		add("backup.custody_fingerprint", "必须是 16–64 位小写十六进制（主密钥指纹前缀）")
+	}
+	if k := c.Update.KeepReleases; k != 0 && (k < DefaultKeepReleases || k > 64) {
+		add("update.keep_releases", "必须是 [2, 64] 内的整数（不得少于 2：current 与上一版本必须保留）")
 	}
 	d := c.Doctor
 	for _, n := range []struct {
