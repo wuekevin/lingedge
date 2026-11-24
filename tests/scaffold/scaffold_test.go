@@ -78,9 +78,15 @@ func readFile(t *testing.T, path string) string {
 func walkSource(t *testing.T, root string, fn func(rel string, d fs.DirEntry)) {
 	t.Helper()
 	skipRel := map[string]bool{"_bmad": true, "_bmad-output": true, "docs": true, "bin": true, "tests/scaffold": true}
-	skipName := map[string]bool{".git": true, "dist": true, "node_modules": true, ".pnpm-store": true, ".nuxt": true, ".output": true}
+	skipName := map[string]bool{".git": true, "dist": true, "node_modules": true, ".pnpm-store": true, ".nuxt": true, ".output": true,
+		// Playwright 的运行期产物（已被 .gitignore）：并行的浏览器测试会随时创建/删除，遍历它们既无意义又会因竞态偶发失败。
+		"test-results": true, "playwright-report": true}
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
+			// 遍历期间被并行测试删除的临时文件/目录已不在树内，不算失败；其他错误照常失败。
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
 			return err
 		}
 		rel, _ := filepath.Rel(root, p)
